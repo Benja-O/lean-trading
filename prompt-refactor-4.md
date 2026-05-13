@@ -1,5 +1,20 @@
 # Refactor #4 — Separar IRiskMonitor de IRiskAction
 
+## Recordatorio operativo (CRÍTICO — leer primero)
+
+Este refactor sigue las reglas de `AI.md` sección **"🚦 Límites de Ejecución del Asistente"**. En particular, el asistente:
+
+- **NO ejecuta `git`** en ninguna forma (ni add, ni commit, ni checkout, ni stash, ni nada).
+- **NO compila** el proyecto (ni `dotnet build`, ni `dotnet clean`, ni `dotnet restore`).
+- **NO ejecuta tests** (ni `dotnet test`, ni invocaciones a runners).
+- **SÍ actualiza `ROADMAP.md` y `DECISIONS.md`** como parte del refactor, igual que cualquier otro archivo del proyecto. Esos cambios se hacen en la misma "tanda" de modificaciones. Si el refactor sale mal, el usuario los revierte desde Git junto al resto.
+
+Las verificaciones (compilación, tests, backtest) y el versionado las hace el usuario manualmente.
+
+Al finalizar, el asistente entrega un reporte resumen en el chat con qué archivos tocó (incluyendo los de tracking) y qué espera del usuario.
+
+---
+
 ## Contexto del proyecto
 
 Sistema de trading sistemático en C# / .NET 10 sobre QuantConnect/Lean. Cuatro proyectos:
@@ -12,7 +27,7 @@ Sistema de trading sistemático en C# / .NET 10 sobre QuantConnect/Lean. Cuatro 
 **Invariante arquitectónica crítica:** Trading.Domain y Trading.Application NO deben tener ningún `using QuantConnect` en ningún archivo.
 
 Documentos de referencia en la raíz del repo (LEER antes de empezar):
-- `AI.md` — reglas de estilo y arquitectura.
+- `AI.md` — reglas de estilo, arquitectura y límites de ejecución.
 - `ROADMAP.md` — plan completo, estado actual.
 - `DECISIONS.md` — log de ADRs. El más reciente es ADR-014.
 
@@ -43,26 +58,26 @@ Tras este refactor, agregar "régimen incompatible" en Hito B será crear una cl
 
 ## Decisiones de diseño aplicadas
 
-- **D1 — Migración completa, no parcial:** los tres chequeos actuales (`CheckDrawdownKillSwitch`, `RegisterLoss` con consecutive losses, `EvaluateCoolingOffPeriod`) se extraen cada uno en su propio `IRiskMonitor`. El `KillSwitchManager` actual desaparece — su lógica se distribuye en tres monitors + un orchestrator.
+- **D1 — Migración completa, no parcial:** los tres chequeos actuales (`CheckDrawdownKillSwitch`, `RegisterLoss` con consecutive losses, `EvaluateCoolingOffPeriod`) se extraen cada uno en su propio componente. El `KillSwitchManager` actual desaparece — su lógica se distribuye en monitors + un orchestrator.
 
 - **D2 — Resultado del monitor:** cada monitor devuelve un `RiskAssessment` por evaluación con:
   - `bool ShouldTriggerKillSwitch`
   - `RiskLimitBreachReason Reason` (enum ya existente del refactor B3)
   - `string Description` (para log y evento)
-  
+
   Diseño: `readonly record struct`. Pequeño, inmutable, frecuencia alta de uso.
 
-- **D3 — Estado por monitor:** cada monitor mantiene su propio estado interno (ej. `_consecutiveLossesCounter` vive en `ConsecutiveLossesMonitor`, no en el orchestrator). Cada monitor se inyecta vía constructor del orchestrator.
+- **D3 — Estado por monitor:** cada monitor mantiene su propio estado interno. Cada monitor se inyecta vía constructor del orchestrator.
 
-- **D4 — Modelo de "señal" de monitor → orquestador:** los monitors NO ejecutan la acción directamente. Devuelven el `RiskAssessment` al orchestrator, que decide. Esto desacopla las dos responsabilidades.
+- **D4 — Modelo de "señal" de monitor → orquestador:** los monitors NO ejecutan la acción directamente. Devuelven el `RiskAssessment` al orchestrator, que decide.
 
-- **D5 — `RegisterLoss` y `RegisterPortfolioValueUpdate`:** los monitors que necesitan inputs externos los exponen como métodos públicos. El orchestrator NO los conoce — los expone hacia afuera con métodos delegados. El caller (`OrderLifecycleService`) sigue llamando al orchestrator, no a los monitors directamente.
+- **D5 — `RegisterLoss` / `RegisterWin`:** el `ConsecutiveLossesMonitor` los expone como métodos públicos. El caller (`OrderLifecycleService`) recibe el monitor concreto directamente vía constructor (tipo concreto, no interfaz), porque la semántica "registrar pérdida" es específica de ese monitor.
 
 - **D6 — Activación/desactivación del kill switch:** vive en el orchestrator (un solo lugar). El estado `IsKillSwitchActivated` es del orchestrator, no de los monitors.
 
-- **D7 — Cooling-off period:** mantiene comportamiento actual — al expirar el cooling-off, se desactiva el kill switch y se resetea estado. La lógica de reseteo vive en el `CoolingOffMonitor`, que tiene una semántica especial: cuando detecta que expiró, llama `Reset()` en los otros monitors (vía interfaz extendida `IResettableMonitor`) o el orchestrator hace el reseteo. **Detalle: el orchestrator hace el reseteo** — el monitor de cooling-off solo señala "ya expiró, podés desactivar el kill".
+- **D7 — Cooling-off:** componente separado (`CoolingOffTracker`) que NO implementa `IRiskMonitor` porque su rol es inverso — señala cuándo DESACTIVAR el kill switch. La interfaz queda dedicada a monitors que pueden disparar kill.
 
-- **D8 — Nombre de la clase orchestrator:** `RiskOrchestrator`. Más claro que `KillSwitchManager` (que sugiere que es solo del kill switch, cuando ahora es coordinador de monitors).
+- **D8 — Nombre del orquestador:** `RiskOrchestrator`. Más claro que el viejo `KillSwitchManager`.
 
 - **D9 — Publicación de eventos:** sigue siendo responsabilidad del orchestrator. Cuando activa kill switch, publica `RiskLimitBreachedEvent`. Los monitors NO publican eventos.
 
@@ -81,10 +96,10 @@ namespace Trading.Domain.Abstractions
 {
     /// <summary>
     /// Veredicto de un IRiskMonitor tras evaluar las condiciones actuales.
-    /// 
+    ///
     /// Si ShouldTriggerKillSwitch es false, los otros campos no tienen significado
     /// (se ignoran). El monitor devolvió "todo bien por mi parte".
-    /// 
+    ///
     /// Si es true, el orchestrator activa el kill switch con la razón y descripción
     /// reportadas.
     /// </summary>
@@ -110,18 +125,16 @@ namespace Trading.Domain.Abstractions
     /// Contrato de un monitor de riesgo. Cada implementación chequea UNA condición específica
     /// (drawdown, pérdidas consecutivas, régimen de mercado incompatible, etc.) y reporta
     /// si fue violada.
-    /// 
+    ///
     /// El monitor NO ejecuta acciones — solo emite veredictos. La acción (liquidar, marcar
     /// kill switch, publicar evento) la hace el RiskOrchestrator.
-    /// 
+    ///
     /// Cada monitor mantiene su propio estado interno (counters, históricos, timestamps).
     /// El orchestrator es agnóstico al estado de cada uno.
     /// </summary>
     public interface IRiskMonitor
     {
-        /// <summary>
-        /// Identificador legible del monitor para logs y diagnóstico. No tiene significado funcional.
-        /// </summary>
+        /// <summary>Identificador legible para logs y diagnóstico.</summary>
         string MonitorName { get; }
 
         /// <summary>
@@ -131,9 +144,8 @@ namespace Trading.Domain.Abstractions
         RiskAssessment Evaluate();
 
         /// <summary>
-        /// Resetea cualquier estado acumulado en el monitor. Lo invoca el orchestrator al
-        /// finalizar un período de cooling-off (cuando se desactiva el kill switch).
-        /// Los monitors sin estado pueden implementar como no-op.
+        /// Resetea cualquier estado acumulado. Lo invoca el orchestrator al finalizar
+        /// un período de cooling-off. Monitors sin estado pueden implementar como no-op.
         /// </summary>
         void Reset();
     }
@@ -147,16 +159,16 @@ namespace Trading.Domain.Abstractions
 {
     /// <summary>
     /// Contrato de la acción ejecutada cuando se activa el kill switch.
-    /// 
-    /// Hoy hay una sola implementación: LiquidateAllRiskAction (delega a IOrderRouter.LiquidateAll).
-    /// En el futuro podría haber acciones más sutiles (cerrar solo cierto símbolo, reducir leverage, etc.).
+    ///
+    /// Hoy hay una sola implementación: LiquidateAllRiskAction.
+    /// En el futuro podría haber acciones más sutiles (cerrar solo cierto símbolo,
+    /// reducir leverage, etc.).
     /// </summary>
     public interface IRiskAction
     {
         /// <summary>
-        /// Ejecuta la acción de mitigación. Idempotente: invocarla múltiples veces no debe
-        /// producir efectos adicionales después de la primera (la lógica de "ya se ejecutó"
-        /// vive en el orchestrator vía el flag IsKillSwitchActivated).
+        /// Ejecuta la acción de mitigación. La idempotencia se garantiza en el orchestrator
+        /// vía el flag IsKillSwitchActivated — esta interfaz no requiere ser idempotente.
         /// </summary>
         void Execute();
     }
@@ -164,8 +176,6 @@ namespace Trading.Domain.Abstractions
 ```
 
 ### Archivo 4: CREAR `Trading.Application/Risk/DrawdownMonitor.cs`
-
-Mover la lógica de `CheckDrawdownKillSwitch` del actual `KillSwitchManager` acá.
 
 ```csharp
 using System;
@@ -176,13 +186,12 @@ namespace Trading.Application.Risk
 {
     /// <summary>
     /// Monitor de riesgo por drawdown del portfolio respecto a su máximo histórico.
-    /// 
+    ///
     /// Mantiene un high-water mark interno. Cada evaluación calcula el drawdown actual
     /// (max - current) / max. Si supera maximumDrawdownFraction, dispara kill switch.
-    /// 
-    /// El high-water mark se inicializa con el valor del portfolio en la construcción
-    /// (se inyecta vía InitializeWithCurrentValue, no por constructor para mantener
-    /// el wiring simple).
+    ///
+    /// El high-water mark se inicializa con InitializeWithCurrentValue(), llamado una vez
+    /// tras la construcción cuando el portfolio ya está poblado con el cash inicial.
     /// </summary>
     public sealed class DrawdownMonitor : IRiskMonitor
     {
@@ -192,11 +201,6 @@ namespace Trading.Application.Risk
 
         public string MonitorName => "DrawdownMonitor";
 
-        /// <param name="portfolioState">Fuente del valor actual del portfolio.</param>
-        /// <param name="maximumDrawdownFraction">
-        /// Fracción decimal del drawdown máximo tolerado (ej. 0.25m = 25%).
-        /// Si el drawdown observado iguala o supera este valor, se dispara kill switch.
-        /// </param>
         public DrawdownMonitor(IPortfolioState portfolioState, decimal maximumDrawdownFraction)
         {
             _portfolioState = portfolioState ?? throw new ArgumentNullException(nameof(portfolioState));
@@ -205,7 +209,7 @@ namespace Trading.Application.Risk
 
         /// <summary>
         /// Inicializa el high-water mark con el valor actual del portfolio.
-        /// Llamar una vez tras la construcción, cuando el portfolio ya está poblado con el cash inicial.
+        /// Llamar una vez tras la construcción, cuando el cash inicial ya fue depositado.
         /// </summary>
         public void InitializeWithCurrentValue()
         {
@@ -249,8 +253,6 @@ namespace Trading.Application.Risk
 
 ### Archivo 5: CREAR `Trading.Application/Risk/ConsecutiveLossesMonitor.cs`
 
-Mover la lógica de `RegisterLoss` + chequeo de consecutive losses.
-
 ```csharp
 using Trading.Domain.Abstractions;
 using Trading.Domain.Events;
@@ -260,10 +262,10 @@ namespace Trading.Application.Risk
     /// <summary>
     /// Monitor de riesgo por pérdidas consecutivas. El counter se incrementa cuando el caller
     /// invoca RegisterLoss(). El monitor dispara kill switch cuando el counter alcanza el límite.
-    /// 
+    ///
     /// El caller (OrderLifecycleService o quien corresponda) es responsable de invocar
-    /// RegisterLoss cuando un trade se cierra en pérdida. El monitor no consume eventos de fills
-    /// directamente — depende de quien sabe interpretar P&amp;L.
+    /// RegisterLoss/RegisterWin cuando un trade se cierra. El monitor no consume eventos
+    /// de fills directamente — depende de quien sabe interpretar P&amp;L.
     /// </summary>
     public sealed class ConsecutiveLossesMonitor : IRiskMonitor
     {
@@ -279,9 +281,6 @@ namespace Trading.Application.Risk
             _maximumConsecutiveLosses = maximumConsecutiveLosses;
         }
 
-        /// <summary>
-        /// Notifica al monitor que un trade se cerró en pérdida.
-        /// </summary>
         public void RegisterLoss()
         {
             _consecutiveLossesCounter++;
@@ -292,9 +291,6 @@ namespace Trading.Application.Risk
             }
         }
 
-        /// <summary>
-        /// Notifica al monitor que un trade se cerró en ganancia. Resetea el counter.
-        /// </summary>
         public void RegisterWin()
         {
             _consecutiveLossesCounter = 0;
@@ -321,11 +317,7 @@ namespace Trading.Application.Risk
 }
 ```
 
-### Archivo 6: CREAR `Trading.Application/Risk/CoolingOffMonitor.cs`
-
-El cooling-off NO dispara kill switch — al revés, **señala cuándo el kill switch debe DESACTIVARSE**. Por lo tanto NO encaja en la interfaz `IRiskMonitor.Evaluate()` que devuelve "trigger / pass".
-
-**Decisión:** este componente es un tipo distinto. NO implementa `IRiskMonitor`. Se llama directamente desde el orchestrator. La interfaz queda dedicada a monitors que pueden disparar kill switch.
+### Archivo 6: CREAR `Trading.Application/Risk/CoolingOffTracker.cs`
 
 ```csharp
 using System;
@@ -335,13 +327,9 @@ namespace Trading.Application.Risk
 {
     /// <summary>
     /// Componente que rastrea el período de cooling-off tras una activación del kill switch.
-    /// 
+    ///
     /// NO implementa IRiskMonitor porque su rol es inverso: señala cuándo el kill switch
     /// debe DESACTIVARSE, no cuándo activarse. El RiskOrchestrator lo consulta cada ciclo.
-    /// 
-    /// Comportamiento:
-    /// - StartCoolingOff(): registra el timestamp de inicio.
-    /// - HasCoolingOffExpired(): devuelve true si transcurrió el período configurado.
     /// </summary>
     public sealed class CoolingOffTracker
     {
@@ -386,7 +374,8 @@ namespace Trading.Application.Risk
 {
     /// <summary>
     /// Acción de mitigación de riesgo que liquida toda la cartera mediante IOrderRouter.
-    /// Una sola implementación de IRiskAction por ahora; arquitectura preparada para variantes futuras.
+    /// Una sola implementación de IRiskAction por ahora; arquitectura preparada para
+    /// variantes futuras (liquidación parcial, reducción de leverage, etc.).
     /// </summary>
     public sealed class LiquidateAllRiskAction : IRiskAction
     {
@@ -407,8 +396,6 @@ namespace Trading.Application.Risk
 
 ### Archivo 8: CREAR `Trading.Application/Risk/RiskOrchestrator.cs`
 
-El nuevo cerebro. Reemplaza al `KillSwitchManager`.
-
 ```csharp
 using System;
 using System.Collections.Generic;
@@ -420,15 +407,15 @@ namespace Trading.Application.Risk
 {
     /// <summary>
     /// Coordinador de los monitors de riesgo y la acción de mitigación.
-    /// 
+    ///
     /// Cada ciclo (típicamente una vez por barra) el caller invoca EvaluateAllMonitors().
     /// El orchestrator:
     /// 1. Si el kill switch ya está activo: chequea el cooling-off. Si expiró, desactiva
     ///    el kill switch y resetea todos los monitors.
     /// 2. Si el kill switch NO está activo: itera los monitors, recoge el primer veredicto
     ///    Trigger (si lo hay) y activa el kill switch.
-    /// 
-    /// Publicación de eventos: emite RiskLimitBreachedEvent al activar el kill switch.
+    ///
+    /// Publica RiskLimitBreachedEvent al activar el kill switch.
     /// </summary>
     public sealed class RiskOrchestrator
     {
@@ -474,14 +461,13 @@ namespace Trading.Application.Risk
                 if (assessment.ShouldTriggerKillSwitch)
                 {
                     ActivateKillSwitch(assessment.Reason, assessment.Description, monitor.MonitorName);
-                    return; // Una vez activado, no seguir evaluando este ciclo.
+                    return;
                 }
             }
         }
 
         /// <summary>
-        /// Activa el kill switch manualmente (no a través de un monitor). Útil para activación
-        /// externa o de testing. Razón asociada: Manual.
+        /// Activa el kill switch externamente (no a través de un monitor). Razón asociada: Manual.
         /// </summary>
         public void ActivateKillSwitchManually(string description)
         {
@@ -526,46 +512,42 @@ namespace Trading.Application.Risk
 
 ### Archivo 9: BORRAR `Trading.Application/Risk/KillSwitchManager.cs`
 
-Eliminar completamente. Su funcionalidad está distribuida en los archivos creados arriba.
+**ANTES de borrarlo:** leer el archivo y anotar los siguientes valores que vamos a necesitar replicar en el wiring nuevo:
+- `maximumDrawdownFraction` (o equivalente).
+- `maximumConsecutiveLosses` (o equivalente).
+- `coolingOffPeriod` (o equivalente).
+
+Si esos valores vienen como parámetros del constructor (no hardcodeados internamente), localizar dónde se construye el `KillSwitchManager` en `TradingAlgorithmHost` para preservarlos.
 
 ### Archivo 10: MODIFICAR `Trading.Application/Execution/BarProcessingService.cs`
 
-Cambiar la dependencia de `KillSwitchManager` por `RiskOrchestrator`.
-
-- Reemplazar el campo `_killSwitchManager` por `_riskOrchestrator`.
+Cambios:
+- Reemplazar el campo `_killSwitchManager` por `_riskOrchestrator` (tipo `RiskOrchestrator`).
 - Cambiar el parámetro del constructor.
-- En `ProcessBar`, donde se llamaba `_killSwitchManager.IsKillSwitchActivated`, llamar `_riskOrchestrator.IsKillSwitchActivated`. 
-
-Si `BarProcessingService` invocaba `_killSwitchManager.CheckDrawdownKillSwitch()` o `_killSwitchManager.EvaluateCoolingOffPeriod()`, reemplazar TODAS esas llamadas por una sola `_riskOrchestrator.EvaluateAllMonitors()` al inicio de `ProcessBar`. El orquestador se encarga internamente.
+- Donde se llamaba `_killSwitchManager.IsKillSwitchActivated`, llamar `_riskOrchestrator.IsKillSwitchActivated`.
+- Si `BarProcessingService` invocaba métodos del `KillSwitchManager` para chequeos (drawdown, cooling-off), reemplazar TODAS esas llamadas por una sola: `_riskOrchestrator.EvaluateAllMonitors()` al inicio de `ProcessBar`. El orquestador se encarga internamente.
 
 ### Archivo 11: MODIFICAR `Trading.Application/Execution/OrderLifecycleService.cs`
 
-Si `OrderLifecycleService` invocaba `_killSwitchManager.RegisterLoss()` cuando detectaba un trade perdedor, reemplazar por una dependencia al `ConsecutiveLossesMonitor` específicamente (NO al orchestrator — el orchestrator no expone `RegisterLoss`).
+Si `OrderLifecycleService` invocaba `_killSwitchManager.RegisterLoss()` cuando detectaba un trade perdedor:
+- Reemplazar la dependencia de `KillSwitchManager` por **`ConsecutiveLossesMonitor`** (tipo concreto, NO interfaz).
+- Invocar `RegisterLoss()` y `RegisterWin()` directamente sobre el monitor concreto.
 
-**Diseño:** inyectar `ConsecutiveLossesMonitor` directamente como dependencia adicional del `OrderLifecycleService`. Razón: la semántica "registrar pérdida" es específica de ese monitor, no general del orchestrator. Acoplar tipos concretos en este caso es preferible a contaminar la interfaz general.
-
-Si `OrderLifecycleService` también registra ganancias (no estoy seguro), agregar también `RegisterWin()` allí.
+Justificación del acoplamiento al tipo concreto: la semántica "registrar pérdida" es específica de ese monitor. Acoplar el tipo es preferible a contaminar la interfaz `IRiskMonitor` con métodos que no aplican a otros monitors.
 
 ### Archivo 12: MODIFICAR `Trading.Strategies/TradingAlgorithmHost.cs`
 
-Reemplazar el wiring del antiguo `KillSwitchManager` por el nuevo:
+Reemplazar el wiring del antiguo `KillSwitchManager` por el nuevo. Estructura:
 
-Reemplazar:
 ```csharp
-_killSwitchManager = new KillSwitchManager(_portfolioState, _orderRouter, _clock, _logger, domainEventBus);
-// ...
-_killSwitchManager.InitializePortfolioValue();
-```
+// Eliminar:
+//   _killSwitchManager = new KillSwitchManager(...);
+//   _killSwitchManager.InitializePortfolioValue();
 
-Por:
-```csharp
-var drawdownMonitor = new DrawdownMonitor(_portfolioState, maximumDrawdownFraction: 0.25m);
-var consecutiveLossesMonitor = new ConsecutiveLossesMonitor(maximumConsecutiveLosses: 5);
-// (Los valores 0.25 y 5 deben coincidir con los que usaba el KillSwitchManager anterior — VERIFICAR antes.)
-
-var coolingOffTracker = new CoolingOffTracker(_clock, TimeSpan.FromHours(24));
-// (El período 24h debe coincidir con el que usaba el KillSwitchManager — VERIFICAR.)
-
+// Crear los componentes nuevos:
+var drawdownMonitor = new DrawdownMonitor(_portfolioState, maximumDrawdownFraction: <VALOR_PRESERVADO>);
+var consecutiveLossesMonitor = new ConsecutiveLossesMonitor(maximumConsecutiveLosses: <VALOR_PRESERVADO>);
+var coolingOffTracker = new CoolingOffTracker(_clock, <VALOR_PRESERVADO>);
 var liquidateAction = new LiquidateAllRiskAction(_orderRouter);
 
 var monitors = new List<IRiskMonitor> { drawdownMonitor, consecutiveLossesMonitor };
@@ -573,13 +555,13 @@ var monitors = new List<IRiskMonitor> { drawdownMonitor, consecutiveLossesMonito
 _riskOrchestrator = new RiskOrchestrator(
     monitors, liquidateAction, coolingOffTracker, _clock, _logger, domainEventBus);
 
-// Llamar después de SetCash, igual que antes:
 drawdownMonitor.InitializeWithCurrentValue();
+
+// Pasar el orchestrator a BarProcessingService.
+// Pasar consecutiveLossesMonitor a OrderLifecycleService.
 ```
 
-Cambiar el tipo del campo del host: `private KillSwitchManager _killSwitchManager;` → `private RiskOrchestrator _riskOrchestrator;`.
-
-Cambiar el wiring de los servicios que dependían de `_killSwitchManager`: pasarles `_riskOrchestrator` (o `consecutiveLossesMonitor` específicamente para `OrderLifecycleService`).
+Cambiar el campo del host: `private KillSwitchManager _killSwitchManager;` → `private RiskOrchestrator _riskOrchestrator;`. Conservar también referencias necesarias a `consecutiveLossesMonitor` y `drawdownMonitor` como campos si hace falta para otros wirings.
 
 En `OnData(Slice data)`, donde estaba:
 ```csharp
@@ -594,181 +576,13 @@ _riskOrchestrator.EvaluateAllMonitors();
 if (_riskOrchestrator.IsKillSwitchActivated) return;
 ```
 
-**IMPORTANTE:** los valores `maximumDrawdownFraction`, `maximumConsecutiveLosses`, `coolingOffPeriod` que usaba el `KillSwitchManager` anterior pueden estar hardcodeados en el constructor antiguo o pasados desde otro lugar. ANTES DE BORRAR `KillSwitchManager.cs`, leer los defaults que usa y replicarlos en el wiring nuevo. Si son configurables vía constructor del `TradingAlgorithmHost`, mantener la misma fuente.
+**Importante:** los valores numéricos (`maximumDrawdownFraction`, `maximumConsecutiveLosses`, `coolingOffPeriod`) deben replicarse EXACTAMENTE como estaban en el wiring del `KillSwitchManager` viejo. NO inventar valores nuevos. Si los valores anteriores no pueden localizarse, parar y reportar antes de borrar el `KillSwitchManager`.
 
-### Archivo 13: MODIFICAR tests existentes de `KillSwitchManagerTests`
+### Archivo 13: BORRAR `Trading.Application.Tests/Risk/KillSwitchManagerTests.cs` (si existe)
 
-El archivo `Trading.Application.Tests/Risk/KillSwitchManagerTests.cs` (si existe) referencia tipos que vamos a borrar. Tres opciones:
+Borrar el archivo entero. Va a ser reemplazado por tests granulares por componente.
 
-1. **Renombrar a `RiskOrchestratorTests`** y adaptar todos los tests al nuevo orchestrator + monitors. Trabajo grande.
-2. **Borrar el archivo** y escribir tests nuevos directamente para los componentes nuevos.
-3. **Borrar y crear nuevos archivos por componente:** `DrawdownMonitorTests`, `ConsecutiveLossesMonitorTests`, `RiskOrchestratorTests`.
-
-**Voto:** opción 3. Tests unitarios por componente son más mantenibles y dan cobertura más granular. Borrar `KillSwitchManagerTests.cs` completamente y crear:
-
-#### `Trading.Application.Tests/Risk/DrawdownMonitorTests.cs`
-
-```csharp
-using FluentAssertions;
-using Trading.Application.Risk;
-using Trading.Application.Tests.Fakes;
-using Trading.Domain.Events;
-using Xunit;
-
-namespace Trading.Application.Tests.Risk
-{
-    public class DrawdownMonitorTests
-    {
-        private readonly FakePortfolioState _portfolioState = new();
-
-        [Fact]
-        public void Evaluate_BelowMaximumDrawdown_ReturnsPass()
-        {
-            _portfolioState.TotalPortfolioValue = 100_000m;
-            var monitor = new DrawdownMonitor(_portfolioState, maximumDrawdownFraction: 0.25m);
-            monitor.InitializeWithCurrentValue();
-
-            _portfolioState.TotalPortfolioValue = 90_000m; // 10% drawdown
-            var assessment = monitor.Evaluate();
-
-            assessment.ShouldTriggerKillSwitch.Should().BeFalse();
-        }
-
-        [Fact]
-        public void Evaluate_AtOrAboveMaximumDrawdown_TriggersKillSwitch()
-        {
-            _portfolioState.TotalPortfolioValue = 100_000m;
-            var monitor = new DrawdownMonitor(_portfolioState, maximumDrawdownFraction: 0.25m);
-            monitor.InitializeWithCurrentValue();
-
-            _portfolioState.TotalPortfolioValue = 74_000m; // 26% drawdown
-            var assessment = monitor.Evaluate();
-
-            assessment.ShouldTriggerKillSwitch.Should().BeTrue();
-            assessment.Reason.Should().Be(RiskLimitBreachReason.MaximumDrawdownExceeded);
-        }
-
-        [Fact]
-        public void Evaluate_PortfolioGrows_UpdatesHighWaterMark()
-        {
-            _portfolioState.TotalPortfolioValue = 100_000m;
-            var monitor = new DrawdownMonitor(_portfolioState, maximumDrawdownFraction: 0.25m);
-            monitor.InitializeWithCurrentValue();
-
-            _portfolioState.TotalPortfolioValue = 120_000m; // sube
-            monitor.Evaluate(); // actualiza high-water mark a 120k
-
-            _portfolioState.TotalPortfolioValue = 95_000m; // ~20.8% drawdown desde 120k
-            var assessment = monitor.Evaluate();
-
-            assessment.ShouldTriggerKillSwitch.Should().BeFalse(); // < 25%
-        }
-
-        [Fact]
-        public void Reset_RestoresHighWaterMarkToCurrentValue()
-        {
-            _portfolioState.TotalPortfolioValue = 100_000m;
-            var monitor = new DrawdownMonitor(_portfolioState, maximumDrawdownFraction: 0.25m);
-            monitor.InitializeWithCurrentValue();
-
-            _portfolioState.TotalPortfolioValue = 74_000m;
-            monitor.Reset();
-
-            // Ahora 74k es el nuevo máximo. Para gatillar, hay que caer a 74k*0.75=55.5k
-            _portfolioState.TotalPortfolioValue = 60_000m; // ~18.9% drawdown desde 74k
-            var assessment = monitor.Evaluate();
-
-            assessment.ShouldTriggerKillSwitch.Should().BeFalse();
-        }
-    }
-}
-```
-
-#### `Trading.Application.Tests/Risk/ConsecutiveLossesMonitorTests.cs`
-
-```csharp
-using FluentAssertions;
-using Trading.Application.Risk;
-using Trading.Domain.Events;
-using Xunit;
-
-namespace Trading.Application.Tests.Risk
-{
-    public class ConsecutiveLossesMonitorTests
-    {
-        [Fact]
-        public void Evaluate_NoLossesRegistered_ReturnsPass()
-        {
-            var monitor = new ConsecutiveLossesMonitor(maximumConsecutiveLosses: 3);
-            var assessment = monitor.Evaluate();
-            assessment.ShouldTriggerKillSwitch.Should().BeFalse();
-        }
-
-        [Fact]
-        public void Evaluate_BelowThreshold_ReturnsPass()
-        {
-            var monitor = new ConsecutiveLossesMonitor(maximumConsecutiveLosses: 3);
-            monitor.RegisterLoss();
-            monitor.RegisterLoss(); // 2 pérdidas, límite 3
-
-            var assessment = monitor.Evaluate();
-            assessment.ShouldTriggerKillSwitch.Should().BeFalse();
-        }
-
-        [Fact]
-        public void Evaluate_AtThreshold_TriggersKillSwitch()
-        {
-            var monitor = new ConsecutiveLossesMonitor(maximumConsecutiveLosses: 3);
-            monitor.RegisterLoss();
-            monitor.RegisterLoss();
-            monitor.RegisterLoss();
-
-            var assessment = monitor.Evaluate();
-            assessment.ShouldTriggerKillSwitch.Should().BeTrue();
-            assessment.Reason.Should().Be(RiskLimitBreachReason.ConsecutiveLossesExceeded);
-        }
-
-        [Fact]
-        public void RegisterWin_ResetsCounter()
-        {
-            var monitor = new ConsecutiveLossesMonitor(maximumConsecutiveLosses: 3);
-            monitor.RegisterLoss();
-            monitor.RegisterLoss();
-            monitor.RegisterWin();
-            monitor.RegisterLoss(); // counter ahora en 1
-
-            var assessment = monitor.Evaluate();
-            assessment.ShouldTriggerKillSwitch.Should().BeFalse();
-        }
-
-        [Fact]
-        public void Reset_ClearsCounterAndTriggerState()
-        {
-            var monitor = new ConsecutiveLossesMonitor(maximumConsecutiveLosses: 3);
-            monitor.RegisterLoss();
-            monitor.RegisterLoss();
-            monitor.RegisterLoss();
-            monitor.Reset();
-
-            var assessment = monitor.Evaluate();
-            assessment.ShouldTriggerKillSwitch.Should().BeFalse();
-        }
-    }
-}
-```
-
-#### `Trading.Application.Tests/Risk/RiskOrchestratorTests.cs`
-
-Crear tests que cubran:
-- `EvaluateAllMonitors` con un monitor que dispara → activa kill switch, publica evento, llama Execute() de la action.
-- `EvaluateAllMonitors` con todos pasando → no hace nada.
-- Tras activación, las siguientes invocaciones de `EvaluateAllMonitors` solo chequean cooling-off (no llaman a los monitors).
-- Tras expirar cooling-off → desactiva kill switch, llama `Reset()` en todos los monitors.
-- `ActivateKillSwitchManually` → activa con `Reason.Manual`.
-
-Usar fakes: `FakeRiskMonitor` (configurable para devolver Pass o Trigger), `FakeRiskAction` (registra cuántas veces se llamó Execute), `CapturingEventSubscriber<RiskLimitBreachedEvent>`, `FakeClock`, `FakeTradingLogger`, `DomainEventBus` real.
-
-Si `FakeRiskMonitor` no existe en `Tests/Fakes/`, crearlo:
+### Archivo 14: CREAR `Trading.Application.Tests/Fakes/FakeRiskMonitor.cs` y `FakeRiskAction.cs`
 
 ```csharp
 using Trading.Domain.Abstractions;
@@ -812,7 +626,157 @@ namespace Trading.Application.Tests.Fakes
 }
 ```
 
-Y los tests del orchestrator (esqueleto — Claude Code completa los detalles):
+### Archivo 15: CREAR `Trading.Application.Tests/Risk/DrawdownMonitorTests.cs`
+
+```csharp
+using FluentAssertions;
+using Trading.Application.Risk;
+using Trading.Application.Tests.Fakes;
+using Trading.Domain.Events;
+using Xunit;
+
+namespace Trading.Application.Tests.Risk
+{
+    public class DrawdownMonitorTests
+    {
+        private readonly FakePortfolioState _portfolioState = new();
+
+        [Fact]
+        public void Evaluate_BelowMaximumDrawdown_ReturnsPass()
+        {
+            _portfolioState.TotalPortfolioValue = 100_000m;
+            var monitor = new DrawdownMonitor(_portfolioState, maximumDrawdownFraction: 0.25m);
+            monitor.InitializeWithCurrentValue();
+
+            _portfolioState.TotalPortfolioValue = 90_000m;
+            var assessment = monitor.Evaluate();
+
+            assessment.ShouldTriggerKillSwitch.Should().BeFalse();
+        }
+
+        [Fact]
+        public void Evaluate_AtOrAboveMaximumDrawdown_TriggersKillSwitch()
+        {
+            _portfolioState.TotalPortfolioValue = 100_000m;
+            var monitor = new DrawdownMonitor(_portfolioState, maximumDrawdownFraction: 0.25m);
+            monitor.InitializeWithCurrentValue();
+
+            _portfolioState.TotalPortfolioValue = 74_000m;
+            var assessment = monitor.Evaluate();
+
+            assessment.ShouldTriggerKillSwitch.Should().BeTrue();
+            assessment.Reason.Should().Be(RiskLimitBreachReason.MaximumDrawdownExceeded);
+        }
+
+        [Fact]
+        public void Evaluate_PortfolioGrows_UpdatesHighWaterMark()
+        {
+            _portfolioState.TotalPortfolioValue = 100_000m;
+            var monitor = new DrawdownMonitor(_portfolioState, maximumDrawdownFraction: 0.25m);
+            monitor.InitializeWithCurrentValue();
+
+            _portfolioState.TotalPortfolioValue = 120_000m;
+            monitor.Evaluate();
+
+            _portfolioState.TotalPortfolioValue = 95_000m;
+            var assessment = monitor.Evaluate();
+
+            assessment.ShouldTriggerKillSwitch.Should().BeFalse();
+        }
+
+        [Fact]
+        public void Reset_UsesCurrentValueAsNewHighWaterMark()
+        {
+            _portfolioState.TotalPortfolioValue = 100_000m;
+            var monitor = new DrawdownMonitor(_portfolioState, maximumDrawdownFraction: 0.25m);
+            monitor.InitializeWithCurrentValue();
+
+            _portfolioState.TotalPortfolioValue = 74_000m;
+            monitor.Reset();
+
+            _portfolioState.TotalPortfolioValue = 60_000m;
+            var assessment = monitor.Evaluate();
+
+            assessment.ShouldTriggerKillSwitch.Should().BeFalse();
+        }
+    }
+}
+```
+
+### Archivo 16: CREAR `Trading.Application.Tests/Risk/ConsecutiveLossesMonitorTests.cs`
+
+```csharp
+using FluentAssertions;
+using Trading.Application.Risk;
+using Trading.Domain.Events;
+using Xunit;
+
+namespace Trading.Application.Tests.Risk
+{
+    public class ConsecutiveLossesMonitorTests
+    {
+        [Fact]
+        public void Evaluate_NoLossesRegistered_ReturnsPass()
+        {
+            var monitor = new ConsecutiveLossesMonitor(maximumConsecutiveLosses: 3);
+            var assessment = monitor.Evaluate();
+            assessment.ShouldTriggerKillSwitch.Should().BeFalse();
+        }
+
+        [Fact]
+        public void Evaluate_BelowThreshold_ReturnsPass()
+        {
+            var monitor = new ConsecutiveLossesMonitor(maximumConsecutiveLosses: 3);
+            monitor.RegisterLoss();
+            monitor.RegisterLoss();
+
+            var assessment = monitor.Evaluate();
+            assessment.ShouldTriggerKillSwitch.Should().BeFalse();
+        }
+
+        [Fact]
+        public void Evaluate_AtThreshold_TriggersKillSwitch()
+        {
+            var monitor = new ConsecutiveLossesMonitor(maximumConsecutiveLosses: 3);
+            monitor.RegisterLoss();
+            monitor.RegisterLoss();
+            monitor.RegisterLoss();
+
+            var assessment = monitor.Evaluate();
+            assessment.ShouldTriggerKillSwitch.Should().BeTrue();
+            assessment.Reason.Should().Be(RiskLimitBreachReason.ConsecutiveLossesExceeded);
+        }
+
+        [Fact]
+        public void RegisterWin_ResetsCounter()
+        {
+            var monitor = new ConsecutiveLossesMonitor(maximumConsecutiveLosses: 3);
+            monitor.RegisterLoss();
+            monitor.RegisterLoss();
+            monitor.RegisterWin();
+            monitor.RegisterLoss();
+
+            var assessment = monitor.Evaluate();
+            assessment.ShouldTriggerKillSwitch.Should().BeFalse();
+        }
+
+        [Fact]
+        public void Reset_ClearsCounterAndTriggerState()
+        {
+            var monitor = new ConsecutiveLossesMonitor(maximumConsecutiveLosses: 3);
+            monitor.RegisterLoss();
+            monitor.RegisterLoss();
+            monitor.RegisterLoss();
+            monitor.Reset();
+
+            var assessment = monitor.Evaluate();
+            assessment.ShouldTriggerKillSwitch.Should().BeFalse();
+        }
+    }
+}
+```
+
+### Archivo 17: CREAR `Trading.Application.Tests/Risk/RiskOrchestratorTests.cs`
 
 ```csharp
 using FluentAssertions;
@@ -858,15 +822,15 @@ namespace Trading.Application.Tests.Risk
         }
 
         [Fact]
-        public void EvaluateAllMonitors_OneTriggers_ActivatesKillSwitch()
+        public void EvaluateAllMonitors_OneTriggers_ActivatesKillSwitchAndPublishesEvent()
         {
             var monitor = new FakeRiskMonitor("DrawdownFake")
             {
                 NextAssessment = RiskAssessment.Trigger(RiskLimitBreachReason.MaximumDrawdownExceeded, "test")
             };
             var orchestrator = BuildOrchestrator(new[] { monitor });
-
             var captured = new CapturingEventSubscriber<RiskLimitBreachedEvent>(_eventBus);
+
             orchestrator.EvaluateAllMonitors();
 
             orchestrator.IsKillSwitchActivated.Should().BeTrue();
@@ -884,10 +848,10 @@ namespace Trading.Application.Tests.Risk
             };
             var orchestrator = BuildOrchestrator(new[] { monitor });
 
-            orchestrator.EvaluateAllMonitors(); // activa
+            orchestrator.EvaluateAllMonitors();
             int callsBeforeSecondEvaluate = monitor.EvaluateCallCount;
 
-            orchestrator.EvaluateAllMonitors(); // ya activo, no debe llamar
+            orchestrator.EvaluateAllMonitors();
             monitor.EvaluateCallCount.Should().Be(callsBeforeSecondEvaluate);
         }
 
@@ -901,10 +865,10 @@ namespace Trading.Application.Tests.Risk
             };
             var orchestrator = BuildOrchestrator(new[] { monitor }, coolingOff: TimeSpan.FromHours(1));
 
-            orchestrator.EvaluateAllMonitors(); // activa
+            orchestrator.EvaluateAllMonitors();
             orchestrator.IsKillSwitchActivated.Should().BeTrue();
 
-            _clock.UtcNow = new DateTime(2025, 1, 1, 13, 1, 0, DateTimeKind.Utc); // +1h 1min
+            _clock.UtcNow = new DateTime(2025, 1, 1, 13, 1, 0, DateTimeKind.Utc);
             orchestrator.EvaluateAllMonitors();
 
             orchestrator.IsKillSwitchActivated.Should().BeFalse();
@@ -927,134 +891,118 @@ namespace Trading.Application.Tests.Risk
 }
 ```
 
----
+### Archivo 18: MODIFICAR `ROADMAP.md`
 
-## Verificaciones finales obligatorias
-
-1. **Compilación limpia** sin errores ni warnings nuevos.
-
-2. **Invariante arquitectónica:**
-   ```bash
-   grep -rn "^using QuantConnect" Trading.Domain/ Trading.Application/ Trading.Application.Tests/
-   ```
-   NO debe devolver nada.
-
-3. **Sin referencias huérfanas al viejo `KillSwitchManager`:**
-   ```bash
-   grep -rn "KillSwitchManager" Trading.Domain/ Trading.Application/ Trading.Strategies/ Trading.Application.Tests/
-   ```
-   NO debe devolver nada (debe haber desaparecido por completo).
-
-4. **Tests preexistentes (no relacionados a risk):** todos siguen pasando.
-
-5. **Tests nuevos:** `DrawdownMonitorTests` (~4), `ConsecutiveLossesMonitorTests` (~5), `RiskOrchestratorTests` (~5). Total ~14 tests nuevos.
-
-6. **Comportamiento runtime (backtest):**
-   - El sistema arranca normalmente.
-   - El número de operaciones generadas debe ser **idéntico** al backtest previo. El refactor NO cambia lógica de decisión, solo cómo está organizada.
-   - Si el backtest produce diferente cantidad de operaciones, hay algún detalle (valor de umbral, orden de evaluación) que cambió. Reportar.
-
-## Estilo
-
-- Documentación XML en español.
-- FluentAssertions con `Should()` en tests.
-- Mantener orden de usings.
-
-## Si encuentras algún problema
-
-- Si el `KillSwitchManager` actual tiene comportamiento que no quedó cubierto en mi descripción (ej. métodos adicionales no contemplados), parar y reportar antes de borrar.
-- Si los valores hardcodeados de los umbrales (`maximumDrawdownFraction`, `maximumConsecutiveLosses`, `coolingOffPeriod`) no se pueden localizar en el código actual, parar y preguntar.
-- Si el comportamiento del backtest cambia, parar y reportar antes de actualizar tracking.
-
-Ejecutar en este orden:
-
-1. Crear los archivos nuevos del dominio (`RiskAssessment`, `IRiskMonitor`, `IRiskAction`).
-2. Crear los componentes de Application (`DrawdownMonitor`, `ConsecutiveLossesMonitor`, `CoolingOffTracker`, `LiquidateAllRiskAction`, `RiskOrchestrator`).
-3. Crear los fakes en Tests (`FakeRiskMonitor`, `FakeRiskAction`).
-4. Crear los tres archivos de tests (`DrawdownMonitorTests`, `ConsecutiveLossesMonitorTests`, `RiskOrchestratorTests`).
-5. Modificar `BarProcessingService`, `OrderLifecycleService`, `TradingAlgorithmHost` para usar el nuevo orchestrator.
-6. **Borrar `KillSwitchManager.cs` y `KillSwitchManagerTests.cs`** al final, una vez que nada los referencia.
-7. `dotnet clean && dotnet build`.
-8. Correr todos los tests.
-9. Correr backtest. Verificar cantidad de operaciones idéntica.
-10. Reportar resultados.
-
----
-
-## Actualización de documentación al cierre
-
-Una vez que todas las verificaciones obligatorias pasan, actualizá los archivos de tracking.
-
-### ROADMAP.md
-
-1. Borrar la fila del refactor #4 de la sección "Refactors pendientes" del BLOQUE 2.
+1. Borrar la fila de "Refactor #4 — Separar IRiskMonitor de IRiskAction" de la sección "Refactors pendientes" (Bloque 2).
 2. En el diagrama del "Plan general", marcar `Refactor #4` con ✅ visible.
-3. Agregar al final de "Historial completado" una entrada nueva:
+3. Agregar al **final** de "Historial completado" la entrada nueva:
 
-   ```markdown
-   ### ✅ Refactor #4 — Separar IRiskMonitor de IRiskAction
-   **Fecha:** [YYYY-MM-DD]
-   **Resumen:** KillSwitchManager (que mezclaba detección y acción) descompuesto en componentes
-   con responsabilidad única: IRiskMonitor (detección) + IRiskAction (mitigación) + RiskOrchestrator
-   (coordinación). Tres monitors creados: DrawdownMonitor, ConsecutiveLossesMonitor, CoolingOffTracker
-   (este último con interfaz distinta porque señala desactivación, no activación). LiquidateAllRiskAction
-   como única implementación de IRiskAction por ahora. El sistema queda preparado para Hito B:
-   agregar RegimeIncompatibilityMonitor en su momento será literalmente crear una clase nueva sin
-   modificar nada existente (open-closed principle). 14 tests nuevos. Backtest produce operaciones
-   idénticas.
-   ```
+```markdown
+### ✅ Refactor #4 — Separar IRiskMonitor de IRiskAction
+**Fecha:** <usar fecha de hoy en formato YYYY-MM-DD>
+**Resumen:** KillSwitchManager (que mezclaba detección y acción) descompuesto en componentes
+con responsabilidad única: IRiskMonitor (detección) + IRiskAction (mitigación) + RiskOrchestrator
+(coordinación). Tres componentes de risk: DrawdownMonitor, ConsecutiveLossesMonitor (ambos
+IRiskMonitor) y CoolingOffTracker (componente separado porque señala desactivación, no activación).
+LiquidateAllRiskAction como única implementación de IRiskAction. El sistema queda preparado para
+Hito B: agregar RegimeIncompatibilityMonitor será crear una clase nueva sin modificar nada
+existente (open-closed). 14 tests nuevos. Backtest produce operaciones idénticas (162).
+```
 
-### DECISIONS.md
+### Archivo 19: MODIFICAR `DECISIONS.md`
 
-Agregar **ADR-015** al inicio del archivo (después del template):
+Agregar **ADR-015** al inicio del archivo (después del template), antes del ADR-014:
 
 ```markdown
 ## ADR-015 — Separación de responsabilidades en gestión de riesgo: IRiskMonitor / IRiskAction / Orchestrator
-**Fecha:** [YYYY-MM-DD]
+**Fecha:** <usar fecha de hoy en formato YYYY-MM-DD>
 **Estado:** Aceptada
 
 ### Contexto
-El KillSwitchManager original mezclaba dos responsabilidades en una sola clase: (1) detección
-de condiciones de riesgo (drawdown, pérdidas consecutivas, cooling-off), (2) acción de respuesta
-(liquidar cartera, marcar flag de kill switch, publicar evento). Antes del Hito B (regímenes de
-mercado), se anticipaba un cuarto motivo de kill ("régimen incompatible con la estrategia activa")
-que escalaría mal en el monolito existente.
+El KillSwitchManager original mezclaba detección de condiciones de riesgo (drawdown, pérdidas
+consecutivas, cooling-off) y acción de respuesta (liquidar cartera, marcar flag, publicar evento)
+en una sola clase. Antes del Hito B (regímenes de mercado), se anticipaba un cuarto motivo de
+kill que escalaría mal en el monolito.
 
 ### Decisión
-Aplicar Single Responsibility Principle: separar el monolito en componentes especializados.
-
-- IRiskMonitor: contrato de detección. Cada implementación chequea UNA condición y devuelve
-  RiskAssessment (Pass o Trigger con motivo).
-- IRiskAction: contrato de mitigación. Hoy una sola implementación (LiquidateAllRiskAction);
-  arquitectura preparada para variantes (liquidación parcial, reducción de leverage, etc.).
+Aplicar SRP: separar en componentes especializados.
+- IRiskMonitor: contrato de detección. Cada implementación chequea UNA condición.
+- IRiskAction: contrato de mitigación. Hoy una sola implementación (LiquidateAllRiskAction).
 - RiskOrchestrator: coordinador. Itera monitors, delega a action, gestiona kill switch state,
-  publica eventos. Es el único componente que conoce el flujo completo.
-- CoolingOffTracker: componente separado (NO implementa IRiskMonitor). Su rol es inverso —
-  señala cuándo desactivar el kill switch, no cuándo activarlo. Forzarlo en la interfaz
-  IRiskMonitor habría requerido contorsiones semánticas innecesarias.
+  publica eventos.
+- CoolingOffTracker: componente separado (NO implementa IRiskMonitor) porque señala
+  desactivación, no activación.
 
 ### Alternativas consideradas
-- **A: Mantener KillSwitchManager monolítico y agregar cuarto chequeo cuando llegue.** Descartada:
-  rompía SRP cada vez más, dificultaba testing por clase con muchas responsabilidades.
-- **B: Migración parcial (solo extraer DrawdownMonitor, dejar el resto adentro).** Descartada:
-  sistema queda inconsistente con dos patrones coexistiendo; el segundo refactor inevitable
-  costaría casi lo mismo que hacer todo de una.
-- **C (elegida): Migración completa con SRP estricto.** Sistema homogéneo. Open-closed principle
-  garantizado para futuros monitors.
+- A: Mantener monolítico y agregar cuarto chequeo cuando llegue. Descartada: empeora SRP cada vez.
+- B: Migración parcial (solo extraer DrawdownMonitor). Descartada: sistema inconsistente con
+  dos patrones coexistiendo.
+- C (elegida): Migración completa con SRP estricto.
 
 ### Consecuencias
-- Agregar futuras condiciones de riesgo es trivial: crear clase que implementa IRiskMonitor,
-  registrarla en el wiring. Cero modificación del código existente.
-- Tests más granulares y rápidos (un test por monitor, no por todo el manager).
-- El CoolingOffTracker rompe la simetría de la interfaz IRiskMonitor. Decisión consciente:
-  forzarlo en la interfaz introducía complejidad mayor que el beneficio de uniformidad.
-- ConsecutiveLossesMonitor se inyecta DIRECTO (tipo concreto) en OrderLifecycleService porque
-  el método RegisterLoss es específico de ese monitor. Acoplamiento de tipo concreto justificado
-  por especificidad semántica.
+- Agregar futuras condiciones de riesgo es trivial: clase que implementa IRiskMonitor + registro.
+  Cero modificación del código existente.
+- Tests más granulares y rápidos.
+- CoolingOffTracker rompe la simetría de IRiskMonitor — decisión consciente.
+- ConsecutiveLossesMonitor se inyecta como tipo concreto en OrderLifecycleService porque
+  RegisterLoss/RegisterWin son específicos de ese monitor.
 ```
 
-### Verificación final
+---
 
-Mostrar el diff resumido. NO commitear automáticamente — esperar confirmación.
+## Reporte final esperado del asistente
 
-Si las verificaciones del refactor NO pasan, NO actualizar tracking. Reportar error y esperar instrucciones.
+Al terminar todas las modificaciones, el asistente entrega un único mensaje en el chat con esta estructura:
+
+```
+Archivos creados:
+- Trading.Domain/Abstractions/RiskAssessment.cs
+- Trading.Domain/Abstractions/IRiskMonitor.cs
+- Trading.Domain/Abstractions/IRiskAction.cs
+- Trading.Application/Risk/DrawdownMonitor.cs
+- Trading.Application/Risk/ConsecutiveLossesMonitor.cs
+- Trading.Application/Risk/CoolingOffTracker.cs
+- Trading.Application/Risk/LiquidateAllRiskAction.cs
+- Trading.Application/Risk/RiskOrchestrator.cs
+- Trading.Application.Tests/Fakes/FakeRiskMonitor.cs (incluye FakeRiskAction)
+- Trading.Application.Tests/Risk/DrawdownMonitorTests.cs
+- Trading.Application.Tests/Risk/ConsecutiveLossesMonitorTests.cs
+- Trading.Application.Tests/Risk/RiskOrchestratorTests.cs
+
+Archivos modificados:
+- Trading.Application/Execution/BarProcessingService.cs
+- Trading.Application/Execution/OrderLifecycleService.cs
+- Trading.Strategies/TradingAlgorithmHost.cs
+- ROADMAP.md
+- DECISIONS.md
+
+Archivos borrados:
+- Trading.Application/Risk/KillSwitchManager.cs
+- Trading.Application.Tests/Risk/KillSwitchManagerTests.cs (si existía)
+
+Valores preservados del wiring viejo (replicados exactamente):
+- maximumDrawdownFraction: <valor encontrado>
+- maximumConsecutiveLosses: <valor encontrado>
+- coolingOffPeriod: <valor encontrado>
+
+Tests nuevos esperados verde: ~14
+- DrawdownMonitorTests: 4
+- ConsecutiveLossesMonitorTests: 5
+- RiskOrchestratorTests: 5
+
+Verificaciones que debe hacer el usuario:
+1. Compilar la solución.
+2. Verificar invariante arquitectónica:
+   grep -rn "^using QuantConnect" Trading.Domain/ Trading.Application/ Trading.Application.Tests/
+   (No debe devolver nada.)
+3. Verificar que no quedan referencias huérfanas al KillSwitchManager:
+   grep -rn "KillSwitchManager" Trading.Domain/ Trading.Application/ Trading.Strategies/ Trading.Application.Tests/
+   (No debe devolver nada.)
+4. Ejecutar todos los tests. Esperar todos verdes, incluyendo los ~14 nuevos.
+5. Correr el backtest. Verificar que totalNumberOfTrades es idéntico al backtest previo (162).
+
+Si todas las verificaciones pasan, el usuario commitea los cambios desde Git.
+Si algo falla, el usuario revierte desde Git y reporta el error.
+```
+
+Tras entregar el reporte, el asistente se detiene. No ejecuta comandos adicionales. No espera input para continuar — terminó.

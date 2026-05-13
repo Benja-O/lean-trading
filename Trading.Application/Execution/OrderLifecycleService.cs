@@ -17,7 +17,7 @@ namespace Trading.Application.Execution
     public class OrderLifecycleService
     {
         private readonly IReadOnlyList<StrategyExecutor> _strategyExecutors;
-        private readonly KillSwitchManager _killSwitchManager;
+        private readonly ConsecutiveLossesMonitor _consecutiveLossesMonitor;
         private readonly IOrderRouter _orderRouter;
         private readonly IPriceRounder _priceRounder;
         private readonly ITradingLogger _logger;
@@ -26,7 +26,7 @@ namespace Trading.Application.Execution
 
         public OrderLifecycleService(
             IReadOnlyList<StrategyExecutor> strategyExecutors,
-            KillSwitchManager killSwitchManager,
+            ConsecutiveLossesMonitor consecutiveLossesMonitor,
             IOrderRouter orderRouter,
             IPriceRounder priceRounder,
             ITradingLogger logger,
@@ -34,7 +34,7 @@ namespace Trading.Application.Execution
             IClock clock)
         {
             _strategyExecutors = strategyExecutors;
-            _killSwitchManager = killSwitchManager;
+            _consecutiveLossesMonitor = consecutiveLossesMonitor;
             _orderRouter = orderRouter;
             _priceRounder = priceRounder;
             _logger = logger;
@@ -86,7 +86,7 @@ namespace Trading.Application.Execution
                     HandleEntryFill(strategyExecutor, lifecycleEvent);
                     break;
                 case OrderPurpose.StopLoss:
-                    _killSwitchManager.RegisterLoss();
+                    _consecutiveLossesMonitor.RegisterLoss();
                     _logger.Info(
                         "Cancelando TakeProfit de '{ExecutorIdentifier}' por {Reason}.",
                         strategyExecutor.ExecutorIdentifier, "Stop Loss Hit");
@@ -94,7 +94,7 @@ namespace Trading.Application.Execution
                     strategyExecutor.ResetState();
                     break;
                 case OrderPurpose.TakeProfit:
-                    _killSwitchManager.ResetLossCounter();
+                    _consecutiveLossesMonitor.RegisterWin();
                     _logger.Info(
                         "Cancelando StopLoss de '{ExecutorIdentifier}' por {Reason}.",
                         strategyExecutor.ExecutorIdentifier, "Take Profit Hit");

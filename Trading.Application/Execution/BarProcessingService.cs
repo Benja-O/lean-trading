@@ -19,7 +19,7 @@ namespace Trading.Application.Execution
     {
         private readonly IPortfolioState _portfolioState;
         private readonly IOrderRouter _orderRouter;
-        private readonly KillSwitchManager _killSwitchManager;
+        private readonly RiskOrchestrator _riskOrchestrator;
         private readonly PositionSizer _positionSizer;
         private readonly ITradingLogger _logger;
         private readonly IDomainEventBus _eventBus;
@@ -28,7 +28,7 @@ namespace Trading.Application.Execution
         public BarProcessingService(
             IPortfolioState portfolioState,
             IOrderRouter orderRouter,
-            KillSwitchManager killSwitchManager,
+            RiskOrchestrator riskOrchestrator,
             PositionSizer positionSizer,
             ITradingLogger logger,
             IDomainEventBus eventBus,
@@ -36,7 +36,7 @@ namespace Trading.Application.Execution
         {
             _portfolioState = portfolioState;
             _orderRouter = orderRouter;
-            _killSwitchManager = killSwitchManager;
+            _riskOrchestrator = riskOrchestrator;
             _positionSizer = positionSizer;
             _logger = logger;
             _eventBus = eventBus;
@@ -75,7 +75,7 @@ namespace Trading.Application.Execution
                     }
                 }
 
-                if (_killSwitchManager.IsKillSwitchActivated) continue;
+                if (_riskOrchestrator.IsKillSwitchActivated) continue;
 
                 SignalDirection signalDirection = strategyExecutor.Strategy.EvaluateSignal(marketBar);
 

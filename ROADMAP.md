@@ -36,8 +36,9 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 ┌─────────────────────────────────────────────────────────────┐
 │ BLOQUE 2 — Antes del Hito B (Regímenes de mercado)          │
 ├─────────────────────────────────────────────────────────────┤
-│ Refactor #4 — Separar IRiskMonitor de IRiskAction           │
+│ Refactor #4 — Separar IRiskMonitor de IRiskAction    ✅     │
 └─────────────────────────────────────────────────────────────┘
+        ✅ BLOQUE 2 COMPLETO — Sistema listo para Hito B
                             ↓
                   HITO B: Clasificación de regímenes
                   de mercado (k-means o HMM)
@@ -71,11 +72,9 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 
 *(Todos los refactors del Bloque 1 están completados. Ver Historial completado.)*
 
-### ⬜ BLOQUE 2 — Pendiente
+### ✅ BLOQUE 2 — Completo
 
-| Estado | ID | Refactor | Bloquea | Comentario |
-|---|---|---|---|---|
-| ⬜ | #4 | Separar `IRiskMonitor` de `IRiskAction` | Hito B | Hoy `KillSwitchManager` mezcla detección (drawdown, pérdidas consecutivas) con acción (liquidar). Cuando se sume "régimen incompatible" como motivo de kill, la mezcla escala mal. |
+*(Todos los refactors del Bloque 2 están completados. Ver Historial completado.)*
 
 ### ⬜ BLOQUE 3 — Pendiente
 
@@ -159,6 +158,10 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 **Fecha original:** 2026-05-12
 **Fecha de reversión:** 2026-05-13
 **Razón:** diseño equivocado. Recalcular indicadores en vivo durante el backtest dentro del mismo proceso es duplicación, no auditoría. Tras cuatro fixes iterativos (buffer, warm-up, tolerancia, algoritmo) persistían ~33% de discrepancias sin causa raíz clara. Reemplazado por tests unitarios estáticos contra valores de referencia (baseline QC), que es el estándar institucional documentado por la propia QuantConnect. Ver ADR-014.
+
+### ✅ Refactor #4 — Separar IRiskMonitor de IRiskAction
+**Fecha:** 2026-05-13
+**Resumen:** `KillSwitchManager` (God Object: detectaba drawdown, contaba pérdidas, accionaba liquidación, gestionaba cooling-off) fue descompuesto en cinco componentes de responsabilidad única. `DrawdownMonitor : IRiskMonitor` detecta drawdown sobre high-water mark. `ConsecutiveLossesMonitor : IRiskMonitor` registra y detecta rachas de pérdidas (API: `RegisterLoss()`, `RegisterWin()`). `CoolingOffTracker` (no monitor: rol inverso, señala desactivación). `LiquidateAllRiskAction : IRiskAction` ejecuta la liquidación. `RiskOrchestrator` coordina el ciclo: evalúa monitors, activa kill switch, ejecuta acción, gestiona cooling-off; expone `IsKillSwitchActivated` y `EvaluateAllMonitors()`. `BarProcessingService` recibe `RiskOrchestrator`. `OrderLifecycleService` recibe `ConsecutiveLossesMonitor` directamente (el orquestador no necesita saber de fills individuales). `TradingAlgorithmHost` compone el grafo completo. `KillSwitchManager.cs` y `KillSwitchManagerTests.cs` eliminados. Nuevos tests: `DrawdownMonitorTests` (4), `ConsecutiveLossesMonitorTests` (5), `RiskOrchestratorTests` (5). Fake `FakeRiskMonitor` + `FakeRiskAction` agregados. Total tras refactor: 57 tests. Invariante preservada: cero `using QuantConnect` en Domain/Application.
 
 ### ✅ Hito A (versión 2) — Tests de referencia de indicadores y estrategias
 **Fecha:** 2026-05-13

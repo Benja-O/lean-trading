@@ -10,6 +10,38 @@
 
 ---
 
+## ADR-015 — Separación de IRiskMonitor e IRiskAction: descomposición de KillSwitchManager
+**Fecha:** 2026-05-13
+**Estado:** Aceptada
+
+### Contexto
+`KillSwitchManager` concentraba cuatro responsabilidades distintas: detectar drawdown excesivo, contar pérdidas consecutivas, ejecutar la liquidación global, y gestionar el período de cooling-off tras la activación. Al planificar Hito B (regímenes de mercado), surgirá una quinta responsabilidad: detectar "régimen incompatible" como condición de pausa. Agregar esa lógica a `KillSwitchManager` escalaría el problema.
+
+Adicionalmente, `OrderLifecycleService` dependía de `KillSwitchManager` solo para `RegisterLoss()` y `RegisterWin()`: dependencia hacia un God Object por una API diminuta.
+
+### Decisión
+Descomponer `KillSwitchManager` en cinco componentes de responsabilidad única:
+- `DrawdownMonitor : IRiskMonitor` — detecta drawdown desde high-water mark.
+- `ConsecutiveLossesMonitor : IRiskMonitor` — registra rachas de pérdidas; expone `RegisterLoss()` / `RegisterWin()` como API pública.
+- `CoolingOffTracker` — gestiona el período de cooling-off (no es `IRiskMonitor`: su rol es señalizar desactivación, no activación).
+- `LiquidateAllRiskAction : IRiskAction` — ejecuta la liquidación.
+- `RiskOrchestrator` — coordina el ciclo completo: evalúa monitors, activa kill switch con la acción, gestiona cooling-off; exposing `IsKillSwitchActivated` y `EvaluateAllMonitors()`.
+
+`ConsecutiveLossesMonitor` se inyecta directamente en `OrderLifecycleService` (no a través del orquestador: el orquestador no necesita saber de fills individuales).
+
+### Alternativas consideradas
+- **A: Refactorizar KillSwitchManager internamente** sin separar interfaces. Descartada: el naming engañoso y el tamaño de la clase seguirían siendo problemas de mantenimiento.
+- **B: IRiskMonitor con método RegisterEvent() genérico** para que OrderLifecycleService informe al monitor via interfaz. Descartada: innecesariamente abstracto; `ConsecutiveLossesMonitor` es un concepto concreto que merece API explícita.
+- **C (elegida): Inyección directa del monitor concreto** en OrderLifecycleService. `RiskOrchestrator` lo recibe como `IRiskMonitor` via DI; `OrderLifecycleService` lo recibe como tipo concreto para acceder a la API de registro. Un objeto, dos facetas.
+
+### Consecuencias
+- Agregar un nuevo monitor en Hito B (régimen de mercado) requiere implementar `IRiskMonitor` y registrarlo en el array que recibe `RiskOrchestrator`. Sin modificar nada existente.
+- `KillSwitchManager.cs` y `KillSwitchManagerTests.cs` eliminados.
+- 14 tests nuevos cubren los tres componentes principales. Total: 57 tests.
+- El término "KillSwitch" desaparece del código; reemplazado por `IsKillSwitchActivated` en `RiskOrchestrator` (nombre descriptivo del estado) y `RiskLimitBreachedEvent` (nombre del evento).
+
+---
+
 ## ADR-014 — Reversión del SignalAuditor: validación de indicadores por tests unitarios estáticos
 **Fecha:** 2026-05-13
 **Estado:** Aceptada (revierte ADR-010, ADR-011, ADR-012, ADR-013 en lo que respecta a auditoría runtime)

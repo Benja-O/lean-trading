@@ -25,7 +25,7 @@ namespace Trading.Strategies
     /// Responsabilidades:
     /// 1. Configuración del backtest/live (fechas, cash, brokerage, símbolos).
     /// 2. Construcción de adaptadores Lean (resolver, portfolio, metadata, router, clock, logger).
-    /// 3. Construcción de servicios de Application (KillSwitch, Sizer, BarProcessing, OrderLifecycle).
+    /// 3. Construcción de servicios de Application (RiskOrchestrator, Sizer, BarProcessing, OrderLifecycle).
     /// 4. Wiring de consolidators -> BarProcessingService.
     /// 5. Routing de OrderEvent -> OrderLifecycleService vía OrderEventMapper.
     ///
@@ -47,7 +47,8 @@ namespace Trading.Strategies
 
         // Servicios de Application
         private OrderRegistry _orderRegistry;
-        private KillSwitchManager _killSwitchManager;
+        private RiskOrchestrator _riskOrchestrator;
+        private ConsecutiveLossesMonitor _consecutiveLossesMonitor;
         private PositionSizer _positionSizer;
         private BarProcessingService _barProcessingService;
         private OrderLifecycleService _orderLifecycleService;
@@ -68,7 +69,13 @@ namespace Trading.Strategies
             var domainEventBus = new DomainEventBus(_logger);
             // En producción no se suscribe nada por ahora; los tests sí usan suscriptores de captura.
 
-            _killSwitchManager = new KillSwitchManager(_portfolioState, _orderRouter, _clock, _logger, domainEventBus);
+            var drawdownMonitor = new DrawdownMonitor(_portfolioState, 0.25m);
+            _consecutiveLossesMonitor = new ConsecutiveLossesMonitor(8);
+            var riskAction = new LiquidateAllRiskAction(_orderRouter);
+            var coolingOffTracker = new CoolingOffTracker(_clock, TimeSpan.FromDays(1));
+            _riskOrchestrator = new RiskOrchestrator(
+                new IRiskMonitor[] { drawdownMonitor, _consecutiveLossesMonitor },
+                riskAction, coolingOffTracker, _clock, _logger, domainEventBus);
             _positionSizer = new PositionSizer(_portfolioState, _instrumentMetadata, _logger);
 
             // ===== Carga y validación de configuración =====
@@ -83,7 +90,7 @@ namespace Trading.Strategies
             SetCash("USDT", 100000);
             SetCash("USD", 0);
 
-            _killSwitchManager.InitializePortfolioValue();
+            drawdownMonitor.InitializeWithCurrentValue();
 
             this.SetBrokerageModel(BrokerageName.Binance, AccountType.Margin);
             SetBenchmark(x => 0);
@@ -155,10 +162,10 @@ namespace Trading.Strategies
 
             // ===== Servicios que requieren la lista de executors ya armada =====
             _barProcessingService = new BarProcessingService(
-                _portfolioState, _orderRouter, _killSwitchManager, _positionSizer, _logger, domainEventBus, _clock);
+                _portfolioState, _orderRouter, _riskOrchestrator, _positionSizer, _logger, domainEventBus, _clock);
 
             _orderLifecycleService = new OrderLifecycleService(
-                _strategyExecutors, _killSwitchManager, _orderRouter, _priceRounder, _logger, domainEventBus, _clock);
+                _strategyExecutors, _consecutiveLossesMonitor, _orderRouter, _priceRounder, _logger, domainEventBus, _clock);
 
             SetWarmUp(TimeSpan.FromDays(1));
         }
@@ -167,10 +174,8 @@ namespace Trading.Strategies
         {
             if (IsWarmingUp) return;
 
-            _killSwitchManager.EvaluateCoolingOffPeriod();
-            if (_killSwitchManager.IsKillSwitchActivated) return;
-
-            _killSwitchManager.CheckDrawdownKillSwitch();
+            _riskOrchestrator.EvaluateAllMonitors();
+            if (_riskOrchestrator.IsKillSwitchActivated) return;
         }
 
         public override void OnOrderEvent(OrderEvent orderEvent)
