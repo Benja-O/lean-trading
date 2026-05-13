@@ -1,0 +1,24 @@
+﻿8. El KillSwitch y la Salida por Tiempo
+code C#
+
+if (IsWarmingUp || _killSwitchManager.IsKillSwitchActivated) return;
+
+    Problema: Si el KillSwitch se activa porque perdiste mucho dinero, el código hace return al principio de OnConsolidatedBar.
+
+    Consecuencia: ¡La salida por tiempo nunca se ejecutará! Si tienes una posición abierta y el KillSwitch se activa, esa posición solo se cerrará si toca el SL o el TP físico, ignorando el MaxBars.
+
+No le agregues ninguna otra funcionalidad, solo la mencionada
+No le quites ninguna funcionalidad existente
+no modifiques nada fuera del archivo Estratega.cs
+
+Claridad de Variables (Zero Abbreviations)
+
+    El formato de las variables debe ser camelCase.
+
+    Prohibido el uso de abreviaturas: Todos los nombres de variables, parametros y propiedades deben ser descriptivos y representar fielmente su proposito.
+
+    Contexto completo: No uses id, usa transactionId o userId. No uses qty, usa quantity. No uses config, usa configuration.
+
+    Iteradores: Incluso en bucles cortos, evita i o j si el contexto permite un nombre mas claro (ej. index, workerIndex).
+
+    Regla de oro: El codigo debe leerse como prosa tecnica en ingles o espanol.

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-Content *)",
+      "Bash(dotnet build *)",
+      "Bash(dotnet test *)",
+      "Bash(dotnet clean *)",
+      "Bash(rmdir \"F:\\\\DesarrolloTrading\\\\QuantConnect\\\\Lean\\\\Trading.Application\\\\Auditing\" \"F:\\\\DesarrolloTrading\\\\QuantConnect\\\\Lean\\\\Trading.Strategies\\\\Auditing\" \"F:\\\\DesarrolloTrading\\\\QuantConnect\\\\Lean\\\\Trading.Application.Tests\\\\Auditing\" && echo \"Directorios eliminados\")"
+    ]
+  }
+}

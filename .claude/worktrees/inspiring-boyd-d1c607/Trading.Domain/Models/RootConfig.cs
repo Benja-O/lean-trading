@@ -1,0 +1,13 @@
+using System.Collections.Generic;
+
+namespace Trading.Domain.Models
+{
+    /// <summary>
+    /// Raíz de la configuración de strategies.json.
+    /// La clave del diccionario es el timeframe ("1m", "5m", "1h", etc.).
+    /// </summary>
+    public class RootConfig
+    {
+        public Dictionary<string, TimeframeNode> Timeframes { get; set; } = new();
+    }
+}

@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-Content *)",
+      "Bash(dotnet build *)",
+      "Bash(dotnet test *)",
+      "Bash(Get-ChildItem -Path \"F:\\\\DesarrolloTrading\\\\QuantConnect\\\\Lean\" -Recurse -Filter \"KillSwitchManager.cs\" -ErrorAction SilentlyContinue)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(Remove-Item \"F:\\\\DesarrolloTrading\\\\QuantConnect\\\\Lean\\\\.claude\\\\worktrees\\\\sweet-villani-9a090c\\\\Trading.Application\\\\Risk\\\\KillSwitchManager.cs\")",
+      "Bash(Remove-Item \"F:\\\\DesarrolloTrading\\\\QuantConnect\\\\Lean\\\\.claude\\\\worktrees\\\\sweet-villani-9a090c\\\\Trading.Application.Tests\\\\Risk\\\\KillSwitchManagerTests.cs\")",
+      "Bash(Write-Output \"Archivos borrados OK\")"
+    ]
+  }
+}
