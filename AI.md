@@ -145,6 +145,19 @@ Este proyecto sigue estrictamente los principios de **Clean Architecture** y **D
 4. **Property-based testing:** para invariantes de riesgo y matemáticas de dimensionamiento usar FsCheck. Ejemplo: "para cualquier `RiskParameters` válido, el tamaño de posición resultante nunca excede el `maximumPositionFraction`".
 5. **Determinismo en tests:** `FakeClock` con tiempo controlado, semillas fijas para cualquier RNG, sin `Thread.Sleep`.
 6. **Naming de tests:** `MethodUnderTest_Scenario_ExpectedBehavior` o estilo Given-When-Then. Cero ambigüedad.
+7. **Tests obligatorios al crear una estrategia nueva o agregar un indicador:**
+   Toda estrategia nueva (cualquier clase que implemente `IStrategy`) debe ir acompañada en el mismo commit/refactor de dos tipos de tests:
+
+   - **Test de referencia del/los indicador(es) usados.** Por cada indicador nuevo que la estrategia utilice (que no haya sido validado antes en otra estrategia), se agrega un test en `Trading.Application.Tests/Indicators/` que verifica que el indicador de QuantConnect produce valores equivalentes a una librería de referencia (TA-Lib o equivalente) sobre una serie sintética conocida. Tolerancia relativa 1e-6. Si el indicador ya tiene test de referencia por una estrategia previa, no se duplica.
+
+   - **Test de comportamiento de la estrategia con datos sintéticos.** Se agrega un test en `Trading.Application.Tests/Strategies/` que:
+     - Construye una serie de barras sintéticas donde las condiciones que dispararían la señal se cumplen deliberadamente en una barra conocida.
+     - Pasa esas barras una por una a `EvaluateSignal`.
+     - Hace assert sobre la señal emitida en la barra esperada (`Long`, `Short` o `Flat`) y sobre las barras anteriores/posteriores.
+
+   Razón: la fidelidad de las señales se garantiza con tests unitarios estáticos contra valores de referencia, NO con auditoría runtime durante el backtest. Esta política está documentada en ADR-014. Cualquier estrategia que se agregue al sistema sin estos dos tests rompe la cobertura institucional del proyecto.
+
+   Patrón de referencia: ver `ExponentialMovingAverageReferenceTests` y `EmaCrossStrategyTests` como ejemplos vivos del estándar.
 
 ## ⚙️ Convenciones Críticas de Dominio
 
