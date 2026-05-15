@@ -16,19 +16,21 @@
 
 El proyecto está organizado en bloques de trabajo. Los refactors técnicos están agrupados por bloque según cuándo es necesario hacerlos.
 
+**Principio de orden (López de Prado):** primero construir el motor (infraestructura + clasificación de régimen), luego validar manualmente con segunda estrategia, **después** automatizar el pipeline de research. Invertir este orden produce automatización de cosas equivocadas.
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │ BLOQUE 0 — Estado actual (refactors ya completados)         │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ BLOQUE 1 — Antes del Hito A (Automatización de backtest)    │
+│ BLOQUE 1 — Antes del Hito A (Tests de referencia)           │
 ├─────────────────────────────────────────────────────────────┤
 │ Refactor A2 — Logging estructurado con placeholders  ✅     │
-│ Refactor B1 — Result<T> donde hay magic values        ✅    │
-│ Refactor B3 — Eventos de dominio (OrderSubmitted/Filled/...) ✅│
+│ Refactor B1 — Result<T> donde hay magic values       ✅     │
+│ Refactor B3 — Eventos de dominio (OrderSubmitted/...) ✅    │
 └─────────────────────────────────────────────────────────────┘
-        ✅ BLOQUE 1 COMPLETO — Sistema listo para Hito A
+        ✅ BLOQUE 1 COMPLETO
                             ↓
               ✅ HITO A: Tests de referencia de
                   indicadores y estrategias
@@ -36,7 +38,7 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 ┌─────────────────────────────────────────────────────────────┐
 │ BLOQUE 2 — Antes del Hito B (Regímenes de mercado)          │
 ├─────────────────────────────────────────────────────────────┤
-│ Refactor #4 — Separar IRiskMonitor de IRiskAction    ✅     │
+│ Refactor #4 — Separar IRiskMonitor de IRiskAction     ✅    │
 └─────────────────────────────────────────────────────────────┘
         ✅ BLOQUE 2 COMPLETO — Sistema listo para Hito B
                             ↓
@@ -55,14 +57,57 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
                   HITO D: Live trading con capital chico
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
+│ HITO E: Segunda estrategia manual (ej. Mean Reversion)      │
+│ Construida SIN automatización todavía. Sirve para:          │
+│ - Validar que el sistema soporta múltiples estrategias.     │
+│ - Aprender qué partes del flujo son repetitivas.            │
+│ - Tener una segunda referencia antes de generalizar.        │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│ HITO F: Strategy Scaffolder                                 │
+│ Comando que genera esqueleto de estrategia nueva:           │
+│ - Clase IStrategy + entrada en strategies.json              │
+│ - Tests de referencia de indicadores                        │
+│ - Tests de comportamiento con datos sintéticos              │
+│ Recién se construye DESPUÉS de tener dos estrategias        │
+│ hechas a mano para saber qué generalizar.                   │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│ HITO G: Walk-Forward Analysis + Monte Carlo + Métricas      │
+│ Pipeline reproducible de validación de estrategias:         │
+│ - Walk-forward con ventanas deslizantes optimización/test.  │
+│ - Monte Carlo sobre curva de equity para distribuciones     │
+│   de drawdown, Sharpe, etc.                                 │
+│ - Métricas estándar institucionales: Sharpe, Sortino,       │
+│   Calmar, MAR, recovery factor, profit factor, expectancy.  │
+│ - Métricas estratificadas por régimen (gracias a Hito B).   │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│ HITO H: Optimización de Hiperparámetros                     │
+│ Búsqueda automatizada con cross-validation por régimen:     │
+│ - Grid search / optimización bayesiana.                     │
+│ - Criterio de selección robusto (no maximizar Sharpe puro). │
+│ - Validación purged k-fold (López de Prado) para evitar     │
+│   leakage temporal.                                         │
+│ El rango de búsqueda y el criterio los define el operador,  │
+│ NO se automatizan (sobreajuste).                            │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
 │ BLOQUE 4 — Cuando el sistema crezca (no urgente)            │
 ├─────────────────────────────────────────────────────────────┤
 │ Value Objects Money/Price/Quantity (cuando haya 2do asset)  │
 │ OrderNormalizer separado (cuando haya múltiples callers)    │
 │ Jerarquía DomainException                                   │
 │ Trading.TestSupport proyecto separado                       │
+│ Auditor independiente en Python con TA-Lib (pre-live serio) │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+**Resumen del flujo:** Bloques 1-3 + Hitos A-D te llevan a operar con capital real. Hitos E-F-G-H son la fábrica de estrategias del futuro — se construyen una vez que el sistema está vivo y con resultados.
 
 ---
 
@@ -74,7 +119,7 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 
 ### ✅ BLOQUE 2 — Completo
 
-*(Todos los refactors del Bloque 2 están completados. Ver Historial completado.)*
+*(Refactor #4 completado. Ver Historial completado.)*
 
 ### ⬜ BLOQUE 3 — Pendiente
 
@@ -82,6 +127,16 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 |---|---|---|---|---|
 | ⬜ | INFRA-1 | Path absoluto de `strategies.json` a configuración inyectable | Hito C | Hoy hardcodeado en `TradingAlgorithmHost.Initialize()`. Pasar a parámetro de entorno o config externa antes de deploy a VPS. |
 | ⬜ | INFRA-2 | Monitoreo básico del sistema en producción | Hito C | Alertas mínimas: caída del proceso, ausencia de market data, kill switch activado. Stack a definir (Healthchecks.io, Uptime Kuma, etc.). |
+
+### ⬜ HITOS POSTERIORES — Planificados (no urgentes hasta operar con capital real)
+
+| Estado | ID | Hito | Pre-requisito | Comentario |
+|---|---|---|---|---|
+| ⬜ | HITO-B | Clasificación de regímenes de mercado (k-means o HMM) | Bloque 2 | Próximo hito mayor. Componente `MarketRegimeClassifier` en `Trading.Application`. Decisión técnica: k-means (más simple) vs HMM (más institucional). Estimación: 8-15 días. |
+| ⬜ | HITO-E | Segunda estrategia manual (ej. Mean Reversion) | Hito D | Construir SIN automatización. Sirve para validar que el sistema soporta múltiples estrategias coexistiendo y para identificar qué partes del flujo son repetitivas antes de automatizar. |
+| ⬜ | HITO-F | Strategy Scaffolder | Hito E | Comando/script que genera esqueleto de estrategia nueva: clase `IStrategy` + entrada JSON + tests de referencia + tests de comportamiento. Solo después de haber hecho dos estrategias manuales. |
+| ⬜ | HITO-G | Walk-Forward Analysis + Monte Carlo + Métricas | Hito F | Pipeline reproducible de validación: walk-forward, Monte Carlo de curva de equity, métricas estándar institucionales (Sharpe, Sortino, Calmar, MAR, profit factor, expectancy, recovery factor), estratificadas por régimen. |
+| ⬜ | HITO-H | Optimización de Hiperparámetros | Hito G | Grid search / bayesiana con purged k-fold cross-validation (López de Prado) para evitar leakage temporal. El rango de búsqueda y el criterio los define el operador. |
 
 ### ⬜ BLOQUE 4 — Postergado (no urgente)
 
@@ -159,13 +214,13 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 **Fecha de reversión:** 2026-05-13
 **Razón:** diseño equivocado. Recalcular indicadores en vivo durante el backtest dentro del mismo proceso es duplicación, no auditoría. Tras cuatro fixes iterativos (buffer, warm-up, tolerancia, algoritmo) persistían ~33% de discrepancias sin causa raíz clara. Reemplazado por tests unitarios estáticos contra valores de referencia (baseline QC), que es el estándar institucional documentado por la propia QuantConnect. Ver ADR-014.
 
-### ✅ Refactor #4 — Separar IRiskMonitor de IRiskAction
-**Fecha:** 2026-05-13
-**Resumen:** `KillSwitchManager` (God Object: detectaba drawdown, contaba pérdidas, accionaba liquidación, gestionaba cooling-off) fue descompuesto en cinco componentes de responsabilidad única. `DrawdownMonitor : IRiskMonitor` detecta drawdown sobre high-water mark. `ConsecutiveLossesMonitor : IRiskMonitor` registra y detecta rachas de pérdidas (API: `RegisterLoss()`, `RegisterWin()`). `CoolingOffTracker` (no monitor: rol inverso, señala desactivación). `LiquidateAllRiskAction : IRiskAction` ejecuta la liquidación. `RiskOrchestrator` coordina el ciclo: evalúa monitors, activa kill switch, ejecuta acción, gestiona cooling-off; expone `IsKillSwitchActivated` y `EvaluateAllMonitors()`. `BarProcessingService` recibe `RiskOrchestrator`. `OrderLifecycleService` recibe `ConsecutiveLossesMonitor` directamente (el orquestador no necesita saber de fills individuales). `TradingAlgorithmHost` compone el grafo completo. `KillSwitchManager.cs` y `KillSwitchManagerTests.cs` eliminados. Nuevos tests: `DrawdownMonitorTests` (4), `ConsecutiveLossesMonitorTests` (5), `RiskOrchestratorTests` (5). Fake `FakeRiskMonitor` + `FakeRiskAction` agregados. Total tras refactor: 57 tests. Invariante preservada: cero `using QuantConnect` en Domain/Application.
-
 ### ✅ Hito A (versión 2) — Tests de referencia de indicadores y estrategias
 **Fecha:** 2026-05-13
 **Resumen:** eliminado completamente el SignalAuditor y todo el código del enfoque anterior (9 archivos borrados, 4 modificados). Reemplazado por dos tipos de tests unitarios estándares institucionales: (1) tests de referencia que verifican que ExponentialMovingAverage de QC produce valores equivalentes al baseline QC sobre serie sintética conocida (QC valida internamente contra TA-Lib), (2) tests de comportamiento de EmaCrossStrategy con datos sintéticos diseñados para forzar cruces alcistas y bajistas. Cobertura institucional sin overhead runtime. 6 tests nuevos. Total verde: 43 tests. Sanity check final humano (verificación de 3-5 señales en TradingView antes de pasar a paper trading) queda como práctica recomendada, no automatizada.
+
+### ✅ Refactor #4 — Separar IRiskMonitor de IRiskAction
+**Fecha:** 2026-05-13
+**Resumen:** `KillSwitchManager` (que mezclaba detección y acción) descompuesto en componentes con responsabilidad única: `IRiskMonitor` (detección) + `IRiskAction` (mitigación) + `RiskOrchestrator` (coordinación). Tres componentes de risk: `DrawdownMonitor`, `ConsecutiveLossesMonitor` (ambos `IRiskMonitor`) y `CoolingOffTracker` (componente separado porque señala desactivación, no activación). `LiquidateAllRiskAction` como única implementación de `IRiskAction`. El sistema queda preparado para Hito B: agregar `RegimeIncompatibilityMonitor` será crear una clase nueva sin modificar nada existente (open-closed). 14 tests nuevos. Backtest produce operaciones idénticas (162). Bloque 2 completo.
 
 ---
 
