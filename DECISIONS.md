@@ -10,7 +10,42 @@
 
 ---
 
-## ADR-015 — Separación de IRiskMonitor e IRiskAction: descomposición de KillSwitchManager
+## ADR-016 — Trading Policy escrita y monitor runtime de degradación: simetría a la regla de entrada
+**Fecha:** 2026-05-15
+**Estado:** Aceptada
+
+### Contexto
+El sistema tiene definida implícitamente una regla de **entrada** inquebrantable: no se opera con capital real una estrategia que no superó la validación robusta del Hito G (walk-forward + Monte Carlo + métricas estratificadas). Esta regla está distribuida en la arquitectura: tests obligatorios por estrategia (ADR-014), `IValidateOptions<T>` al boot, `RiskParameters` con invariantes.
+
+No existe una regla análoga de **salida**: nada del sistema actual responde a la pregunta "¿cuándo una estrategia que ya está corriendo deja de tener derecho a operar?". El operador queda obligado a tomar esa decisión en runtime, generalmente bajo estrés (drawdown sostenido, racha de pérdidas, métricas degradándose) y sin criterio escrito previamente. En la práctica institucional, esa es la decisión que más frecuentemente se ejecuta mal, y la causa raíz es estructural: lo que no está codificado o documentado de forma versionada se negocia con uno mismo en el peor momento posible.
+
+Adicionalmente, el refactor #4 (ADR-015) dejó el sistema en open-closed sobre `IRiskMonitor`: agregar un monitor nuevo no requiere modificar nada existente. Esa puerta está abierta y la degradación estadística de una estrategia en vivo es exactamente el tipo de condición que debería detectarse vía monitor.
+
+### Decisión
+Introducir dos artefactos complementarios en el Bloque 3 (pre-Hito C, paper trading):
+
+- **OPS-1 — `POLICY.md`:** documento markdown versionado en el repo, escrito antes de iniciar paper trading. Codifica por estrategia y a nivel sistema: umbrales numéricos de drawdown que disparan reducción/pausa/kill definitivo; criterios cuantitativos de "estrategia muerta" (rolling Sharpe, profit factor, expectancy degradados respecto al backtest); cadencia de revisión humana; procedimiento de reactivación tras pausa. Los umbrales se definen con margen explícito para el haircut esperado entre backtest y live (típicamente 30-50% de degradación en Sharpe), no como porcentaje simétrico del backtest.
+
+- **OPS-2 — `StrategyHealthMonitor`:** componente en `Trading.Application` que implementa `IRiskMonitor` y consume `OrderFilledEvent` del `IDomainEventBus` para mantener métricas rolling en vivo por estrategia. Compara contra los umbrales de `POLICY.md` y dispara `RiskLimitBreachedEvent` (extendiendo `RiskLimitBreachReason` con `StrategyDegradation`) cuando se cruzan. Se registra en el array de monitors de `RiskOrchestrator`.
+
+OPS-1 va primero y bloquea OPS-2: define los números que OPS-2 va a chequear.
+
+### Alternativas consideradas
+- **A: Postergar al Bloque 4 ("cuando crezca").** Tentador porque OPS-1/OPS-2 no son código del motor de trading sino metadatos operativos. Descartada: paper trading sin policy escrita no cumple su función formativa (es donde se entrena el músculo de apagar una estrategia "como si fuera real"), y operar live sin OPS-2 deja la decisión más costosa del oficio (cuándo matar una estrategia que pierde) librada a la disciplina humana bajo estrés. El costo de hacerlo bien es chico; el costo de no hacerlo se paga en blow-ups.
+
+- **B: Solo OPS-1 (documento escrito sin componente runtime).** Mejor que nada, pero documento sin enforcement es papel mojado: la inspección humana de métricas en vivo no escala a múltiples estrategias y falla bajo estrés operativo (el operador minimiza lo malo cuando el dolor está fresco). Descartada por insuficiente.
+
+- **C: Solo OPS-2 (monitor runtime sin documento).** Código sin criterio: los umbrales que el monitor compara tienen que venir de algún lado, y si no están escritos y versionados en el repo terminan hardcodeados en el código o en un JSON sin contexto. Descartada por incompleta: OPS-1 es la fuente de verdad humana, OPS-2 es la ejecución.
+
+- **D (elegida): OPS-1 + OPS-2 en el Bloque 3, en ese orden.** OPS-1 antes que OPS-2 porque define los números. Ambos antes que Hito C porque el paper trading es donde se valida el conjunto.
+
+### Consecuencias
+- El sistema queda con las tres puertas críticas definidas: entrada (validación robusta antes de operar — Hito G), operación (risk monitors en runtime — refactor #4), salida (policy de degradación y muerte de estrategia — OPS-1/OPS-2). Hasta hoy faltaba la tercera.
+- `RiskLimitBreachReason` se extenderá con un valor nuevo (`StrategyDegradation`). El refactor #4 ya garantiza que agregar un monitor no toca código existente, así que el blast radius de OPS-2 es chico.
+- Se introduce deuda técnica conocida: las métricas rolling del `StrategyHealthMonitor` se calculan en memoria desde el inicio de cada sesión. Si el proceso reinicia, se pierde el historial reciente y el monitor entra en warm-up. Para paper trading es aceptable; para live serio habrá que persistir el estado. Queda anotado para Bloque 4.
+- El documento `POLICY.md` introduce un nuevo tipo de artefacto al repo (operacional, no código), que se versiona con el mismo rigor que cualquier otro: cualquier cambio a un umbral se commitea con justificación, y se revierte con `git` como cualquier código mal pensado.
+
+---
 **Fecha:** 2026-05-13
 **Estado:** Aceptada
 

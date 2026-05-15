@@ -50,6 +50,8 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 ├─────────────────────────────────────────────────────────────┤
 │ Path absoluto a configuración                               │
 │ Monitoreo básico (alertas si algo se cae)                   │
+│ OPS-1 — Trading Policy Document (POLICY.md)                 │
+│ OPS-2 — StrategyHealthMonitor (IRiskMonitor de degradación) │
 └─────────────────────────────────────────────────────────────┘
                             ↓
                   HITO C: Paper trading
@@ -127,6 +129,8 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 |---|---|---|---|---|
 | ⬜ | INFRA-1 | Path absoluto de `strategies.json` a configuración inyectable | Hito C | Hoy hardcodeado en `TradingAlgorithmHost.Initialize()`. Pasar a parámetro de entorno o config externa antes de deploy a VPS. |
 | ⬜ | INFRA-2 | Monitoreo básico del sistema en producción | Hito C | Alertas mínimas: caída del proceso, ausencia de market data, kill switch activado. Stack a definir (Healthchecks.io, Uptime Kuma, etc.). |
+| ⬜ | OPS-1 | Trading Policy Document (`POLICY.md`) | Hito C, OPS-2 | Documento versionado en el repo que codifica las reglas operativas inquebrantables del sistema. Por estrategia y a nivel sistema: umbrales de drawdown que disparan reducción/pausa/kill definitivo; criterios cuantitativos de "estrategia muerta" (rolling Sharpe, profit factor, expectancy degradados respecto al backtest, con margen explícito para haircut backtest→live del 30-50%); cadencia de revisión humana (qué se mira diario/semanal/mensual); procedimiento de reactivación tras pausa. Es la regla simétrica a "no operar estrategia que no pasó validación": define cuándo una estrategia que ya está corriendo deja de tener derecho a hacerlo. Sin esto, el paper trading no tiene criterio de éxito definido y la decisión de apagar se negocia con uno mismo en el peor momento. Va antes que OPS-2 porque define los números que OPS-2 va a chequear. |
+| ⬜ | OPS-2 | `StrategyHealthMonitor` — implementación runtime de `POLICY.md` | Hito C | Componente nuevo en `Trading.Application` que implementa `IRiskMonitor` (refactor #4) y consume `OrderFilledEvent` del bus para mantener métricas en vivo por estrategia (rolling Sharpe, profit factor, expectancy, drawdown desde último ATH de la estrategia). Compara contra los umbrales de `POLICY.md` y dispara `RiskLimitBreachedEvent` con `RiskLimitBreachReason.StrategyDegradation` cuando se cruzan. Se registra en el array de monitors de `RiskOrchestrator`, sin tocar nada existente (open-closed). La automatización es necesaria porque la inspección humana de métricas no escala y falla bajo estrés operativo. |
 
 ### ⬜ HITOS POSTERIORES — Planificados (no urgentes hasta operar con capital real)
 
