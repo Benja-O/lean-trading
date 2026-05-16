@@ -35,4 +35,10 @@
     <Folder Include="Adapters\" />
   </ItemGroup>
 
+
+  <ItemGroup>
+    <Content Include="strategies.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
 </Project>

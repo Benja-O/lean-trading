@@ -1,4 +1,4 @@
-using QuantConnect;
+﻿using QuantConnect;
 using QuantConnect.Algorithm;
 using QuantConnect.Brokerages;
 using QuantConnect.Data;
@@ -22,17 +22,17 @@ using Trading.Strategies.Infrastructure;
 namespace Trading.Strategies
 {
     /// <summary>
-    /// Host del sistema. Es el ÚNICO lugar que extiende QCAlgorithm y compone los adaptadores Lean
+    /// Host del sistema. Es el ÃšNICO lugar que extiende QCAlgorithm y compone los adaptadores Lean
     /// con los servicios de Trading.Application.
     ///
     /// Responsabilidades:
-    /// 1. Configuración del backtest/live (fechas, cash, brokerage, símbolos).
-    /// 2. Construcción de adaptadores Lean (resolver, portfolio, metadata, router, clock, logger).
-    /// 3. Construcción de servicios de Application (RiskOrchestrator, Sizer, BarProcessing, OrderLifecycle).
+    /// 1. ConfiguraciÃ³n del backtest/live (fechas, cash, brokerage, sÃ­mbolos).
+    /// 2. ConstrucciÃ³n de adaptadores Lean (resolver, portfolio, metadata, router, clock, logger).
+    /// 3. ConstrucciÃ³n de servicios de Application (RiskOrchestrator, Sizer, BarProcessing, OrderLifecycle).
     /// 4. Wiring de consolidators -> BarProcessingService.
-    /// 5. Routing de OrderEvent -> OrderLifecycleService vía OrderEventMapper.
+    /// 5. Routing de OrderEvent -> OrderLifecycleService vÃ­a OrderEventMapper.
     ///
-    /// La lógica de negocio NO vive aquí; vive en Trading.Application sin conocer Lean.
+    /// La lÃ³gica de negocio NO vive aquÃ­; vive en Trading.Application sin conocer Lean.
     /// </summary>
     public class TradingAlgorithmHost : QCAlgorithm
     {
@@ -70,7 +70,7 @@ namespace Trading.Strategies
 
             // ===== Servicios de Application =====
             var domainEventBus = new DomainEventBus(_logger);
-            // En producción no se suscribe nada por ahora; los tests sí usan suscriptores de captura.
+            // En producciÃ³n no se suscribe nada por ahora; los tests sÃ­ usan suscriptores de captura.
 
             var drawdownMonitor = new DrawdownMonitor(_portfolioState, 0.25m);
             _consecutiveLossesMonitor = new ConsecutiveLossesMonitor(8);
@@ -81,21 +81,21 @@ namespace Trading.Strategies
                 riskAction, coolingOffTracker, _clock, _logger, domainEventBus);
             _positionSizer = new PositionSizer(_portfolioState, _instrumentMetadata, _logger);
 
-            // ===== Régimen de mercado =====
+            // ===== RÃ©gimen de mercado =====
             // Paso 2 de Hito B: classifier fake (devuelve siempre Trend) que valida el wiring del filtro.
-            // Paso 3 reemplazará este fake por AccordHmmClassifier con modelo entrenado offline.
+            // Paso 3 reemplazarÃ¡ este fake por AccordHmmClassifier con modelo entrenado offline.
             var btcInstrumentId = new InstrumentId("BTCUSDT");
             var regimeClassifierBtc = new ConfigurableMarketRegimeClassifier(
                 btcInstrumentId, RegimeLabel.HighVolatility, _clock);
             var regimeRegistry = new MarketRegimeRegistry(
                 new IMarketRegimeClassifier[] { regimeClassifierBtc }, _clock, _logger);
 
-            // ===== Carga y validación de configuración =====
-            // El loader falla loud si RiskPerTradePercentage no está presente o es inválido en cualquier definición.
-            string strategiesFilePath = @"F:\DesarrolloTrading\QuantConnect\Lean\Trading.Strategies\bin\Debug\net10.0\strategies.json";
+            // ===== Carga y validaciÃ³n de configuraciÃ³n =====
+            // El loader falla loud si RiskPerTradePercentage no estÃ¡ presente o es invÃ¡lido en cualquier definiciÃ³n.
+            string strategiesFilePath = System.IO.Path.Combine(System.AppContext.BaseDirectory, "strategies.json");
             var rootConfiguration = _strategyConfigurationLoader.Load(strategiesFilePath);
 
-            // ===== Configuración del entorno de trading =====
+            // ===== ConfiguraciÃ³n del entorno de trading =====
             SetStartDate(2025, 1, 1);
             SetEndDate(2026, 3, 31);
             SetAccountCurrency("USDT");
@@ -125,7 +125,7 @@ namespace Trading.Strategies
                 _instrumentResolver.Register(cryptoAsset.Symbol);
             }
 
-            // ===== Construcción de executors =====
+            // ===== ConstrucciÃ³n de executors =====
             var strategyCompatibilities = new Dictionary<string, StrategyRegimeCompatibility>();
 
             foreach (var timeframeNode in rootConfiguration.Timeframes)
@@ -149,8 +149,8 @@ namespace Trading.Strategies
                     {
                         var strategy = StrategyFactory.Create(strategyDefinition.StrategyName);
 
-                        // Defensa en profundidad: el loader ya validó que .RiskPerTradePercentage tiene valor.
-                        // Acceder con .Value acá es seguro y mantiene la política fail-loud si algo se rompe arriba.
+                        // Defensa en profundidad: el loader ya validÃ³ que .RiskPerTradePercentage tiene valor.
+                        // Acceder con .Value acÃ¡ es seguro y mantiene la polÃ­tica fail-loud si algo se rompe arriba.
                         var riskParameters = RiskParameters.FromPercentages(
                             stopLossPercentage: strategyDefinition.StopLossPercentage,
                             takeProfitPercentage: strategyDefinition.TakeProfitPercentage,
@@ -175,8 +175,8 @@ namespace Trading.Strategies
                                 catch (ArgumentException parseException)
                                 {
                                     throw new InvalidOperationException(
-                                        $"Estrategia '{strategyExecutor.ExecutorIdentifier}' (timeframe {timeframe}, símbolo {symbolTicker}): " +
-                                        $"valor inválido en CompatibleRegimes. {parseException.Message}", parseException);
+                                        $"Estrategia '{strategyExecutor.ExecutorIdentifier}' (timeframe {timeframe}, sÃ­mbolo {symbolTicker}): " +
+                                        $"valor invÃ¡lido en CompatibleRegimes. {parseException.Message}", parseException);
                                 }
                             }
                             allowedRegimes = parsedLabels;
@@ -197,7 +197,7 @@ namespace Trading.Strategies
                 }
             }
 
-            // ===== Consolidator dedicado para el régimen de mercado (4h) =====
+            // ===== Consolidator dedicado para el rÃ©gimen de mercado (4h) =====
             // Independiente de los consolidators de estrategias. Alimenta al MarketRegimeRegistry.
             // Hardcodeado a 4h en este paso; futuras iteraciones pueden parametrizar el timeframe por instrumento.
             foreach (var regimeInstrumentId in new[] { btcInstrumentId })

@@ -1,8 +1,0 @@
-// --------------------------- Compilar Strategies --------------------------- //
-
-dotnet build .\trading.strategies\trading.strategies.csproj
-
-// --------------------------- Ejecutar --------------------------- //
-
-F:\DesarrolloTrading\QuantConnect\Lean\Launcher\bin\Debug
-.\QuantConnect.Lean.Launcher.exe

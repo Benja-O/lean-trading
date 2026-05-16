@@ -1,4 +1,4 @@
-# OS Files
+﻿# OS Files
 .DS_Store
 
 # Object files
@@ -286,3 +286,5 @@ QuantConnect.Lean.sln.DotSettings
 /prompt-eliminar-auditor.md
 /prompt_refactor_A2.md
 /HITO_B_PASO_1_BRIEF.md
+
+.claude/
