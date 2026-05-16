@@ -7,11 +7,14 @@ using QuantConnect.Data.Market;
 using QuantConnect.Orders;
 using QuantConnect.Orders.Fees;
 using QuantConnect.Orders.Slippage;
+using System.Collections.Generic;
 using Trading.Application.Eventing;
 using Trading.Application.Execution;
+using Trading.Application.Regimes;
 using Trading.Application.Risk;
 using Trading.Application.Sizing;
 using Trading.Domain.Abstractions;
+using Trading.Domain.Abstractions.Regimes;
 using Trading.Domain.ValueObjects;
 using Trading.Strategies.Adapters;
 using Trading.Strategies.Infrastructure;
@@ -78,6 +81,15 @@ namespace Trading.Strategies
                 riskAction, coolingOffTracker, _clock, _logger, domainEventBus);
             _positionSizer = new PositionSizer(_portfolioState, _instrumentMetadata, _logger);
 
+            // ===== Régimen de mercado =====
+            // Paso 2 de Hito B: classifier fake (devuelve siempre Trend) que valida el wiring del filtro.
+            // Paso 3 reemplazará este fake por AccordHmmClassifier con modelo entrenado offline.
+            var btcInstrumentId = new InstrumentId("BTCUSDT");
+            var regimeClassifierBtc = new ConfigurableMarketRegimeClassifier(
+                btcInstrumentId, RegimeLabel.HighVolatility, _clock);
+            var regimeRegistry = new MarketRegimeRegistry(
+                new IMarketRegimeClassifier[] { regimeClassifierBtc }, _clock, _logger);
+
             // ===== Carga y validación de configuración =====
             // El loader falla loud si RiskPerTradePercentage no está presente o es inválido en cualquier definición.
             string strategiesFilePath = @"F:\DesarrolloTrading\QuantConnect\Lean\Trading.Strategies\bin\Debug\net10.0\strategies.json";
@@ -114,6 +126,8 @@ namespace Trading.Strategies
             }
 
             // ===== Construcción de executors =====
+            var strategyCompatibilities = new Dictionary<string, StrategyRegimeCompatibility>();
+
             foreach (var timeframeNode in rootConfiguration.Timeframes)
             {
                 string timeframe = timeframeNode.Key;
@@ -146,6 +160,29 @@ namespace Trading.Strategies
                             strategyDefinition, timeframe, instrumentId, strategy, riskParameters);
                         _strategyExecutors.Add(strategyExecutor);
                         localStrategyExecutors.Add(strategyExecutor);
+
+                        // Parseo de CompatibleRegimes (strings del JSON) a RegimeLabel y registro.
+                        IReadOnlySet<RegimeLabel> allowedRegimes = null;
+                        if (strategyDefinition.CompatibleRegimes != null)
+                        {
+                            var parsedLabels = new HashSet<RegimeLabel>();
+                            foreach (var regimeName in strategyDefinition.CompatibleRegimes)
+                            {
+                                try
+                                {
+                                    parsedLabels.Add(RegimeLabelParser.Parse(regimeName));
+                                }
+                                catch (ArgumentException parseException)
+                                {
+                                    throw new InvalidOperationException(
+                                        $"Estrategia '{strategyExecutor.ExecutorIdentifier}' (timeframe {timeframe}, símbolo {symbolTicker}): " +
+                                        $"valor inválido en CompatibleRegimes. {parseException.Message}", parseException);
+                                }
+                            }
+                            allowedRegimes = parsedLabels;
+                        }
+                        strategyCompatibilities[strategyExecutor.ExecutorIdentifier] =
+                            new StrategyRegimeCompatibility(strategyExecutor.ExecutorIdentifier, allowedRegimes);
                     }
 
                     tradeBarConsolidator.DataConsolidated += (sender, tradeBarData) =>
@@ -160,9 +197,31 @@ namespace Trading.Strategies
                 }
             }
 
+            // ===== Consolidator dedicado para el régimen de mercado (4h) =====
+            // Independiente de los consolidators de estrategias. Alimenta al MarketRegimeRegistry.
+            // Hardcodeado a 4h en este paso; futuras iteraciones pueden parametrizar el timeframe por instrumento.
+            foreach (var regimeInstrumentId in new[] { btcInstrumentId })
+            {
+                if (!regimeRegistry.HasClassifier(regimeInstrumentId)) continue;
+
+                var regimeSymbol = _instrumentResolver.Resolve(regimeInstrumentId);
+                var regimeConsolidator = new TradeBarConsolidator(TimeSpan.FromHours(4));
+
+                regimeConsolidator.DataConsolidated += (sender, tradeBarData) =>
+                {
+                    if (IsWarmingUp) return;
+                    var marketBar = MarketBarMapper.ToMarketBar((TradeBar)tradeBarData, _instrumentResolver);
+                    regimeRegistry.ClassifyBar(marketBar);
+                };
+
+                SubscriptionManager.AddConsolidator(regimeSymbol, regimeConsolidator);
+            }
+
             // ===== Servicios que requieren la lista de executors ya armada =====
             _barProcessingService = new BarProcessingService(
-                _portfolioState, _orderRouter, _riskOrchestrator, _positionSizer, _logger, domainEventBus, _clock);
+                _portfolioState, _orderRouter, _riskOrchestrator, _positionSizer,
+                _logger, domainEventBus, _clock,
+                regimeRegistry, strategyCompatibilities);
 
             _orderLifecycleService = new OrderLifecycleService(
                 _strategyExecutors, _consecutiveLossesMonitor, _orderRouter, _priceRounder, _logger, domainEventBus, _clock);

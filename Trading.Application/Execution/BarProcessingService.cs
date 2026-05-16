@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using Trading.Application.Regimes;
 using Trading.Application.Risk;
 using Trading.Application.Sizing;
 using Trading.Domain.Abstractions;
@@ -24,6 +26,8 @@ namespace Trading.Application.Execution
         private readonly ITradingLogger _logger;
         private readonly IDomainEventBus _eventBus;
         private readonly IClock _clock;
+        private readonly MarketRegimeRegistry _regimeRegistry;
+        private readonly IReadOnlyDictionary<string, StrategyRegimeCompatibility> _strategyCompatibilities;
 
         public BarProcessingService(
             IPortfolioState portfolioState,
@@ -32,7 +36,9 @@ namespace Trading.Application.Execution
             PositionSizer positionSizer,
             ITradingLogger logger,
             IDomainEventBus eventBus,
-            IClock clock)
+            IClock clock,
+            MarketRegimeRegistry regimeRegistry,
+            IReadOnlyDictionary<string, StrategyRegimeCompatibility> strategyCompatibilities)
         {
             _portfolioState = portfolioState;
             _orderRouter = orderRouter;
@@ -41,6 +47,8 @@ namespace Trading.Application.Execution
             _logger = logger;
             _eventBus = eventBus;
             _clock = clock;
+            _regimeRegistry = regimeRegistry ?? throw new ArgumentNullException(nameof(regimeRegistry));
+            _strategyCompatibilities = strategyCompatibilities ?? throw new ArgumentNullException(nameof(strategyCompatibilities));
         }
 
         public void ProcessBar(MarketBar marketBar, IReadOnlyList<StrategyExecutor> strategyExecutors)
@@ -80,6 +88,23 @@ namespace Trading.Application.Execution
                 SignalDirection signalDirection = strategyExecutor.Strategy.EvaluateSignal(marketBar);
 
                 if (signalDirection == SignalDirection.Flat) continue;
+
+                // ===== Filtro de régimen pre-orden =====
+                // Si la estrategia declara CompatibleRegimes y el régimen actual del instrumento no está
+                // en esa lista, la señal se descarta. Régimen Unknown nunca filtra (fail-safe).
+                if (_strategyCompatibilities.TryGetValue(strategyExecutor.ExecutorIdentifier, out var compatibility))
+                {
+                    var currentRegime = _regimeRegistry.GetLastClassification(instrumentId);
+                    if (!compatibility.IsCompatibleWith(currentRegime.Label))
+                    {
+                        _logger.Debug(
+                            "BarProcessingService: señal {Direction} descartada para {ExecutorIdentifier}. " +
+                            "Régimen actual de {InstrumentId} es {CurrentRegime}, no está en CompatibleRegimes de la estrategia.",
+                            signalDirection, strategyExecutor.ExecutorIdentifier, instrumentId, currentRegime.Label);
+                        continue;
+                    }
+                }
+                // Si no hay compatibility registrada para este executor, no filtramos (fail-safe).
 
                 // Bloqueamos entrada si ya hay posición o hay órdenes pending.
                 if (_portfolioState.IsInvested(instrumentId)) continue;
