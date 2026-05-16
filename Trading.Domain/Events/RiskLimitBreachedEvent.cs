@@ -15,7 +15,16 @@ namespace Trading.Domain.Events
         ConsecutiveLossesExceeded,
 
         /// <summary>Activación manual o por motivo no categorizado.</summary>
-        Manual
+        Manual,
+
+        /// <summary>
+        /// Una estrategia intentó emitir una señal en un régimen de mercado declarado incompatible.
+        /// Este valor NO activa el kill switch global: el filtro de régimen rechaza la señal
+        /// específica en BarProcessingService como un guard pre-orden. El valor existe en el
+        /// enum para que las emisiones diagnósticas del filtro (futuras, no en este paso)
+        /// puedan categorizarse junto a las otras razones.
+        /// </summary>
+        RegimeIncompatibility
     }
 
     /// <summary>

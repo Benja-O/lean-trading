@@ -14,7 +14,11 @@ namespace Trading.Strategies.Adapters
             var instrumentId = instrumentResolver.Resolve(tradeBar.Symbol);
             return new MarketBar(
                 instrumentId: instrumentId,
+                open: tradeBar.Open,
+                high: tradeBar.High,
+                low: tradeBar.Low,
                 close: tradeBar.Close,
+                volume: tradeBar.Volume,
                 timestampUtc: tradeBar.EndTime);
         }
     }

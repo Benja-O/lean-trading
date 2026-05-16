@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace Trading.Domain.Models
 {
     /// <summary>
@@ -36,5 +38,25 @@ namespace Trading.Domain.Models
 
         public bool CombineWithTimeExit { get; set; }
         public int MaxBars { get; set; }
+
+        /// <summary>
+        /// Lista de regímenes de mercado compatibles con esta estrategia (declarados como strings
+        /// en el JSON, ej. ["Trend", "Squeeze"]).
+        ///
+        /// Semántica:
+        /// - null/ausente del JSON: la estrategia es compatible con todos los regímenes (fail-safe).
+        /// - Lista vacía []: inválido; el loader debe rechazarlo (ver StrategyConfigLoader).
+        /// - Lista con valores: solo se emiten señales cuando el clasificador reporta un régimen
+        ///   incluido en esta lista.
+        ///
+        /// La conversión de strings a el enum RegimeLabel ocurre en una capa superior cuando esa
+        /// abstracción exista (Paso 2 de Hito B). Aquí se mantiene como string para evitar acoplar
+        /// el DTO de configuración a una abstracción que aún no existe.
+        ///
+        /// El tipo es List&lt;string&gt; concreto (no IReadOnlyList&lt;string&gt;) siguiendo el patrón
+        /// establecido del repo para DTOs de configuración deserializados con Newtonsoft.Json
+        /// (RootConfig.Timeframes es Dictionary concreto por la misma razón).
+        /// </summary>
+        public List<string>? CompatibleRegimes { get; set; }
     }
 }

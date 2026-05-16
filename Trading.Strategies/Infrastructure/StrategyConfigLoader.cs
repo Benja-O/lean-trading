@@ -87,6 +87,18 @@ namespace Trading.Strategies.Infrastructure
                         collectedErrors.Add(
                             $"{strategyContext}{System.Environment.NewLine}{invalidRiskException.Message}");
                     }
+
+                    // Validación de CompatibleRegimes: null/ausente es válido (fail-safe = compatible con todos).
+                    // Lista vacía es inválido — indicaría una decisión confusa que el operador debe explicitar.
+                    if (strategyDefinition.CompatibleRegimes != null &&
+                        strategyDefinition.CompatibleRegimes.Count == 0)
+                    {
+                        collectedErrors.Add(
+                            $"{strategyContext}{System.Environment.NewLine}" +
+                            "El campo 'CompatibleRegimes' está presente pero es una lista vacía. " +
+                            "Si querés que la estrategia opere en todos los regímenes, omití el campo (no lo incluyas como []). " +
+                            "Si querés desactivar la estrategia, removela del JSON.");
+                    }
                 }
             }
 
