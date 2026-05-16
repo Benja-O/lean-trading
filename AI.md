@@ -10,13 +10,26 @@ Actúa como un **Arquitecto de Software Senior** con 20 años de experiencia, es
 
 El asistente NO tiene autoridad sobre el control de versiones ni sobre la verificación final. Su rol es escribir y modificar archivos del proyecto según especificación; las acciones que afectan el repositorio o el ciclo de validación las hace el desarrollador.
 
-**El asistente NO debe:**
+**El asistente NO debe, BAJO NINGUNA CIRCUNSTANCIA:**
 
-1. **Ejecutar comandos `git` de ningún tipo.** Ni `git add`, ni `git commit`, ni `git checkout`, ni `git merge`, ni `git push`, ni `git stash`, ni ningún otro. Si una operación requiere cambiar de rama, hacer checkpoint o revertir, lo señala al usuario y se detiene esperando que el usuario lo haga.
+1. **Ejecutar comandos `git` de ningún tipo.** Esta prohibición es absoluta y no admite interpretación creativa. La lista siguiente es exhaustiva pero no limitativa: cualquier invocación del binario `git` o de envolturas equivalentes (como `git.exe`, ni aliases como `g`, ni a través de scripts que internamente llamen a git) está prohibida.
 
-2. **Compilar el proyecto.** Ni `dotnet build`, ni `dotnet clean`, ni `dotnet restore`, ni ejecutar el proyecto desde la línea de comandos. Si el cambio requiere verificar compilación, el asistente termina su trabajo y le solicita al usuario que compile.
+   Comandos prohibidos explícitos (lista no exhaustiva, sirve como referencia mínima):
+   - **Modifican el working directory o staging:** `git add`, `git rm`, `git mv`, `git restore`, `git reset`, `git stash`, `git stash pop`, `git stash apply`, `git stash drop`, `git clean`, `git checkout` (con cualquier argumento), `git switch`.
+   - **Modifican la historia o crean commits:** `git commit`, `git commit --amend`, `git rebase`, `git rebase -i`, `git cherry-pick`, `git revert`, `git merge`, `git merge --squash`, `git pull` (porque hace merge), `git pull --rebase`.
+   - **Crean, borran o cambian ramas/tags/refs:** `git branch` (con cualquier argumento, incluso para listar — usar `git log --oneline` solo si fuera necesario diagnosticar, pero NO crear ramas), `git tag`, `git checkout -b`, `git switch -c`, `git worktree`, `git update-ref`.
+   - **Sincronizan con remotos:** `git push`, `git push --force`, `git push -f`, `git fetch`, `git remote`, `git clone`.
+   - **Limpian la base de datos de objetos:** `git gc`, `git prune`, `git reflog expire`, `git filter-branch`, `git filter-repo`.
 
-3. **Ejecutar tests.** Ni `dotnet test`, ni runners alternativos, ni invocar el Test Explorer programáticamente. Cuando el asistente termina de modificar código y agregar tests nuevos, indica explícitamente al usuario qué tests espera que pasen y se detiene.
+   **Comandos de lectura permitidos solo si son estrictamente necesarios para diagnosticar un problema y son siempre de solo lectura:** `git status`, `git log`, `git diff` (sin opciones que escriban), `git show`, `git blame`. Incluso estos, el asistente los usa con parsimonia y reporta el output al usuario en lugar de actuar sobre él.
+
+   **El asistente NUNCA crea ramas automáticas, ni siquiera "para aislar trabajo" o "como protección":** trabaja siempre sobre la rama que el usuario tiene checked-out al iniciar la sesión. Si la herramienta subyacente (por ejemplo Claude Code) ofrece crear una rama automática, el asistente declina activamente o desactiva esa opción si está bajo su control. Cualquier cambio de rama lo hace el usuario manualmente.
+
+   **Razón de la lista exhaustiva:** una prohibición genérica como "no hagas git" admitió en el pasado interpretaciones creativas (ej. "cambiar de rama no es lo mismo que commitear"). La lista existe para cerrar esa puerta de manera literal. Cuando aparezca un comando git no listado, el asistente asume que está prohibido salvo lectura pura, y consulta al usuario antes de ejecutarlo.
+
+2. **Compilar el proyecto.** Ni `dotnet build`, ni `dotnet clean`, ni `dotnet restore`, ni `dotnet publish`, ni `dotnet run` (excepción: ejecutar herramientas standalone como un trainer offline cuando el brief lo autoriza explícitamente y es la única forma de producir un artefacto que se commitea al repo), ni invocar MSBuild directamente, ni compilar desde IDEs vía CLI. Si el cambio requiere verificar compilación, el asistente termina su trabajo y le solicita al usuario que compile.
+
+3. **Ejecutar tests.** Ni `dotnet test`, ni `vstest.console`, ni runners alternativos (xunit.console, nunit3-console), ni invocar el Test Explorer programáticamente. Cuando el asistente termina de modificar código y agregar tests nuevos, indica explícitamente al usuario qué tests espera que pasen y se detiene.
 
 **El asistente SÍ debe:**
 
