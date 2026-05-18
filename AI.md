@@ -36,7 +36,17 @@ El asistente NO tiene autoridad sobre el control de versiones ni sobre la verifi
 - Modificar archivos de código fuente (`.cs`, `.csproj`, `.json` de configuración del proyecto).
 - Crear archivos nuevos donde corresponda según la arquitectura.
 - Eliminar archivos cuando el refactor lo requiere.
-- **Actualizar `ROADMAP.md` y `DECISIONS.md` como parte del refactor** cuando corresponda: mover entradas a "Historial completado", agregar ADRs nuevos al inicio, marcar refactors con ✅ en el diagrama del Plan general. Son archivos del proyecto y se editan igual que cualquier otro código fuente, en la misma "tanda" del refactor.
+- **Actualizar `ROADMAP.md` y `DECISIONS.md` como parte del refactor** cuando corresponda: mover entradas a "Historial completado", agregar ADRs nuevos al inicio, marcar refactors con ✅ en el diagrama del Plan general. Son archivos del proyecto y se editan igual que cualquier otro código fuente, en la misma "tanda" del refactor. **Esta regla no es opcional ni postergable a "después":** si el asistente entrega un refactor sin actualizar los `.md`, el refactor está incompleto. La consecuencia conocida de no respetar esto es que el ROADMAP empieza a mentir sobre el estado del proyecto y la única forma de reconstruir el historial pasa a ser leer `git log` (que típicamente tiene mensajes lacónicos y no documenta decisiones arquitectónicas).
+
+- **Proponer el mensaje del commit al cierre de cada entrega.** El asistente no commitea (la regla 1 lo prohíbe), pero **sí redacta y le entrega al usuario el mensaje de commit sugerido** al final de cada refactor o tarea, listo para que el usuario lo copie y pegue. Formato:
+   - **Primera línea (≤72 caracteres):** prefijo convencional + descripción concisa.
+     - Prefijos válidos: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `style`, `perf`.
+     - Ejemplo: `feat(regimes): integrar filtro pre-orden con classifier fake en BarProcessingService`.
+   - **Línea en blanco.**
+   - **Cuerpo opcional (recomendado para cambios de >1 archivo o decisiones no triviales):** bullet points indicando qué se modificó concretamente. Útil para que `git log --oneline` y `git log -p` ambos sean legibles 6 meses después.
+   - **Referencias opcionales al final:** `Refs ADR-017` o `Closes HITO-B Paso 2` cuando aplique, para enlazar el commit con documentación.
+
+   **Razón:** los commits con mensaje `asdf` (patrón histórico del repo) son irreversibles y hacen imposible reconstruir el historial cuando algo se rompe meses después. La inversión de 30 segundos en redactar un mensaje útil paga sola la primera vez que hay que diagnosticar un bug introducido tres semanas atrás. Como el asistente ya conoce el alcance exacto del cambio que acaba de hacer (mejor que cualquier herramienta automática), es el responsable natural de proponer el mensaje. El usuario lo aplica tal cual o lo ajusta.
 - Documentar al final de cada cambio: qué se modificó, qué espera del usuario (compilar, correr tests, verificar comportamiento), y qué acciones quedan pendientes para que el usuario las ejecute.
 
 **Razón:** el usuario controla los puntos de verificación y los checkpoints de Git porque son irreversibles o costosos de revertir. El asistente puede equivocarse en cualquier paso; mantener Git y testing fuera de su alcance limita el daño potencial a "código mal modificado en working directory", que es trivialmente recuperable. Las actualizaciones a `ROADMAP.md` y `DECISIONS.md` son parte natural del refactor — si el refactor sale mal, esos cambios se revierten junto al resto desde Git, sin tratamiento especial.

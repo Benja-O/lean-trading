@@ -10,6 +10,110 @@
 
 ---
 
+## ADR-018 — Adelantamiento de INFRA-1: path absoluto del strategies.json eliminado y reconciliado con MSBuild
+**Fecha:** 2026-05-17
+**Estado:** Aceptada
+
+### Contexto
+El `TradingAlgorithmHost.cs` hardcodeaba un path absoluto al `strategies.json`: `F:\DesarrolloTrading\QuantConnect\Lean\Trading.Strategies\bin\Debug\net10.0\strategies.json`. Eso traía tres problemas concretos:
+
+1. **No portable.** En cualquier máquina con otro layout de disco el sistema no arrancaba.
+2. **Genera dos archivos paralelos sin sincronizar.** Existía una copia en `Trading.Strategies\strategies.json` (fuente versionada en git) y una copia en `bin\Debug\net10.0\strategies.json` (la que el código leía efectivamente). El `.csproj` no tenía `<Content CopyToOutputDirectory="..." />`, así que MSBuild no sincronizaba ambas. Como consecuencia, ambas vivían vidas separadas y diferían en contenido (la fuente con `MeanReversion`, el bin con `EmaCrossStrategy`).
+3. **Disonancia silenciosa para herramientas de edición.** Sesiones de agentes (Claude Code) editaban la fuente versionada mientras el backtest cargaba el bin sin actualizar. El bug se manifestaba como "modifiqué el código pero el backtest no cambia", sin error explícito.
+
+El refactor INFRA-1 del Bloque 3 del ROADMAP planificaba resolver esto antes del Hito C, pero el problema afectó dos sesiones de trabajo sobre Hito B y se decidió adelantarlo.
+
+### Decisión
+Tres cambios atómicos, ejecutados en una sola pasada de limpieza:
+
+1. **Path relativo basado en `AppContext.BaseDirectory`.** El `strategiesFilePath` de `TradingAlgorithmHost.cs` pasa de hardcoded a:
+   ```csharp
+   string strategiesFilePath = System.IO.Path.Combine(System.AppContext.BaseDirectory, "strategies.json");
+   ```
+   `AppContext.BaseDirectory` resuelve al directorio donde está el `.exe` en runtime, lo cual coincide con `..\Launcher\bin\Debug\` (definido en `OutputPath` del `.csproj`) en desarrollo y será el directorio del binario desplegado en producción.
+
+2. **`<Content Include="strategies.json" CopyToOutputDirectory="PreserveNewest" />` agregado al `Trading.Strategies.csproj`.** Esto le indica a MSBuild que copie el archivo fuente al directorio de output en cada build (si la fuente es más nueva que el destino). De aquí en adelante el desarrollador edita únicamente la fuente; el bin se sincroniza automáticamente al compilar.
+
+3. **Reconciliación del contenido.** La copia desactualizada de `Trading.Strategies\strategies.json` (la fuente, que tenía `MeanReversion`) fue sobrescrita con el contenido válido del bin (`EmaCrossStrategy` en BTCUSDT 1h con `RiskPerTradePercentage: 2.0`). La copia del bin fue eliminada para que MSBuild la regenere desde la fuente en el próximo build.
+
+### Alternativas consideradas
+- **A: Mantener el path absoluto y aceptar la limitación.** Descartada: causó dos sesiones de trabajo perdidas por confusión sobre qué archivo era la fuente de verdad. El costo de mantenerlo supera el costo de eliminarlo.
+- **B: Usar un archivo de configuración (`appsettings.json` o variable de entorno) para parametrizar el path.** Descartada por sobre-ingeniería para el alcance actual: una variable de entorno requiere infraestructura adicional (`Microsoft.Extensions.Configuration`, validación, default), cuando `AppContext.BaseDirectory` resuelve el caso 100% sin agregar dependencias.
+- **C (elegida): `AppContext.BaseDirectory` + `<Content CopyToOutputDirectory>`.** Mínimo cambio, máxima portabilidad. Patrón estándar de .NET.
+
+### Consecuencias
+- El `strategies.json` ahora se versiona únicamente en `Trading.Strategies\strategies.json`. La copia en `bin\` es un artefacto generado en cada build, no se versiona, no se edita.
+- INFRA-1 del Bloque 3 del ROADMAP queda completado. Se mueve a "Historial completado" con fecha 2026-05-17.
+- El refactor habilita además que cualquier desarrollador clone el repo en otra máquina y el sistema arranque sin tocar paths hardcoded.
+- Deuda implícita resuelta: el JSON que alimenta el sistema ahora vive en una sola ubicación clara y conocida.
+
+---
+
+## ADR-017 — Hito B Pasos 1 y 2: clasificación de regímenes con abstracción agnóstica e integración como guard pre-orden
+**Fecha:** 2026-05-15
+**Estado:** Parcialmente aceptada (Pasos 1 y 2 completados; Paso 3 pendiente)
+
+### Contexto
+El Hito B del ROADMAP introduce clasificación de regímenes de mercado para filtrar señales de las estrategias según condición agregada del mercado (Trend / MeanReverting / HighVolatility / Squeeze). El alcance se dividió en tres pasos progresivos para aislar complejidad numérica (HMM real con Accord) del trabajo de plomería (abstracciones, registry, filtro pre-orden).
+
+Tras analizar el código existente (especialmente `BarProcessingService` y `RiskOrchestrator`), surgió un hallazgo arquitectónico que cambió la decisión original sobre dónde insertar el filtro de régimen.
+
+### Decisión
+El Hito B se ejecuta en tres pasos:
+
+**Paso 1 — Pre-requisitos arquitectónicos del Domain (completado 2026-05-14):**
+- `MarketBar` extendido a OHLCV (`Open`, `High`, `Low`, `Close`, `Volume`). Constructor legado `(InstrumentId, decimal close, DateTime)` mantenido como `[Obsolete]` para retrocompatibilidad temporal.
+- `StrategyDefinition` recibe propiedad `List<string>? CompatibleRegimes` (nullable, `List<T>` concreto por consistencia con `RootConfig.Timeframes` y por compatibilidad con Newtonsoft.Json).
+- `RiskLimitBreachReason` extendido con `RegimeIncompatibility` (queda definido aunque no se emita en este hito; pertenece al vocabulario del dominio).
+- `MarketBarMapper` actualizado para construir `MarketBar` con OHLCV completo desde `TradeBar` de Lean.
+- `StrategyConfigLoader` valida que `CompatibleRegimes`, si está presente, no sea lista vacía (mensaje explicativo: ausencia = compatible con todo, lista vacía = inválido).
+
+**Paso 2 — Abstracción de régimen + filtro pre-orden con classifier fake (completado 2026-05-15):**
+- `RegimeLabel` enum (`Unknown`, `Trend`, `MeanReverting`, `HighVolatility`, `Squeeze`) en `Trading.Domain/Abstractions/Regimes/`.
+- `RegimeLabelParser.Parse(string)` con mensajes de error explícitos. Rechaza `Unknown` como configuración explícita (forzar al usuario a omitir el campo si quiere "todos los regímenes").
+- `RegimeClassification` (record) con `Label`, `Probabilities` (distribución completa, `double` por ser magnitud estadística), `ClassifiedAtUtc`, y constructor estático `UnknownFor` para fail-safe.
+- `IMarketRegimeClassifier` contrato **agnóstico del algoritmo**: ningún método ni propiedad delata HMM, k-means o redes neuronales. Esto habilita NEURAL-1 futuro como adaptador alternativo sin tocar el contrato (open-closed).
+- `MarketRegimeRegistry` en `Trading.Application/Regimes/`: mantiene mapa `InstrumentId → IMarketRegimeClassifier` + cache de última clasificación. Instrumento sin classifier registrado → fail-safe a `Unknown`.
+- `ConfigurableMarketRegimeClassifier`: implementación fake que devuelve siempre una `RegimeLabel` fija. Útil para tests y para validar wiring sin necesidad de modelo entrenado. Rechaza `Unknown` como `fixedLabel` (forzar coherencia).
+- `StrategyRegimeCompatibility`: encapsula la lógica de compatibilidad por estrategia. Tres reglas fail-safe: lista null → compatible con todo; lista vacía → compatible con todo; `RegimeLabel.Unknown` siempre compatible.
+- `BarProcessingService` integra el filtro como **guard `continue`** después del check de `KillSwitchActivated` y `SignalDirection.Flat`, **antes** de los checks de `IsInvested` y `HasOpenOrders`. Recibe dos dependencias nuevas: `MarketRegimeRegistry` e `IReadOnlyDictionary<string, StrategyRegimeCompatibility>`.
+- `TradingAlgorithmHost` construye el registry con `ConfigurableMarketRegimeClassifier(BTCUSDT, Trend)`, parsea `CompatibleRegimes` de cada `StrategyDefinition` a `RegimeLabel`, crea un consolidator 4h dedicado para alimentar al registry (independiente de los consolidators de estrategias), y inyecta todo al `BarProcessingService`.
+
+**Paso 3 — HMM real con Accord.NET + trainer offline (pendiente):**
+- Adaptador `AccordHmmClassifier : IMarketRegimeClassifier` en `Trading.Strategies/Regimes/`.
+- Proyecto standalone `Trading.Strategies/Tools/HmmTrainer` para entrenamiento offline con datos históricos de BTCUSDT perpetual de Binance (ventana 2020-2024, estrictamente anterior al período de backtest 2025-01 a 2026-03).
+- Selección de número de estados por BIC entre K ∈ {2, 3, 4}.
+- `SemanticStateMapper` que mapea estados crudos del HMM a `RegimeLabel` según propiedades estadísticas del cluster.
+- Modelo serializado a JSON commiteado en `models/regime/BTCUSDT-perp-binance.hmm.json`.
+- Reemplazo del fake del Paso 2 por el classifier real en el wiring.
+
+### Hallazgo arquitectónico crítico: el filtro NO va por `RiskOrchestrator`
+En la planificación original se asumió que el filtro de régimen sería un `IRiskMonitor` más, registrado en el array de monitors del `RiskOrchestrator` (aprovechando el open-closed del ADR-015). Al inspeccionar el código real de `BarProcessingService` apareció que el sistema **ya tiene el patrón de guards pre-orden** (`continue` checks) que es exactamente lo que el filtro de régimen necesita:
+
+```csharp
+if (_riskOrchestrator.IsKillSwitchActivated) continue;
+if (signalDirection == SignalDirection.Flat) continue;
+// ← acá va el filtro de régimen, como un guard más
+if (_portfolioState.IsInvested(instrumentId)) continue;
+```
+
+Esta decisión es **conceptualmente más limpia**: un kill switch global por drawdown excesivo es una condición catastrófica que justifica liquidar todo (vía `IRiskAction`). Un régimen incompatible es un filtro pre-orden por contexto, que solo justifica descartar esa señal específica. Forzar el régimen al `IRiskMonitor` habría requerido extender el `RiskOrchestrator` para mapear razones de breach a acciones distintas (`RejectOrderRiskAction` vs `LiquidateAllRiskAction`), agregando complejidad innecesaria.
+
+### Alternativas consideradas
+- **Filtro como `IRiskMonitor` con `RegimeIncompatibilityMonitor`.** Descartada tras inspección del código (ver "Hallazgo arquitectónico crítico"). El patrón existente de guards en `BarProcessingService` es la abstracción correcta.
+- **Filtro como interfaz separada `IOrderValidator`.** Descartada por sobre-ingeniería: el filtro encaja perfectamente como un guard más en el patrón ya establecido, no merece su propia jerarquía de abstracciones.
+- **Régimen como propiedad de cada `IStrategy`.** Descartada: viola separación de responsabilidades; el régimen es propiedad del mercado, no de la estrategia. La estrategia declara con qué regímenes es compatible, el sistema decide.
+- **K-means como algoritmo del Paso 3 (vs HMM).** Descartada: HMM modela transiciones temporales como ciudadano de primera clase (matriz de transición), devuelve distribución probabilística (no solo estado actual), permite criterio formal de selección de número de estados (BIC). Decisión asentada en planificación previa al Paso 3.
+
+### Consecuencias del estado actual
+- El sistema tiene filtro de régimen operativo en código pero **inactivo en producción**: el `strategies.json` del repo no tiene aún el campo `CompatibleRegimes` en la entrada de EmaCrossStrategy. Cuando se agregue (acción inmediata pendiente), el filtro empezará a discriminar.
+- El fake del Paso 2 (`ConfigurableMarketRegimeClassifier` configurado con `Trend`) se reemplazará en el Paso 3 por `AccordHmmClassifier`. Como ambos implementan la misma interfaz, el cambio es una sola línea en el wiring.
+- Tests nuevos: ~30 tests entre `Trading.Domain.Tests/RegimeLabelTests`, `Trading.Domain.Tests/RegimeClassificationTests`, `Trading.Application.Tests/Regimes/*Tests.cs`, y los tests de validación de `CompatibleRegimes` en el loader.
+- Deuda técnica conocida del Paso 2: el `MarketBar` legado constructor `(InstrumentId, decimal close, DateTime)` está marcado `[Obsolete]` pero sigue siendo usado en algunos lugares del proyecto. Se elimina cuando se migren todos los call-sites a OHLCV, idealmente como parte de un cleanup posterior.
+- ADR-017 quedará en estado "Parcialmente aceptada" hasta que el Paso 3 cierre el Hito B. En ese momento se actualiza el estado y se agrega un nuevo ADR documentando las decisiones específicas del HMM (parámetros de entrenamiento, fuente de datos, formato del modelo serializado).
+
+---
+
 ## ADR-016 — Trading Policy escrita y monitor runtime de degradación: simetría a la regla de entrada
 **Fecha:** 2026-05-15
 **Estado:** Aceptada
@@ -46,6 +150,8 @@ OPS-1 va primero y bloquea OPS-2: define los números que OPS-2 va a chequear.
 - El documento `POLICY.md` introduce un nuevo tipo de artefacto al repo (operacional, no código), que se versiona con el mismo rigor que cualquier otro: cualquier cambio a un umbral se commitea con justificación, y se revierte con `git` como cualquier código mal pensado.
 
 ---
+
+## ADR-015 — Separación de IRiskMonitor de IRiskAction (descomposición del KillSwitchManager)
 **Fecha:** 2026-05-13
 **Estado:** Aceptada
 
