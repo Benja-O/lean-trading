@@ -1,4 +1,4 @@
-﻿using QuantConnect;
+using QuantConnect;
 using QuantConnect.Algorithm;
 using QuantConnect.Brokerages;
 using QuantConnect.Data;
@@ -86,7 +86,7 @@ namespace Trading.Strategies
             // Paso 3 reemplazarÃ¡ este fake por AccordHmmClassifier con modelo entrenado offline.
             var btcInstrumentId = new InstrumentId("BTCUSDT");
             var regimeClassifierBtc = new ConfigurableMarketRegimeClassifier(
-                btcInstrumentId, RegimeLabel.HighVolatility, _clock);
+                btcInstrumentId, RegimeLabel.Trend, _clock);
             var regimeRegistry = new MarketRegimeRegistry(
                 new IMarketRegimeClassifier[] { regimeClassifierBtc }, _clock, _logger);
 
