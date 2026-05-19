@@ -91,5 +91,13 @@ namespace Trading.Application.Regimes
             if (instrument == null) throw new ArgumentNullException(nameof(instrument));
             return _classifiers.ContainsKey(instrument);
         }
+
+        /// <summary>
+        /// Devuelve los instrumentos para los cuales hay un classifier registrado.
+        /// Útil para el wiring agnóstico del host: en lugar de hardcodear la lista
+        /// de instrumentos del régimen, el host itera sobre los registrados.
+        /// </summary>
+        public IReadOnlySet<InstrumentId> GetRegisteredInstruments() =>
+            new HashSet<InstrumentId>(_classifiers.Keys);
     }
 }

@@ -18,6 +18,11 @@
 
   <ItemGroup>
     <Compile Remove="pseudo_codigo.cs" />
+    <!-- El proyecto HmmTrainer vive en Tools/HmmTrainer/. Es un .csproj independiente
+         (tool offline) y no debe ser compilado como parte de Trading.Strategies.
+         Sin esta exclusión MSBuild incluiría Program.cs/BicCalculator.cs vía glob. -->
+    <Compile Remove="Tools\**\*.cs" />
+    <None Remove="Tools\**\*.cs" />
   </ItemGroup>
 
   <ItemGroup>
@@ -32,12 +37,27 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- HMM real con Accord.NET para clasificación de régimen (Hito B, Paso 3).
+         Solo Accord.MachineLearning trae las dependencias de Statistics y Math
+         que el HMM continuo necesita. Si Accord no compila en .NET 10 por dependencias
+         deprecated, REPORTAR Y DETENERSE (ver brief). -->
+    <PackageReference Include="Accord.MachineLearning" Version="3.8.0" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Folder Include="Adapters\" />
   </ItemGroup>
 
 
   <ItemGroup>
     <Content Include="strategies.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <!-- Modelos HMM versionados en el repo (Hito B, Paso 3). MSBuild los copia a
+         {OutputPath}/models/regime/ en cada build para que el host los encuentre
+         vía Path.Combine(AppContext.BaseDirectory, "models", "regime", ...). -->
+    <Content Include="..\models\regime\*.hmm.json">
+      <Link>models\regime\%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>

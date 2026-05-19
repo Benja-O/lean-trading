@@ -7,7 +7,10 @@ using QuantConnect.Data.Market;
 using QuantConnect.Orders;
 using QuantConnect.Orders.Fees;
 using QuantConnect.Orders.Slippage;
+using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using Trading.Application.Eventing;
 using Trading.Application.Execution;
 using Trading.Application.Regimes;
@@ -18,21 +21,22 @@ using Trading.Domain.Abstractions.Regimes;
 using Trading.Domain.ValueObjects;
 using Trading.Strategies.Adapters;
 using Trading.Strategies.Infrastructure;
+using Trading.Strategies.Regimes;
 
 namespace Trading.Strategies
 {
     /// <summary>
-    /// Host del sistema. Es el ÃšNICO lugar que extiende QCAlgorithm y compone los adaptadores Lean
+    /// Host del sistema. Es el ÚNICO lugar que extiende QCAlgorithm y compone los adaptadores Lean
     /// con los servicios de Trading.Application.
     ///
     /// Responsabilidades:
-    /// 1. ConfiguraciÃ³n del backtest/live (fechas, cash, brokerage, sÃ­mbolos).
-    /// 2. ConstrucciÃ³n de adaptadores Lean (resolver, portfolio, metadata, router, clock, logger).
-    /// 3. ConstrucciÃ³n de servicios de Application (RiskOrchestrator, Sizer, BarProcessing, OrderLifecycle).
+    /// 1. Configuración del backtest/live (fechas, cash, brokerage, símbolos).
+    /// 2. Construcción de adaptadores Lean (resolver, portfolio, metadata, router, clock, logger).
+    /// 3. Construcción de servicios de Application (RiskOrchestrator, Sizer, BarProcessing, OrderLifecycle).
     /// 4. Wiring de consolidators -> BarProcessingService.
-    /// 5. Routing de OrderEvent -> OrderLifecycleService vÃ­a OrderEventMapper.
+    /// 5. Routing de OrderEvent -> OrderLifecycleService vía OrderEventMapper.
     ///
-    /// La lÃ³gica de negocio NO vive aquÃ­; vive en Trading.Application sin conocer Lean.
+    /// La lógica de negocio NO vive aquí; vive en Trading.Application sin conocer Lean.
     /// </summary>
     public class TradingAlgorithmHost : QCAlgorithm
     {
@@ -70,7 +74,6 @@ namespace Trading.Strategies
 
             // ===== Servicios de Application =====
             var domainEventBus = new DomainEventBus(_logger);
-            // En producciÃ³n no se suscribe nada por ahora; los tests sÃ­ usan suscriptores de captura.
 
             var drawdownMonitor = new DrawdownMonitor(_portfolioState, 0.25m);
             _consecutiveLossesMonitor = new ConsecutiveLossesMonitor(8);
@@ -81,21 +84,11 @@ namespace Trading.Strategies
                 riskAction, coolingOffTracker, _clock, _logger, domainEventBus);
             _positionSizer = new PositionSizer(_portfolioState, _instrumentMetadata, _logger);
 
-            // ===== RÃ©gimen de mercado =====
-            // Paso 2 de Hito B: classifier fake (devuelve siempre Trend) que valida el wiring del filtro.
-            // Paso 3 reemplazarÃ¡ este fake por AccordHmmClassifier con modelo entrenado offline.
-            var btcInstrumentId = new InstrumentId("BTCUSDT");
-            var regimeClassifierBtc = new ConfigurableMarketRegimeClassifier(
-                btcInstrumentId, RegimeLabel.Trend, _clock);
-            var regimeRegistry = new MarketRegimeRegistry(
-                new IMarketRegimeClassifier[] { regimeClassifierBtc }, _clock, _logger);
-
-            // ===== Carga y validaciÃ³n de configuraciÃ³n =====
-            // El loader falla loud si RiskPerTradePercentage no estÃ¡ presente o es invÃ¡lido en cualquier definiciÃ³n.
+            // ===== Carga y validación de configuración =====
             string strategiesFilePath = System.IO.Path.Combine(System.AppContext.BaseDirectory, "strategies.json");
             var rootConfiguration = _strategyConfigurationLoader.Load(strategiesFilePath);
 
-            // ===== ConfiguraciÃ³n del entorno de trading =====
+            // ===== Configuración del entorno de trading =====
             SetStartDate(2025, 1, 1);
             SetEndDate(2026, 3, 31);
             SetAccountCurrency("USDT");
@@ -125,7 +118,30 @@ namespace Trading.Strategies
                 _instrumentResolver.Register(cryptoAsset.Symbol);
             }
 
-            // ===== ConstrucciÃ³n de executors =====
+            // ===== Régimen de mercado (HMM real, Paso 3 del Hito B) =====
+            // Wiring agnóstico al instrumento: extrae dinámicamente del strategies.json los instrumentos
+            // únicos que tienen al menos una estrategia con CompatibleRegimes declarado, y carga el modelo
+            // serializado correspondiente. Si una estrategia depende del régimen pero el modelo no existe,
+            // el sistema falla loud al boot (fail-fast).
+            var instrumentsRequiringRegime = ExtractInstrumentsRequiringRegime(rootConfiguration);
+            var regimeClassifiers = new List<IMarketRegimeClassifier>();
+            foreach (var instrumentId in instrumentsRequiringRegime)
+            {
+                string modelPath = System.IO.Path.Combine(
+                    System.AppContext.BaseDirectory, "models", "regime",
+                    $"{instrumentId.Ticker}-perp-binance.hmm.json");
+                if (!File.Exists(modelPath))
+                {
+                    throw new InvalidOperationException(
+                        $"El instrumento {instrumentId.Ticker} tiene estrategias con CompatibleRegimes declarado " +
+                        $"pero no existe el modelo entrenado en '{modelPath}'. " +
+                        "Ejecutá HmmTrainer para generarlo.");
+                }
+                regimeClassifiers.Add(AccordHmmClassifierFactory.Load(modelPath));
+            }
+            var regimeRegistry = new MarketRegimeRegistry(regimeClassifiers, _clock, _logger);
+
+            // ===== Construcción de executors =====
             var strategyCompatibilities = new Dictionary<string, StrategyRegimeCompatibility>();
 
             foreach (var timeframeNode in rootConfiguration.Timeframes)
@@ -149,8 +165,6 @@ namespace Trading.Strategies
                     {
                         var strategy = StrategyFactory.Create(strategyDefinition.StrategyName);
 
-                        // Defensa en profundidad: el loader ya validÃ³ que .RiskPerTradePercentage tiene valor.
-                        // Acceder con .Value acÃ¡ es seguro y mantiene la polÃ­tica fail-loud si algo se rompe arriba.
                         var riskParameters = RiskParameters.FromPercentages(
                             stopLossPercentage: strategyDefinition.StopLossPercentage,
                             takeProfitPercentage: strategyDefinition.TakeProfitPercentage,
@@ -161,7 +175,6 @@ namespace Trading.Strategies
                         _strategyExecutors.Add(strategyExecutor);
                         localStrategyExecutors.Add(strategyExecutor);
 
-                        // Parseo de CompatibleRegimes (strings del JSON) a RegimeLabel y registro.
                         IReadOnlySet<RegimeLabel> allowedRegimes = null;
                         if (strategyDefinition.CompatibleRegimes != null)
                         {
@@ -175,8 +188,8 @@ namespace Trading.Strategies
                                 catch (ArgumentException parseException)
                                 {
                                     throw new InvalidOperationException(
-                                        $"Estrategia '{strategyExecutor.ExecutorIdentifier}' (timeframe {timeframe}, sÃ­mbolo {symbolTicker}): " +
-                                        $"valor invÃ¡lido en CompatibleRegimes. {parseException.Message}", parseException);
+                                        $"Estrategia '{strategyExecutor.ExecutorIdentifier}' (timeframe {timeframe}, símbolo {symbolTicker}): " +
+                                        $"valor inválido en CompatibleRegimes. {parseException.Message}", parseException);
                                 }
                             }
                             allowedRegimes = parsedLabels;
@@ -197,19 +210,17 @@ namespace Trading.Strategies
                 }
             }
 
-            // ===== Consolidator dedicado para el rÃ©gimen de mercado (4h) =====
+            // ===== Consolidator dedicado para el régimen de mercado (4h) =====
             // Independiente de los consolidators de estrategias. Alimenta al MarketRegimeRegistry.
-            // Hardcodeado a 4h en este paso; futuras iteraciones pueden parametrizar el timeframe por instrumento.
-            foreach (var regimeInstrumentId in new[] { btcInstrumentId })
+            // El HMM real necesita procesar barras DURANTE el warm-up de QC para calentar su buffer
+            // interno (100 barras 4h), por eso NO chequeamos IsWarmingUp dentro del handler.
+            foreach (var regimeInstrumentId in regimeRegistry.GetRegisteredInstruments())
             {
-                if (!regimeRegistry.HasClassifier(regimeInstrumentId)) continue;
-
                 var regimeSymbol = _instrumentResolver.Resolve(regimeInstrumentId);
                 var regimeConsolidator = new TradeBarConsolidator(TimeSpan.FromHours(4));
 
                 regimeConsolidator.DataConsolidated += (sender, tradeBarData) =>
                 {
-                    if (IsWarmingUp) return;
                     var marketBar = MarketBarMapper.ToMarketBar((TradeBar)tradeBarData, _instrumentResolver);
                     regimeRegistry.ClassifyBar(marketBar);
                 };
@@ -226,7 +237,9 @@ namespace Trading.Strategies
             _orderLifecycleService = new OrderLifecycleService(
                 _strategyExecutors, _consecutiveLossesMonitor, _orderRouter, _priceRounder, _logger, domainEventBus, _clock);
 
-            SetWarmUp(TimeSpan.FromDays(1));
+            // 20 días de calendario cubren las 100 barras 4h de warm-up del HMM con margen
+            // (17 días serían el mínimo estricto: 100 · 4h = 16.67 días).
+            SetWarmUp(TimeSpan.FromDays(20));
         }
 
         public override void OnData(Slice data)
@@ -243,6 +256,24 @@ namespace Trading.Strategies
                 orderEvent, this, _instrumentResolver, _orderRegistry, _logger);
             if (lifecycleEvent == null) return;
             _orderLifecycleService.Handle(lifecycleEvent);
+        }
+
+        private static IReadOnlySet<InstrumentId> ExtractInstrumentsRequiringRegime(
+            Trading.Domain.Models.RootConfig rootConfiguration)
+        {
+            var instruments = new HashSet<InstrumentId>();
+            foreach (var timeframeNode in rootConfiguration.Timeframes)
+            {
+                foreach (var strategyDefinition in timeframeNode.Value.Strategies)
+                {
+                    if (strategyDefinition.CompatibleRegimes != null &&
+                        strategyDefinition.CompatibleRegimes.Count > 0)
+                    {
+                        instruments.Add(new InstrumentId(strategyDefinition.Symbol));
+                    }
+                }
+            }
+            return instruments;
         }
     }
 }

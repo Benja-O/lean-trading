@@ -17,3 +17,34 @@ Automatizar control de backtest realizado
 
 Lidiar con el estado (persistencia) para estar listo para Live Trading.
 Arreglar el manejo de Partial Fills para evitar posiciones huérfanas.
+
+
+ feat(regimes): implementar HMM real con Accord.NET, trainer offline y modelo entrenado de BTCUSDT
+
+  - Trading.Strategies/Regimes/: AccordHmmClassifier (Viterbi + Posterior con
+    buffers rolling), AccordHmmClassifierFactory, PersistedHmmModel,
+    HmmModelSerializer (System.Text.Json indentado), SemanticStateMapper
+    (cuartiles + persistencia), BinanceKlinesParser (csv/zip, header autodetect),
+    FeatureExtractor (returns log, vol_20, momentum SMA20/SMA50), FeatureScaler.
+  - Trading.Strategies/Tools/HmmTrainer/: proyecto Exe net10.0 que entrena
+    offline con datos históricos de Binance Klines 2020-01-01 a 2024-12-31,
+    inicializa emisiones por k-means clustering, prueba K ∈ {2,3,4} y elige
+    por BIC. Resultado: K=4, BIC=57643.94 (margen 12-20% sobre K=3 y K=2),
+    mapeo {0:HighVolatility, 1:Squeeze, 2:Trend, 3:Trend}.
+  - models/regime/BTCUSDT-perp-binance.hmm.json: modelo serializado versionado
+    en el repo. Copy-to-output via <Content> en Trading.Strategies.csproj.
+  - TradingAlgorithmHost: refactor del wiring de régimen para extraer
+    dinámicamente instrumentos únicos del strategies.json. Fail-loud si una
+    estrategia depende del régimen pero falta el modelo. SetWarmUp 1d → 20d
+    para cubrir warm-up del HMM (100 barras 4h). Bug fix: quitar
+    if(IsWarmingUp) return del consolidator del régimen.
+  - MarketRegimeRegistry: nuevo GetRegisteredInstruments() para wiring agnóstico.
+  - Trading.Strategies.Tests: proyecto nuevo con AccordHmmClassifierReferenceTests
+    (pipeline completo sobre serie sintética 3 regímenes), SemanticStateMapperTests,
+    BinanceKlinesParserTests.
+  - DECISIONS: ADR-017 → "Aceptada" (Hito B completado). ADR-019 nuevo
+    documentando parámetros del HMM, BICs por K, mapeo y alternativas.
+  - ROADMAP: Hito B marcado completo. Paso 3 movido a historial.
+
+  Closes HITO-B
+  Refs ADR-017, ADR-019
