@@ -11,6 +11,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
 using Trading.Application.Eventing;
 using Trading.Application.Execution;
 using Trading.Application.Health;
@@ -58,6 +59,8 @@ namespace Trading.Strategies
         private HealthHeartbeatTracker _healthHeartbeatTracker;
         private HeartbeatFileWriter _heartbeatFileWriter;
         private System.Threading.Timer _heartbeatFlushTimer;
+        private HttpClient _httpClient;
+        private HealthchecksIoPinger _healthchecksPinger;
 
         // Servicios de Application
         private OrderRegistry _orderRegistry;
@@ -87,6 +90,9 @@ namespace Trading.Strategies
             // Heartbeat: suscripto a eventos de dominio antes de que se emitan
             _healthHeartbeatTracker = new HealthHeartbeatTracker(domainEventBus, _clock, _logger);
             _heartbeatFileWriter = new HeartbeatFileWriter(_healthHeartbeatTracker, _clock, _logger);
+            var pingUrl = Environment.GetEnvironmentVariable("HEALTHCHECKS_PING_URL");
+            _httpClient = new HttpClient();
+            _healthchecksPinger = new HealthchecksIoPinger(pingUrl, _httpClient, _clock, _logger);
 
             var drawdownMonitor = new DrawdownMonitor(_portfolioState, 0.25m);
             _consecutiveLossesMonitor = new ConsecutiveLossesMonitor(8);
@@ -273,6 +279,9 @@ namespace Trading.Strategies
                         try
                         {
                             _heartbeatFileWriter.Flush();
+                            // fire-and-forget deliberado: el callback del Timer es síncrono;
+                            // el pinger garantiza no propagar excepciones.
+                            _ = _healthchecksPinger.PingAsync(System.Threading.CancellationToken.None);
                         }
                         catch (System.Exception ex)
                         {
@@ -329,6 +338,7 @@ namespace Trading.Strategies
             }
 
             _structuredLogSink?.Dispose();
+            _httpClient?.Dispose();
         }
 
         private static IReadOnlySet<InstrumentId> ExtractInstrumentsRequiringRegime(
