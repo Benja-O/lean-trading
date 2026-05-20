@@ -13,6 +13,7 @@ using System.IO;
 using System.Linq;
 using Trading.Application.Eventing;
 using Trading.Application.Execution;
+using Trading.Application.Health;
 using Trading.Application.Regimes;
 using Trading.Application.Risk;
 using Trading.Application.Sizing;
@@ -52,6 +53,12 @@ namespace Trading.Strategies
         private ITradingLogger _logger;
         private IPriceRounder _priceRounder;
 
+        // Observabilidad
+        private JsonlFileLogSink _structuredLogSink;
+        private HealthHeartbeatTracker _healthHeartbeatTracker;
+        private HeartbeatFileWriter _heartbeatFileWriter;
+        private System.Threading.Timer _heartbeatFlushTimer;
+
         // Servicios de Application
         private OrderRegistry _orderRegistry;
         private RiskOrchestrator _riskOrchestrator;
@@ -69,11 +76,17 @@ namespace Trading.Strategies
             _orderRegistry = new OrderRegistry();
             _orderRouter = new LeanOrderRouter(this, _instrumentResolver, _orderRegistry);
             _clock = new LeanClock(this);
-            _logger = new LeanLogger(this);
+            // logs/trading-{fecha}.jsonl relativo al directorio de salida, retención 30 días
+            _structuredLogSink = new JsonlFileLogSink(_clock);
+            _logger = new LeanLogger(this, _structuredLogSink);
             _priceRounder = new PriceRounder(_instrumentMetadata);
 
             // ===== Servicios de Application =====
             var domainEventBus = new DomainEventBus(_logger);
+
+            // Heartbeat: suscripto a eventos de dominio antes de que se emitan
+            _healthHeartbeatTracker = new HealthHeartbeatTracker(domainEventBus, _clock, _logger);
+            _heartbeatFileWriter = new HeartbeatFileWriter(_healthHeartbeatTracker, _clock, _logger);
 
             var drawdownMonitor = new DrawdownMonitor(_portfolioState, 0.25m);
             _consecutiveLossesMonitor = new ConsecutiveLossesMonitor(8);
@@ -237,6 +250,53 @@ namespace Trading.Strategies
             _orderLifecycleService = new OrderLifecycleService(
                 _strategyExecutors, _consecutiveLossesMonitor, _orderRouter, _priceRounder, _logger, domainEventBus, _clock);
 
+            // Flush inicial: deja el heartbeat.json creado con el estado al boot.
+            // Se ejecuta tanto en backtest como en live.
+            _heartbeatFileWriter.Flush();
+
+            // Timer de wall clock para el flush periódico. Solo activo en live:
+            // en backtest el heartbeat no tiene consumidor (Healthchecks.io alertaría
+            // con 15 meses de "silencio" en cuestión de microsegundos del wall clock).
+            //
+            // Se usa System.Threading.Timer en lugar de Schedule.On porque:
+            // 1) Schedule.On corre al ritmo del clock simulado del backtest (~650k disparos
+            //    en 15 meses), no al ritmo del wall clock real que necesita el dead-man's switch.
+            // 2) El heartbeat es observabilidad pasiva, no participa del flujo de trading,
+            //    por lo que no requiere el determinismo del scheduler de QC.
+            // 3) Trading.Strategies es el adaptador autorizado a usar primitivas de timing
+            //    crudas; la regla del AI.md de "timers vía ITimer" aplica a Trading.Application.
+            if (LiveMode)
+            {
+                _heartbeatFlushTimer = new System.Threading.Timer(
+                    callback: _ =>
+                    {
+                        try
+                        {
+                            _heartbeatFileWriter.Flush();
+                        }
+                        catch (System.Exception ex)
+                        {
+                            // Defensa en profundidad: el writer ya garantiza no propagar,
+                            // pero en thread de Timer una excepción no manejada terminaría
+                            // el proceso. Loggear y continuar.
+                            _logger.Warning(
+                                "Heartbeat flush timer falló: {ExceptionType} {Message}",
+                                ex.GetType().Name, ex.Message);
+                        }
+                    },
+                    state: null,
+                    dueTime: System.TimeSpan.FromSeconds(60),
+                    period: System.TimeSpan.FromSeconds(60));
+
+                _logger.Info("Heartbeat flush timer iniciado (cadencia: 60s wall clock).");
+            }
+            else
+            {
+                _logger.Info(
+                    "Heartbeat flush timer deshabilitado (modo backtest). " +
+                    "El archivo heartbeat.json refleja el estado al boot.");
+            }
+
             // 20 días de calendario cubren las 100 barras 4h de warm-up del HMM con margen
             // (17 días serían el mínimo estricto: 100 · 4h = 16.67 días).
             SetWarmUp(TimeSpan.FromDays(20));
@@ -256,6 +316,19 @@ namespace Trading.Strategies
                 orderEvent, this, _instrumentResolver, _orderRegistry, _logger);
             if (lifecycleEvent == null) return;
             _orderLifecycleService.Handle(lifecycleEvent);
+        }
+
+        public override void OnEndOfAlgorithm()
+        {
+            base.OnEndOfAlgorithm();
+
+            if (_heartbeatFlushTimer != null)
+            {
+                _heartbeatFlushTimer.Dispose();
+                _heartbeatFlushTimer = null;
+            }
+
+            _structuredLogSink?.Dispose();
         }
 
         private static IReadOnlySet<InstrumentId> ExtractInstrumentsRequiringRegime(

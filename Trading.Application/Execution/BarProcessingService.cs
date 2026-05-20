@@ -79,6 +79,9 @@ namespace Trading.Application.Execution
                             StopPrice: null,
                             ClientTag: string.Empty));
 
+                        _eventBus.Publish(new BarProcessedEvent(
+                            _clock.UtcNow, marketBar.TimestampUtc, instrumentId));
+
                         continue;
                     }
                 }
@@ -146,6 +149,9 @@ namespace Trading.Application.Execution
                     LimitPrice: null,
                     StopPrice: null,
                     ClientTag: string.Empty));
+
+                _eventBus.Publish(new BarProcessedEvent(
+                    _clock.UtcNow, marketBar.TimestampUtc, instrumentId));
             }
         }
     }
