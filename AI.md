@@ -91,6 +91,20 @@ Todo brief generado para Claude Code debe contener, en este orden:
 - **División en piezas:** trabajos grandes (varios commits naturales) se dividen en piezas A, B, C, etc., con detención obligatoria entre ellas. Trabajos chicos (un refactor de un archivo, una corrección puntual de tests, una actualización de documentación) pueden resolverse directamente en conversación con el asistente principal, sin generar archivo de brief.
 - **Versionado del brief:** los archivos de brief NO se commitean al repositorio del proyecto principal. Son artefactos de planificación efímeros, no parte del histórico de código. El histórico vive en el commit message + ADRs en `DECISIONS.md`.
 
+### Entrega de archivos `.md` modificados
+
+Cuando un cambio implique modificar `AI.md`, `ROADMAP.md`, `DECISIONS.md` o cualquier otro `.md` versionado del proyecto, el asistente principal **siempre entrega el archivo completo modificado, listo para descargar**. Nunca entrega solo el diff, el bloque suelto a copiar, ni instrucciones del tipo "pegá esto al final de tal sección".
+
+**Razón:** los `.md` del proyecto son la única fuente de verdad de las reglas, decisiones y estado del proyecto. Reconstruir manualmente las modificaciones desde diffs introduce riesgo de error humano (sección pegada en lugar incorrecto, indentación de Markdown rota, anclas o tablas corrompidas) y fricción innecesaria. El operador descarga el archivo modificado, lo revisa con su herramienta de diff preferida si quiere, y lo coloca en el repositorio en un solo paso atómico.
+
+**Procedimiento del asistente:**
+1. Leer el archivo actual completo desde la ubicación que el operador indique (típicamente `/mnt/project/` o adjunto en el chat).
+2. Aplicar las modificaciones con herramientas de edición precisas (`str_replace` o equivalente), no regenerando el archivo desde cero.
+3. Verificar el delta del cambio con `diff` o `wc -l` para garantizar que el resto del archivo no se alteró por accidente.
+4. Entregar el archivo resultante vía `present_files` (o equivalente) para que el operador lo descargue.
+
+Esta regla aplica incluso a cambios pequeños (una línea agregada en una tabla, un ADR nuevo al final): se entrega el archivo completo, siempre.
+
 ## 🏛️ Filosofía General y Arquitectura
 Este proyecto sigue estrictamente los principios de **Clean Architecture** y **Domain-Driven Design (DDD)**. Está diseñado para aislar la lógica de negocio del motor de trading subyacente (QuantConnect/Lean).
 
@@ -199,6 +213,31 @@ Este proyecto sigue estrictamente los principios de **Clean Architecture** y **D
 3. **Structured logging:** siempre con placeholders y propiedades nombradas. `_logger.LogInformation("Order {OrderId} filled at {Price}", orderId, fillPrice);` — nunca interpolación de strings.
 4. **Correlation:** toda orden lleva un `OrderId` opaco que se propaga en todos los logs y eventos asociados a su ciclo de vida.
 5. **Eventos de dominio:** para auditoría regulatoria, las transiciones críticas (`OrderSubmitted`, `OrderFilled`, `RiskLimitBreached`) emiten eventos de dominio inmutables que se persisten para reconstrucción posterior.
+
+6. **Persistencia y observabilidad (post-INFRA-2):**
+   - Cada llamada a `ITradingLogger` se persiste como línea JSONL en `logs/trading-{wall-clock-date}.jsonl` con rotación diaria por wall clock real y retención de 30 días. Este sink corre en paralelo al sink de consola de Lean, sin cambiar las firmas de `ITradingLogger`. El campo `timestamp` dentro de cada evento JSON usa el clock del sistema (simulado en backtest, real en live), pero la rotación y retención usan **wall clock real** (`DateTime.UtcNow`) para evitar comportamientos absurdos en backtest (cientos de rotaciones espurias que eliminan los propios logs del run).
+   - El estado de salud del sistema se mantiene en `HealthHeartbeatTracker` (suscripto a eventos de dominio) y se flushea atómicamente cada 60 segundos de **wall clock real** a `health/heartbeat.json`. Solo activo en `LiveMode`; en backtest queda congelado al estado del boot.
+   - Existe además un dead-man's switch externo vía Healthchecks.io: ping HTTP cada 5 minutos a una URL configurable. Si el ping no llega en 15 minutos, alerta a Telegram. Detalles operativos en ADR-021.
+
+7. **Criterio arquitectónico — `IClock` vs wall clock real:**
+   - Componentes del **flujo determinista de trading** (en `Trading.Domain` y `Trading.Application`): siempre `IClock`. Es lo que hace reproducible el backtest.
+   - Componentes de **observabilidad y housekeeping de I/O** en `Trading.Strategies` (rotación de archivos de log, timers de heartbeat, pings externos, retención): usan **wall clock real** (`DateTime.UtcNow` directo, o `System.Threading.Timer` cuando corresponda). El housekeeping no participa del determinismo del backtest y debe operar en tiempo real.
+   - Esta distinción es la que diferencia comportamiento sensato en backtest vs. comportamiento que dispara cientos de operaciones espurias por minuto simulado. Aprendizaje registrado en ADR-021.
+
+## 🔐 Variables de Entorno
+
+Configuración operativa que NO se commitea al repositorio. Lectura vía `Environment.GetEnvironmentVariable(...)` en `TradingAlgorithmHost.Initialize()` o en componentes específicos de `Trading.Strategies`. Documentar acá toda variable nueva al momento de introducirla.
+
+| Variable | Obligatoria | Default si ausente | Formato esperado | Componente |
+|---|---|---|---|---|
+| `HEALTHCHECKS_PING_URL` | No | Ping deshabilitado, loguea Warning una sola vez al arranque | `https://hc-ping.com/{UUID}` o `https://healthchecks.io/{UUID}` | `HealthchecksIoPinger` |
+
+**Reglas operativas:**
+
+- Las variables de entorno **NO se commitean** al repositorio bajo ningún concepto. Contienen secretos operativos o configuración por ambiente.
+- Si una variable es opcional y no está definida, el componente debe hacer **graceful degradation**: loguear Warning una sola vez al arranque y operar en modo no-op. Nunca romper el arranque del sistema.
+- Si una variable es obligatoria y no está definida, el componente debe fallar fast con excepción descriptiva al boot. Hoy no hay variables obligatorias.
+- Cuando se introduzca una variable nueva, agregar fila a la tabla arriba en el mismo refactor que la introduce.
 
 ## 🧪 Testing
 

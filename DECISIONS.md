@@ -10,6 +10,98 @@
 
 ---
 
+## ADR-021 — Monitoreo básico para paper trading: JSONL local + heartbeat + Healthchecks.io
+**Fecha:** 2026-05-20
+**Estado:** Aceptada
+
+### Contexto
+El sistema termina los backtests con logs en consola de Lean que no persisten, sin alertas externas, y sin forma de reconstruir eventos pasados. Para operar paper trading (Hito C) y live (Hito D) se necesita cubrir tres ejes operativos distintos que el término "monitoreo" agrupa imprecisamente:
+
+1. **Liveness:** detectar si el proceso murió. Sin esto, posiciones abiertas quedan sin gestión activa por un tiempo indefinido (sin trailing stop reactivo, sin cierre por régimen incompatible, sin kill switch activo).
+2. **Patologías silenciosas:** el proceso puede estar vivo pero sin recibir datos, sin generar señales, o con kill switch activo sin notificación. Estos son los bugs operativos más caros porque no producen excepciones, producen silencio.
+3. **Persistencia de evidencia:** reconstruir qué pasó N días atrás cuando los logs de consola ya no están. Hace falta logs estructurados, persistentes, con timestamp y nivel, parseables y sobrevivientes al ciclo de vida del proceso.
+
+Los tres ejes no se cubren con una sola herramienta. INFRA-2 los cubre con tres piezas mínimas, complementarias entre sí.
+
+### Decisión
+Tres piezas implementadas en orden estricto A → B → C, cada una commit-eable de forma independiente:
+
+**A — Persistencia de logs estructurados (JSONL):**
+- Nueva interfaz `IStructuredLogSink` en `Trading.Domain.Abstractions` (contrato) y nuevo enum `LogLevel` (espejo de los 5 niveles de `ITradingLogger`, cero dependencias externas en Domain).
+- Implementación `JsonlFileLogSink` en `Trading.Strategies.Adapters`: una línea JSON por evento en `logs/trading-{wall-clock-date}.jsonl`.
+- Helper estático `LogTemplateRenderer` extrae la lógica de parseo de placeholders nombrados que estaba embebida en `LeanLogger`.
+- `LeanLogger` recibe el sink por constructor e invoca al sink en paralelo al `QCAlgorithm.Log/Debug/Error`, sin cambiar firmas públicas de `ITradingLogger`.
+- **Rotación y retención usan wall clock real (`DateTime.UtcNow.Date`)**, no `_clock.UtcNow`. Razón: `IClock` devuelve el clock simulado del backtest, que avanza día a día y dispararía cientos de rotaciones espurias eliminando los propios logs del run en curso.
+- **El campo `timestamp` dentro de cada evento JSON sí usa `_clock.UtcNow`**, para correlacionar con órdenes y barras del backtest.
+- Retención de 30 días de wall clock real, configurable por constructor.
+- Thread-safe (lock interno), traga excepciones de I/O para no romper trading.
+
+**B — Heartbeat local:**
+- Nuevo evento `BarProcessedEvent` (emitido por `BarProcessingService` solo en el camino exitoso, no en early-returns por skip de régimen, sizing fallido, etc.).
+- `HealthHeartbeatTracker` en `Trading.Application.Health` suscripto a `BarProcessedEvent`, `OrderSubmittedEvent`, `OrderFilledEvent`, `RiskLimitBreachedEvent`. Estado in-memory con lock. Snapshot inmutable vía `HealthSnapshot` record.
+- `HeartbeatFileWriter` en `Trading.Strategies.Adapters`: serializa snapshot a `health/heartbeat.json` con escritura atómica (`.tmp` + `File.Move` overwrite).
+- Flush periódico vía `System.Threading.Timer` cada 60s de **wall clock real**, **solo en `LiveMode`**. En backtest, solo flush inicial al término de `Initialize()`; el archivo queda congelado durante el backtest.
+- Razón del `LiveMode` guard: en backtest `Schedule.On(TimeRules.Every(60s))` se dispara al ritmo del clock simulado (~650k veces en un backtest de 15 meses), llevando el tiempo de ejecución de 1 minuto a 20+. El heartbeat es observabilidad pasiva, no participa del flujo de trading.
+- Razón de usar `System.Threading.Timer` en lugar de `Schedule.On` incluso en live: el heartbeat opera en wall clock real porque su consumidor externo (Healthchecks.io) opera en wall clock. `Trading.Strategies` es el adaptador autorizado a usar primitivas de timing crudas.
+
+**C — Ping externo a Healthchecks.io:**
+- `HealthchecksIoPinger` en `Trading.Strategies.Adapters` hace HTTP GET a una URL configurable.
+- URL vía variable de entorno `HEALTHCHECKS_PING_URL`. Si no está o formato inválido (no matchea `^https://(hc-ping\.com|healthchecks\.io)/.+`): modo no-op con Warning una sola vez al arranque (graceful degradation, nunca rompe arranque).
+- Throttle interno de 5 minutos entre pings (el callback del timer del heartbeat también dispara el ping, pero el pinger solo pega al HTTP real cada 5min).
+- Healthchecks.io configurado con período 5min y grace 15min: si el ping no llega en 15min, alerta a Telegram.
+- `HttpClient` long-lived (un único cliente para todo el run, sin `IHttpClientFactory` — sobre-ingeniería), dispose en `OnEndOfAlgorithm`.
+- Nunca propaga excepciones al caller (un ping fallido no puede romper trading): errores de red, timeouts y status no-2xx loguean Warning y retornan ok.
+
+### Alternativas consideradas
+
+- **Seq / Datadog / Loki (logs centralizados):** sobre-ingeniería para una máquina única, infra adicional, costo recurrente. Descartado. Reconsiderar si el sistema crece a múltiples nodos en cloud.
+- **Uptime Kuma (alternativa self-hosted a Healthchecks.io):** requiere hostear el monitor en la misma máquina que se quiere monitorear, lo cual derrota el propósito del dead-man's switch (si la máquina muere, también muere el monitor). Descartado.
+- **Pingdom / UptimeRobot:** chequean URLs públicas (HTTP GET desde afuera hacia una URL hosteada por nosotros), no esperan pings entrantes; menos orientados al patrón "dead-man's switch". Descartado.
+- **Métricas con Prometheus + Grafana / dashboard visual:** sobre-ingeniería para una sola estrategia en una sola máquina. Las métricas de performance del trading (P&L, drawdown rolling, Sharpe) son responsabilidad de OPS-2, no INFRA-2.
+- **Posponer todo al Bloque 4:** descartado, son la mínima precondición operativa razonable para paper trading. Sin INFRA-2 no hay forma de detectar caídas ni de hacer post-mortem.
+- **Dashboard de métricas operativas dentro de INFRA-2:** descartado por scope creep. Inspección vía `jq` o `Select-String` sobre el JSONL es suficiente para una máquina.
+
+### Consecuencias
+
+**Positivas:**
+- Observabilidad local completa (JSONL + heartbeat) sin dependencias externas.
+- Alerta externa de caída total vía Healthchecks.io + Telegram.
+- Inspección post-mortem con `jq` o `Select-String` desde la línea de comandos.
+- Cero impacto sobre métricas del backtest (verificado: 225 órdenes idénticas pre/post-INFRA-2).
+- Tiempo de ejecución del backtest restaurado a baseline (~100 segundos) tras los fixes.
+
+**Neutras / aceptadas como deuda:**
+- No hay dashboard visual de métricas operativas. Aceptable para una sola estrategia en una sola máquina.
+- Variable `HEALTHCHECKS_PING_URL` requerida en ambiente de producción; si no está, el ping queda deshabilitado con Warning visible (no rompe arranque).
+- Las métricas de performance del trading (P&L, drawdown rolling, etc.) NO están cubiertas; corresponden a OPS-2.
+
+**Negativas reveladas durante la implementación, documentadas como deuda en ROADMAP:**
+- **DEUDA-2:** `TradingAlgorithmHost.Initialize()` se ejecuta dos veces en backtest. Doble suscripción al bus, doble instanciación de adaptadores. Sin impacto funcional sobre métricas. Fix pendiente: guard de idempotencia. Validar si afecta también a live.
+- **DEUDA-3:** logs durante `Initialize()` tienen timestamp del epoch de QC (`1997-12-31T19:00:00`). Problema cosmético. No afecta paper/live (sin `SetStartDate`).
+
+### Fixes correctivos durante la implementación (todos por el mismo error de fondo)
+
+Durante INFRA-2 se aplicaron tres fixes correctivos antes del cierre, todos por **confundir `IClock` con wall clock real en componentes de housekeeping**:
+
+1. **Timer del heartbeat (Pieza B fix):** el `Schedule.On(TimeRules.Every(60s))` original se disparaba al ritmo del clock simulado del backtest, llevando el tiempo de ejecución de 1min a 20+. Reemplazado por `System.Threading.Timer` envuelto en `if (LiveMode)`.
+
+2. **Rotación y retención del JSONL (Pieza A fix):** usaban `_clock.UtcNow.Date` y eliminaban los propios logs del run en cada cambio de día simulado. Reemplazado por `DateTime.UtcNow.Date` para esas dos operaciones específicas, manteniendo `_clock.UtcNow` para el campo `timestamp` de cada evento.
+
+3. **Tests `Write_*` del sink (Pieza A tests fix):** fallaban con `IOException` al intentar leer el archivo mientras el sink lo tenía abierto en modo escritura. Antes del fix de rotación, cada test usaba `FakeClock` distinto y escribía a archivos distintos, evitando el conflicto. Tras el fix de rotación, todos los tests escriben al mismo archivo de wall clock real. Corregidos adoptando patrón `using` con disposición del sink antes de la lectura.
+
+### Aprendizaje arquitectónico (incorporado a AI.md)
+
+Surgió un criterio que vale la pena explicitar para componentes futuros: **observabilidad y housekeeping de I/O en `Trading.Strategies` deben operar en wall clock real**, no en `IClock`. El `IClock` está pensado para componentes del flujo determinista de trading (Application + Domain). Confundir esto fue la causa raíz de los tres fixes durante INFRA-2. Patrón a evaluar en futuros adapters de observabilidad: si el componente no influye en señales / órdenes / risk, y su consumidor es externo (un servicio de monitoreo, un archivo de log que se inspecciona post-mortem), debe usar wall clock real.
+
+### Validaciones pendientes en Hito C
+
+Al arrancar paper trading (Hito C), confirmar:
+
+1. **`heartbeat.json` se actualiza cada 60s de wall clock real** (no queda congelado como en backtest). Inspección: `Get-FileHash` repetido sobre el archivo cada minuto debe dar hashes distintos.
+2. **Pings llegan al dashboard de Healthchecks.io.** Visible en el panel del check.
+3. **La alerta de Telegram dispara cuando el proceso muere.** Test deliberado: matar el proceso, esperar 15min, confirmar mensaje en Telegram.
+4. **Validar si DEUDA-2 (`Initialize()` doble) aplica también a live.** Si el JSONL en live muestra cada Warning/Info del arranque una sola vez, la deuda es solo de backtest y puede dejarse a más largo plazo.
+
 ---
 
 ## ADR-020 — Test de referencia AccordHmmClassifierReferenceTests skipeado por convergencia degenerada con datos sintéticos
