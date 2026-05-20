@@ -10,6 +10,90 @@
 
 ---
 
+## ADR-022 — POLICY.md: dos niveles de semáforo, calibración absoluta, liquidación inmediata, reactivación con análisis escrito
+**Fecha:** 2026-05-21
+**Estado:** Aceptada
+
+### Contexto
+El sistema entra al Bloque 3 (precondiciones para paper trading) con infraestructura de monitoreo completa (INFRA-2: JSONL, heartbeat, ping externo) pero sin reglas operativas escritas que codifiquen cuándo una estrategia o el sistema completo pierden el derecho de operar. Hoy las reglas operativas están: (a) en la cabeza del operador, (b) en comentarios sueltos en código, (c) hardcodeadas en umbrales del `DrawdownMonitor` y `ConsecutiveLossesMonitor`. Funciona mientras hay una sola estrategia, un solo operador y un solo régimen de mercado. Se rompe en tres escenarios que ocurren en Hito C y D:
+
+1. Una estrategia se degrada en vivo y la decisión "¿apago o aguanto?" se negocia con uno mismo en caliente, justo cuando peor se razona.
+2. Algo raro pasa en live (slippage anómalo, latencia, fill que no llega) y sin policy cada anomalía es una decisión nueva.
+3. En 6 meses el operador (u otra persona) necesita entender por qué el sistema tiene derecho a operar capital. Sin documento escrito, no hay respuesta consultable.
+
+OPS-1 produce `POLICY.md` para resolver esto. Cuatro decisiones operativas no triviales se cerraron durante el diseño del documento y se registran acá.
+
+### Decisión
+
+**D1 — Dos niveles de semáforo (OK / Apagar), no tres (Verde / Amarillo / Negro).**
+
+POLICY define que cada estrategia está en uno de dos estados: operando dentro de banda, o apagada. Cuando cruza cualquiera de los umbrales U1-U4 definidos en POLICY sección 3, se apaga. Sin escalón intermedio de "reducir tamaño en lugar de apagar."
+
+**D2 — Calibración absoluta de umbrales, no derivada del backtest existente.**
+
+Los umbrales U1-U4 (DD absoluto desde ATH > 25%, DD rolling 30 días > 15% sostenido 5 días, PF rolling < 1.0 sostenido 10 trades, expectancy rolling < 0 sostenido 10 trades) son **números absolutos** que reflejan el mandato de riesgo del operador, no fracciones del max DD o del Sharpe del backtest actual. Recalibración planificada para post-Hito G (cuando exista walk-forward analysis con base estadística).
+
+**D3 — Liquidación inmediata al disparar umbral, no pause-only.**
+
+Cuando se dispara un umbral de estrategia, la posición abierta de esa estrategia se liquida inmediatamente a mercado. La estrategia queda excluida del flujo de generación de señales en `strategies.json`. No se espera al SL/TP natural.
+
+**D4 — Reactivación con solo análisis escrito en `DECISIONS.md/incidents/`, sin re-paper trading obligatorio.**
+
+Para reactivar una estrategia pausada por degradación, alcanza con: análisis documentado de qué falló y qué se ajusta (si algo se ajusta), entrada datada en `DECISIONS.md/incidents/`, reactivación manual en `strategies.json`. NO se exige pasar nuevamente por un período de paper trading antes de volver a live.
+
+### Alternativas consideradas
+
+**Para D1 (niveles de semáforo):**
+- **A: Tres niveles (Amarillo / Rojo / Negro)** con escalón intermedio "Rojo = reducir tamaño a la mitad". Descartada: agrega complejidad operativa significativa (más decisiones que tomar, más umbrales que calibrar, más estados que el monitor debe distinguir) sin beneficio claro para un operador que construye su propio sistema con una sola estrategia activa. El escalón intermedio es valioso en fondos con risk team dedicado donde "reducir exposure" es operativamente trivial; para un operador único, reducir size requiere editar `strategies.json`, redeplear, y monitorear que el cambio se aplicó — fricción innecesaria frente al beneficio de tener un estado intermedio.
+- **B (elegida): Dos niveles (OK / Apagar)**. Simpler, más institucional, más alineado con el patrón de circuit breakers de las mesas profesionales pequeñas. Trade-off aceptado: si una estrategia está claramente degradada pero no tan degradada como para apagar, la decisión queda en la inspección humana semanal (sección 4 de POLICY) en lugar de en el monitor automático.
+
+**Para D2 (calibración de umbrales):**
+- **A: Umbrales derivados del backtest existente** (ej. "kill threshold = 1.5x el max DD del backtest"). Descartada: el backtest actual de `EmaCrossStrategy / BTCUSDT 1h` se construyó para validar infraestructura (que el sizing redondee, que los eventos fluyan, que el HMM cargue), no como proceso de validación cuantitativa institucional. No hubo walk-forward analysis ni cross-validation purged k-fold (eso es Hito G/H). Tomar el max DD de ese backtest y derivar umbrales equivale a calibrar el termómetro con un termómetro roto. Metodológicamente incorrecto.
+- **B: Posponer los umbrales hasta post-Hito G** (umbrales como `<TBD>` hasta tener walk-forward). Descartada: rompe el orden del ROADMAP que tiene OPS-2 antes de paper trading. Deja Hito C operando sin automatización de kill por degradación, solo con kill por drawdown global hardcodeado. No es razonable arrancar paper trading sin POLICY operativa.
+- **C (elegida): Umbrales absolutos hoy, recalibración post-Hito G.** Los números reflejan el mandato de riesgo personal del operador (lo que está dispuesto a perder antes de apagar), no una predicción derivada de datos cuestionables. Es la respuesta institucional pragmática: calibrar con lo disponible hoy, mejorar con mejores datos cuando existan. Cada recalibración futura se documenta como entrada nueva en `DECISIONS.md`.
+
+**Para D3 (acción al disparar umbral):**
+- **A: Pause-only** (estrategia deja de generar señales nuevas; posiciones abiertas siguen su curso al SL/TP/time exit). Descartada: si decidimos que la estrategia está degradada es porque no confiamos más en su edge — y eso incluye no confiar en su SL/TP. Aguantar la posición de una estrategia muerta es esperanza, no risk management. Inconsistente con cómo el sistema ya maneja el kill switch global (`LiquidateAllRiskAction`).
+- **B (elegida): Liquidación inmediata a mercado.** Consistente con el patrón del kill switch global. Asume slippage, lo cual es aceptable porque el costo de slippage en una sola liquidación es menor que el costo de quedarse en una posición de una estrategia que ya no tiene edge.
+
+**Para D4 (rigor de reactivación):**
+- **A: Análisis escrito + ADR formal + re-paper trading antes de live**. Descartada: burocrática para un operador único que construye su propio sistema. Un proceso de re-paper de 30 días cada vez que algo se apaga frena más de lo que protege.
+- **B: Análisis escrito + ADR formal (sin re-paper).** Considerada pero descartada: distinguir entre "entrada en `DECISIONS.md/incidents/`" y "ADR formal con número correlativo" agrega ceremonia sin valor incremental para este contexto. Los ADRs con número son para decisiones arquitectónicas que afectan el diseño del sistema; las reactivaciones son operativas y van mejor a un sub-archivo de incidentes datado.
+- **C (elegida): Solo análisis escrito en `DECISIONS.md/incidents/`.** Pragmático, suficiente para que el historial operativo quede consultable. Si una reactivación tiene un patrón que amerita ADR (ej. "descubrimos que el umbral U1 está mal calibrado para activos de alta volatilidad"), ese ADR se genera adicionalmente al análisis del incidente. Trade-off aceptado: el operador asume el riesgo de reactivar algo sin re-paper. Si reactivó mal, se vuelve a apagar rápido y aprende; el costo lo paga el operador con su propio capital.
+
+### Consecuencias
+
+**Positivas:**
+- POLICY.md existe como contrato escrito entre operador-en-frío y operador-en-caliente. La decisión "¿apago o aguanto?" deja de ser una negociación bajo estrés.
+- OPS-2 (`StrategyHealthMonitor`) tiene especificación clara de qué métricas calcular y qué umbrales chequear. Se puede empezar a construir inmediatamente.
+- El sistema queda preparado para entrar a Hito C (paper trading) con criterio de éxito explícito y procedimientos de emergencia documentados.
+- Las decisiones operativas tomadas hoy son consultables y revisables; si en 6 meses el operador piensa "¿por qué dos niveles y no tres?", la respuesta está en este ADR.
+- La estrategia activa hoy (`EmaCrossStrategy / BTCUSDT / 1h`) tiene su entrada poblada en POLICY sección 7 con umbrales numéricos concretos, no placeholders.
+
+**Neutras / aceptadas:**
+- Los umbrales U1-U4 son del operador, no de un comité de risk management. Si el operador es demasiado conservador con U1 (25% DD), va a apagar estrategias sanas con frecuencia. Si es demasiado laxo, va a apagar tarde. La recalibración trimestral (POLICY sección 4.4) es el mecanismo de corrección.
+- La política de eventos macro (POLICY 2.3) se cumple manualmente hasta que se construya `EventCalendarMonitor` (postergado a Bloque 4 como `EVCAL-1`). En los primeros meses de operación, el operador debe consultar calendario económico semanalmente y desactivar manualmente. Riesgo: olvidarse de pausar antes de un FOMC y entrar en mal momento. Mitigación: el primer incidente de este tipo es el trigger sugerido para activar `EVCAL-1`.
+- Sin escalón intermedio de "reducir size", una estrategia que entra en degradación borderline queda solo bajo supervisión humana semanal hasta cruzar el umbral de apagado. Aceptable para una estrategia única; reconsiderar si llega a haber >3 estrategias activas simultáneas.
+
+**Negativas:**
+- Los umbrales absolutos son menos defendibles institucionalmente que los derivados estadísticamente. Para el operador único, está bien; si en el futuro este sistema se profesionaliza o se comparte, requiere recalibración estadística sí o sí (Hito G).
+
+### Cambios colaterales al ROADMAP
+
+- OPS-1 marcado como ✅ completado.
+- OPS-2 actualizado: ahora referencia explícitamente las métricas y umbrales U1-U4 de POLICY sección 3.
+- Nueva entrada `EVCAL-1` agregada al Bloque 4 postergado: `EventCalendarMonitor`. Trigger sugerido: segunda estrategia activa, o sistema operando >7 días sin supervisión diaria, o un incidente concreto de pausa no aplicada a tiempo.
+
+### Validaciones pendientes en Hito C
+
+Al arrancar paper trading, verificar que la POLICY refleja la realidad operativa:
+
+1. **Frecuencia real de las inspecciones (sección 4 de POLICY).** Si la cadencia diaria/semanal/mensual no se cumple en la práctica, los umbrales escritos no sirven. Ajustar la cadencia (no relajar los umbrales).
+2. **Trades acumulados antes de los 50.** Los primeros trades del paper sirven para confirmar que U1 y U2 funcionan; observar si los disparan por ruido o por degradación real.
+3. **Discrepancias entre la inspección humana semanal y los umbrales automáticos.** Si la inspección semanal indica "esto va mal" pero el monitor no dispara, los umbrales son demasiado laxos. Documentar y recalibrar en la revisión trimestral.
+
+---
+
 ## ADR-021 — Monitoreo básico para paper trading: JSONL local + heartbeat + Healthchecks.io
 **Fecha:** 2026-05-20
 **Estado:** Aceptada

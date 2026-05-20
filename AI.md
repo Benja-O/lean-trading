@@ -113,6 +113,20 @@ Este proyecto sigue estrictamente los principios de **Clean Architecture** y **D
 2. **Prohibido `DateTime.Now` y `DateTime.UtcNow`** fuera de `Trading.Strategies`. Todo acceso al tiempo se hace a través de `IClock`. El no-determinismo temporal es un bug en gestación.
 3. **Prohibido el estado estático mutable** en `Trading.Domain` y `Trading.Application`. Cualquier estado vive en objetos inyectados con ciclo de vida explícito.
 
+## 📜 Reglas operativas: POLICY.md como fuente de verdad
+
+El proyecto separa **reglas técnicas** (cómo se construye el sistema: arquitectura, naming, tipos, testing — todas codificadas en este `AI.md`) de **reglas operativas** (cómo se opera el sistema una vez construido: cuándo apagar una estrategia, qué inspeccionar, cómo proceder ante incidentes — codificadas en `POLICY.md` en la raíz del repo).
+
+**Implicancias para el asistente y para Claude Code:**
+
+1. **Cuando un componente runtime implementa una regla operativa, su especificación viene de `POLICY.md`, no se inventa en el componente.** Ejemplo canónico: `StrategyHealthMonitor` (OPS-2) lee los umbrales U1-U4 de `POLICY.md` sección 3. Los números (DD 25%, PF rolling < 1.0, etc.) NO se hardcodean en el código del monitor con valores propios; el monitor los recibe como configuración derivada de POLICY.
+
+2. **Cuando un brief o refactor toca una regla operativa, la fuente que se cita es POLICY, no AI.md.** AI.md no debe duplicar los números de POLICY ni reescribir sus reglas; debe apuntar a POLICY. Si una regla operativa cambia, se cambia en POLICY (con entrada nueva en `DECISIONS.md`) y los componentes que la implementan se actualizan en consecuencia.
+
+3. **POLICY.md tiene su propio régimen de versionado** documentado en su frontmatter (no se modifica en caliente durante un drawdown, los cambios sustantivos requieren ADR, etc.). El asistente respeta ese régimen igual que respeta las reglas de modificación de AI.md.
+
+4. **Ante una decisión que cae en zona gris** (¿esto va en AI o en POLICY?): si la regla afecta cómo se escribe el código, va a AI.md; si afecta cómo se opera el sistema o cuándo se interviene manualmente, va a POLICY.md. Reglas chequeables por compilador o test → AI. Reglas que dispara o consulta un humano o un monitor de risk → POLICY.
+
 ## 📂 Estructura de Proyectos y Responsabilidades
 
 ### 1. `Trading.Domain` (El Núcleo)
