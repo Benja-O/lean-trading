@@ -290,3 +290,7 @@ QuantConnect.Lean.sln.DotSettings
 .claude/
 /Trading.Strategies/requerimientos.txt
 /OPS_1_BRIEF.md
+/AI999.md
+/DEUDA_4_BRIEF.md
+/INFRA_3_BRIEF_v2.md
+/Trading.Strategies/Adapters/NullStructuredLogSink.cs
