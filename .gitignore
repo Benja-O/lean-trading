@@ -294,3 +294,5 @@ QuantConnect.Lean.sln.DotSettings
 /DEUDA_4_BRIEF.md
 /INFRA_3_BRIEF_v2.md
 /Trading.Strategies/Adapters/NullStructuredLogSink.cs
+/OPS_2_BRIEF.md
+/.gitignore
