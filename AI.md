@@ -27,9 +27,9 @@ El asistente NO tiene autoridad sobre el control de versiones ni sobre la verifi
 
    **Razón de la lista exhaustiva:** una prohibición genérica como "no hagas git" admitió en el pasado interpretaciones creativas (ej. "cambiar de rama no es lo mismo que commitear"). La lista existe para cerrar esa puerta de manera literal. Cuando aparezca un comando git no listado, el asistente asume que está prohibido salvo lectura pura, y consulta al usuario antes de ejecutarlo.
 
-2. **Compilar el proyecto.** Ni `dotnet build`, ni `dotnet clean`, ni `dotnet restore`, ni `dotnet publish`, ni `dotnet run` (excepción: ejecutar herramientas standalone como un trainer offline cuando el brief lo autoriza explícitamente y es la única forma de producir un artefacto que se commitea al repo), ni invocar MSBuild directamente, ni compilar desde IDEs vía CLI. Si el cambio requiere verificar compilación, el asistente termina su trabajo y le solicita al usuario que compile.
+2. **Compilar el proyecto.** El asistente puede ejecutar `dotnet build` cuando lo necesite para verificar que el código compila. Prohibidos `dotnet clean`, `dotnet publish`, `dotnet pack` y flags que escriban fuera de `bin/`/`obj/` o que modifiquen archivos versionados.
 
-3. **Ejecutar tests.** Ni `dotnet test`, ni `vstest.console`, ni runners alternativos (xunit.console, nunit3-console), ni invocar el Test Explorer programáticamente. Cuando el asistente termina de modificar código y agregar tests nuevos, indica explícitamente al usuario qué tests espera que pasen y se detiene.
+3. **Ejecutar tests.** El asistente puede ejecutar `dotnet test` cuando lo necesite para verificar el comportamiento del código. Prohibidos runners alternativos (`vstest.console`, `xunit.console`, etc.). Si un test falla y la conclusión es que el test está mal, el asistente se detiene y reporta al operador; no modifica tests existentes sin autorización explícita del brief o del operador en chat. Agregar tests nuevos en el mismo refactor que el código nuevo está permitido.
 
 **El asistente SÍ debe:**
 
