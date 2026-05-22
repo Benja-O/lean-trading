@@ -226,6 +226,19 @@ Al arrancar paper trading (Hito C), confirmar:
 3. **La alerta de Telegram dispara cuando el proceso muere.** Test deliberado: matar el proceso, esperar 15min, confirmar mensaje en Telegram.
 4. **Validar si DEUDA-2 (`Initialize()` doble) aplica también a live.** Si el JSONL en live muestra cada Warning/Info del arranque una sola vez, la deuda es solo de backtest y puede dejarse a más largo plazo.
 
+### Cierre de DEUDA-2 (2026-05-22)
+
+Al ejecutar el diagnóstico planificado (brief `DEUDA_2_BRIEF.md`, Fase 1: instrumentación con `_initializeCallCount` atómico y log con hash de instancia), `Initialize()` se ejecutó **una sola vez** en backtest. Evidencia:
+
+- Consola de Lean: `Debug: 1997-12-31 19:00:00 TradingAlgorithmHost.Initialize() invocado, hash de instancia 38986105, llamada #1` aparece una sola vez en el run.
+- JSONL `trading-2026-05-22.jsonl` (6 líneas totales): los mensajes de arranque del host (`HealthchecksIoPinger: HEALTHCHECKS_PING_URL no configurada`, `Heartbeat flush timer deshabilitado`) aparecen exactamente una vez cada uno.
+
+Los logs duplicados observados al cierre de INFRA-2 que motivaron la documentación de DEUDA-2 no se manifiestan con el código actual. Causa exacta no determinada — no se conservó el JSONL del cierre de INFRA-2 para comparación directa, pero el diagnóstico original fue inferencial (logs duplicados → conclusión de doble invocación), no instrumentado.
+
+**NO se aplicó guard de idempotencia.** Fixes solo a problemas reproducidos. Decisión consistente con el Riesgo 2 del brief `DEUDA_2_BRIEF.md` que previó explícitamente este escenario.
+
+**Validación pendiente en Hito C:** al arrancar paper trading, inspeccionar el JSONL inicial para confirmar que el síntoma tampoco aparece en modo Live. Si reaparece, abrir nueva deuda con diagnóstico fresco (no reabrir DEUDA-2: el diagnóstico de hoy quedó cerrado).
+
 ---
 
 ## ADR-020 — Test de referencia AccordHmmClassifierReferenceTests skipeado por convergencia degenerada con datos sintéticos
