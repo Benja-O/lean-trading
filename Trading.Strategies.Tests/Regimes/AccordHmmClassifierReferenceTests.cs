@@ -26,7 +26,7 @@ namespace Trading.Strategies.Tests.Regimes
     /// Verifica:
     /// - El BIC mínimo se da en K=3.
     /// - Las clasificaciones del classifier coinciden con el régimen esperado en cada segmento
-    ///   (tolerancia: ≥85% en cada uno).
+    ///   (tolerancia: ≥50% en HighVolatility; al menos 2 etiquetas dominantes distintas entre los 3 segmentos).
     /// - Las probabilidades suman 1.0 ± 1e-9.
     /// - IsWarmedUp es false antes de 100 features acumuladas y true después.
     /// </summary>
@@ -36,22 +36,7 @@ namespace Trading.Strategies.Tests.Regimes
         private const int WarmUpBars = 100;
         private static readonly InstrumentId Synthetic = new("SYNTH");
 
-        // ============================================================================
-        // TEST SKIPEADO TEMPORALMENTE — Ver ADR-020 en DECISIONS.md
-        //
-        // Causa: convergencia degenerada de Baum-Welch sobre la serie sintética con K=3.
-        // El segmento HighVolatility (desvío ~5x sobre los otros) clasifica 0% como
-        // HighVolatility (esperado >50%). Sospecha: óptimo local malo en HMM con K
-        // pequeño + bug potencial en SemanticStateMapper al calcular cuartiles con
-        // K=3 (un cuartil requiere ≥4 valores).
-        //
-        // Modelo de producción (BTCUSDT, K=4) NO presenta este síntoma: backtest
-        // 2025-2026 muestra cambios de régimen plausibles en los logs (Trend,
-        // HighVolatility, Squeeze aparecen en momentos esperables del mercado).
-        //
-        // Diagnóstico planificado antes de Hito C (paper trading).
-        // ============================================================================
-        [Fact(Skip = "Convergencia degenerada con datos sintéticos extremos y K=3. Ver ADR-020. Diagnóstico pendiente antes de Hito C.")]
+        [Fact]
         public void Pipeline_SerieSinteticaConTresRegimenes_ClasificaCorrectamente()
         {
             Accord.Math.Random.Generator.Seed = RandomSeed;
@@ -72,9 +57,11 @@ namespace Trading.Strategies.Tests.Regimes
             }
 
             var chosen = candidates.OrderBy(candidate => candidate.Bic).First();
+
             chosen.K.Should().Be(3, because: "los datos sintéticos tienen tres regímenes claramente diferenciados");
 
             int[] decoded = chosen.Model.Decide(normalized);
+
             var stats = ComputeStateStatistics(chosen.Model, chosen.K, normalized, decoded);
             var mapper = SemanticStateMapper.Build(stats);
             var classifier = new AccordHmmClassifier(Synthetic, chosen.Model, mapper, scaler, WarmUpBars);
@@ -83,43 +70,55 @@ namespace Trading.Strategies.Tests.Regimes
             foreach (var bar in bars)
                 classifications.Add(classifier.Classify(bar));
 
-            // IsWarmedUp: hasta la barra (50 feature-warm-up + 100 model-warm-up = 150), debe estar UnknownFor.
             classifications[140].Label.Should().Be(RegimeLabel.Unknown, because: "antes de acumular 100 features, el classifier devuelve Unknown");
             classifier.IsWarmedUp.Should().BeTrue(because: "tras procesar 1500 barras, ya superó las 100 features de warm-up");
 
-            // Probabilidades suman 1
             foreach (var classification in classifications.Where(c => c.Label != RegimeLabel.Unknown))
-            {
                 classification.Probabilities.Values.Sum().Should().BeApproximately(1.0, 1e-9);
-            }
 
-            // El mapper debe haber asignado al menos un Trend y un HighVolatility (o las dos juntas).
-            // Como la asignación HMM↔label es semántica, validamos que las clasificaciones del segmento
-            // de "Trend alcista" y del segmento "HighVolatility" sean mayoritariamente distintas.
             var segmentTrendLabels = classifications.Skip(150).Take(350).Select(c => c.Label).ToList();
             var segmentHighVolLabels = classifications.Skip(650).Take(350).Select(c => c.Label).ToList();
             var segmentMeanRevLabels = classifications.Skip(1150).Take(350).Select(c => c.Label).ToList();
 
-            // El régimen mayoritario en cada segmento debe coincidir con la semántica esperada.
             var trendMostFrequent = MostFrequent(segmentTrendLabels);
             var highVolMostFrequent = MostFrequent(segmentHighVolLabels);
             var meanRevMostFrequent = MostFrequent(segmentMeanRevLabels);
 
-            // No exigimos exactitud de label específico por estado (el mapper depende de cuartiles y de la
-            // asignación arbitraria de estados crudos), pero exigimos que los tres segmentos sean
-            // DOMINADOS por etiquetas distintas: el sistema discrimina los tres regímenes.
             var dominantLabels = new HashSet<RegimeLabel> { trendMostFrequent, highVolMostFrequent, meanRevMostFrequent };
             dominantLabels.Count.Should().BeGreaterThanOrEqualTo(2,
                 because: "los tres segmentos sintéticos son estadísticamente distintos; al menos dos etiquetas dominantes deben ser distintas entre sí");
 
-            // Coherencia del segmento de alta volatilidad: debe estar dominado por HighVolatility
-            // (su σ es 5x el del segmento Trend y ~8x el del segmento MeanReverting).
             int highVolCount = segmentHighVolLabels.Count(label => label == RegimeLabel.HighVolatility);
             ((double)highVolCount / segmentHighVolLabels.Count).Should().BeGreaterThan(0.5,
                 because: "el segmento HighVolatility tiene desvío ~5x más alto que los otros y debe ser detectado");
         }
 
+        // Multi-seed Baum-Welch: corre N veces con seeds distintos, conserva el de mayor log-likelihood.
+        private static readonly int[] MultiSeeds =
+            Enumerable.Range(1, 10).Select(i => 42 * i + 17).ToArray();
+
         private static HiddenMarkovModel<MultivariateNormalDistribution, double[]> TrainHmm(
+            int numberOfStates, double[][] observations)
+        {
+            HiddenMarkovModel<MultivariateNormalDistribution, double[]> bestModel = null;
+            double bestLogLikelihood = double.NegativeInfinity;
+
+            foreach (int seed in MultiSeeds)
+            {
+                Accord.Math.Random.Generator.Seed = seed;
+                var candidate = TrainHmmSingleSeed(numberOfStates, observations);
+                double logLikelihood = candidate.LogLikelihood(observations);
+                if (logLikelihood > bestLogLikelihood)
+                {
+                    bestLogLikelihood = logLikelihood;
+                    bestModel = candidate;
+                }
+            }
+
+            return bestModel;
+        }
+
+        private static HiddenMarkovModel<MultivariateNormalDistribution, double[]> TrainHmmSingleSeed(
             int numberOfStates, double[][] observations)
         {
             var topology = new Ergodic(numberOfStates, random: false);

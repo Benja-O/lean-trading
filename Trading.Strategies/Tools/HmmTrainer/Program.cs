@@ -31,8 +31,11 @@ namespace Trading.Strategies.Tools.HmmTrainer
         private const int WarmUpBarsForRuntime = 100;
         private const int RandomSeed = 42;
         private const int MinimumRequiredBars = 10000;
+        private const int MultiSeedAttempts = 10;
 
         private static readonly int[] CandidateNumbersOfStates = { 2, 3, 4 };
+        private static readonly int[] RandomSeeds =
+            Enumerable.Range(1, MultiSeedAttempts).Select(i => 42 * i + 17).ToArray();
         private static readonly DateTime TrainingWindowStartUtc = new(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
         private static readonly DateTime TrainingWindowEndUtc = new(2024, 12, 31, 23, 59, 59, DateTimeKind.Utc);
 
@@ -131,7 +134,36 @@ namespace Trading.Strategies.Tools.HmmTrainer
             return Path.Combine(candidate.FullName, "models", "regime", $"{InstrumentIdentifier}-perp-binance.hmm.json");
         }
 
+        // Multi-seed Baum-Welch: entrena N veces con seeds distintos, conserva el de mayor log-likelihood.
+        // Mitiga convergencia a óptimo local degenerado con estados colapsados (Hipótesis A de ADR-024).
         private static CandidateResult TrainCandidate(int numberOfStates, double[][] normalizedObservations)
+        {
+            HiddenMarkovModel<MultivariateNormalDistribution, double[]> bestModel = null;
+            double bestLogLikelihood = double.NegativeInfinity;
+
+            for (int attemptIndex = 0; attemptIndex < RandomSeeds.Length; attemptIndex++)
+            {
+                Accord.Math.Random.Generator.Seed = RandomSeeds[attemptIndex];
+                var candidate = TrainCandidateSingleSeed(numberOfStates, normalizedObservations);
+                double logLikelihood = candidate.LogLikelihood(normalizedObservations);
+                if (logLikelihood > bestLogLikelihood)
+                {
+                    bestLogLikelihood = logLikelihood;
+                    bestModel = candidate;
+                }
+            }
+
+            double bic = BicCalculator.Compute(
+                numberOfStates: numberOfStates,
+                featureDimension: FeatureExtractor.FeatureCount,
+                observationCount: normalizedObservations.Length,
+                finalLogLikelihood: bestLogLikelihood);
+
+            return new CandidateResult(numberOfStates, bestModel, bestLogLikelihood, bic);
+        }
+
+        private static HiddenMarkovModel<MultivariateNormalDistribution, double[]> TrainCandidateSingleSeed(
+            int numberOfStates, double[][] normalizedObservations)
         {
             // Inicialización canónica HMM-GMM: k-means clustering de las observaciones para
             // arrancar BaumWelch con emisiones diferenciadas (rompe simetría inicial sin la cual
@@ -165,15 +197,7 @@ namespace Trading.Strategies.Tools.HmmTrainer
             };
 
             teacher.Learn(new[] { normalizedObservations });
-
-            double logLikelihood = model.LogLikelihood(normalizedObservations);
-            double bic = BicCalculator.Compute(
-                numberOfStates: numberOfStates,
-                featureDimension: FeatureExtractor.FeatureCount,
-                observationCount: normalizedObservations.Length,
-                finalLogLikelihood: logLikelihood);
-
-            return new CandidateResult(numberOfStates, model, logLikelihood, bic);
+            return model;
         }
 
         private static double[,] BuildClusterCovariance(

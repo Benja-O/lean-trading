@@ -10,6 +10,66 @@
 
 ---
 
+## ADR-024 — SemanticStateMapper adaptativo a K + multi-seed Baum-Welch (resuelve ADR-020)
+**Fecha:** 2026-05-22
+**Estado:** Aceptada
+
+### Contexto
+
+ADR-020 documentó como deuda técnica el test `AccordHmmClassifierReferenceTests.Pipeline_SerieSinteticaConTresRegimenes_ClasificaCorrectamente` skipeado por convergencia degenerada con K=3 sobre serie sintética. ADR-020 enumeró tres hipótesis de causa raíz y un plan de diagnóstico. Este ADR documenta la resolución.
+
+### Causa raíz identificada
+
+**Hipótesis B confirmada (causa principal):** bug en `SemanticStateMapper.Build` al calcular cuartiles con K pequeño. Con K=3, `Math.Ceiling(3 * 0.75) = 3`, lo cual hace la condición `positionInSorted >= 3` insatisfacible en un array de 3 elementos (posiciones válidas: {0, 1, 2}). Resultado: ningún estado se mapeaba a `HighVolatility` con K=3.
+
+**Hipótesis A confirmada (causa adicional):** Baum-Welch convergía a un óptimo local malo con seed=42 sobre datos sintéticos extremos, donde dos estados colapsaban a parámetros casi idénticos. Evidenciado por la matriz de transición y las estadísticas por estado.
+
+**Hipótesis C descartada:** el `FeatureScaler` preserva las diferencias entre regímenes; las features del segmento HighVolatility sí se distinguen de los otros en el espacio escalado.
+
+**Modelo de producción (K=4) no afectado por Hipótesis B:** con K=4, `Ceiling(4 * 0.75) = 3`, y la posición 3 sí existe en el array de 4 elementos. El fix se aplica preventivamente para K<4 y por robustez arquitectónica.
+
+### Decisión
+
+**Fix 1 — `SemanticStateMapper.Build` adaptativo a K:**
+- K=2: estado de σ mayor → HighVolatility candidato; el otro evalúa Trend/Squeeze/MeanReverting por sus reglas estándar de μ y ρ.
+- K=3: tercios — última posición ordenada por σ → HighVolatility, primera posición (si ρ > 0.7) → Squeeze.
+- K>=4: cuartiles tradicionales (sin cambios respecto a la versión anterior).
+- Reglas comunes y caso degenerado: sin cambios.
+
+**Fix 2 — Multi-seed Baum-Welch en `HmmTrainer` y en el test sintético:**
+- Entrenar el HMM 10 veces con seeds `42 * i + 17` (i ∈ {1..10}), conservar el modelo de mayor log-likelihood.
+- Aplicado al trainer offline y al test de referencia; el runtime carga el modelo serializado sin cambios.
+
+**Decisión sobre el modelo de producción:** validación cruzada del modelo de producción contra 5 ventanas históricas de BTCUSDT (2025-2026) fue OK. El modelo distingue correctamente régimen de HighVolatility (volatilidad caótica sin dirección: σ alto + μ ≈ 0) de Trend (movimientos direccionales fuertes, incluyendo crashes direccionales). Esta distinción es consistente con la literatura de regime-switching (Hamilton 1989, Ang-Bekaert 2002) y operativamente útil para estrategias direccionales. El modelo no requiere re-entrenamiento. El baseline de 6 órdenes (ADR-023) se preserva.
+
+**Definición operativa de RegimeLabel.HighVolatility (consensuada en validación cruzada de Fase 4):** el modelo reserva `HighVolatility` para volatilidad caótica sin dirección dominante (estado con σ alto + μ ≈ 0 en la emisión). Los crashes y rallies direccionales fuertes se clasifican como `Trend` incluso con ATR elevado, porque el HMM detecta el momentum sostenido en la emisión. La gestión de riesgo en crashes direccionales se delega a stops/sizing/POLICY, no al clasificador de régimen.
+
+### Alternativas consideradas
+
+**A — Eliminar el test sintético en lugar de hacerlo pasar.** Descartada: el test detectó un bug arquitectónico real (`SemanticStateMapper` no adaptativo a K). Eliminar el test enmascararía el problema.
+
+**B — Forzar K=4 mínimo en todos los entrenamientos para evitar el caso degenerado de K=3.** Descartada: K se elige por BIC sobre los datos. Forzar K mínimo sería sobreajustar a la heurística del cuartil en lugar de corregir la heurística.
+
+**C — Refactor profundo de `SemanticStateMapper` con clustering jerárquico.** Descartada por overengineering.
+
+**D (elegida) — Adaptación de la heurística existente a K.** Mínimo cambio que resuelve el bug sin alterar el contrato serializado entre trainer y runtime.
+
+### Consecuencias
+
+- El test `Pipeline_SerieSinteticaConTresRegimenes_ClasificaCorrectamente` pasa verde (sin `[Fact(Skip)]`).
+- `SemanticStateMapperTests` recibe 5 tests adicionales cubriendo K=2, K=3 (caso del bug), K=3 con Squeeze, K=4, K=5.
+- El trainer offline ahora ejecuta 10 pasadas de Baum-Welch en lugar de 1. Tiempo de entrenamiento ~10x más lento; aceptable porque es offline y poco frecuente.
+- El modelo de producción actual (K=4) se mantiene; el baseline de no-regresión de 6 órdenes (ADR-023) se preserva.
+- ADR-020 pasa a estado "Resuelta en ADR-024 (2026-05-22)".
+- `ProductionHmmGranularQueryTests.cs` se commitea como evidencia durable de la validación cruzada y queda reutilizable para consultas granulares futuras al modelo (referenciado en Hito G).
+
+### Riesgo residual
+
+- La validación cruzada se hizo con 5 ventanas seleccionadas; la inspección humana semanal (POLICY sección 4) durante paper trading va a producir señales si el modelo se comporta de forma incoherente en operación real.
+- Las reglas adaptativas por K son heurísticas. Si en el futuro se entrenan modelos con K>=5 o con dimensionalidad de features distinta, puede requerirse re-calibración. Trigger sugerido: si la diversidad de etiquetas asignadas en un modelo nuevo es <2, revisar el mapper.
+
+---
+
 ## ADR-023 — StrategyHealthMonitor: componente autónomo fuera del array de IRiskMonitor del orchestrator
 **Fecha:** 2026-05-21
 **Estado:** Aceptada
@@ -243,7 +303,7 @@ Los logs duplicados observados al cierre de INFRA-2 que motivaron la documentaci
 
 ## ADR-020 — Test de referencia AccordHmmClassifierReferenceTests skipeado por convergencia degenerada con datos sintéticos
 **Fecha:** 2026-05-19
-**Estado:** Aceptada (deuda técnica documentada)
+**Estado:** Resuelta en ADR-024 (2026-05-22)
 
 ### Contexto
 El brief del Hito B Paso 3 especificó la creación de un test de referencia (`AccordHmmClassifierReferenceTests`) que valida el pipeline completo del HMM sobre una serie sintética con tres regímenes claramente diferenciados (Trend alcista calmo, HighVolatility, MeanReverting). El criterio de éxito era que cada segmento se clasificara correctamente en al menos el 50% de las barras post-warm-up.

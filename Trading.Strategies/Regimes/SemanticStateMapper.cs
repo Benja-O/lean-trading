@@ -57,16 +57,20 @@ namespace Trading.Strategies.Regimes
             double SelfTransitionProbability);
 
         /// <summary>
-        /// Aplica las reglas del brief para mapear estados → etiquetas:
-        /// <list type="number">
-        ///   <item>Si σᵢ está en el cuartil superior → HighVolatility.</item>
-        ///   <item>Si σᵢ está en el cuartil inferior y ρᵢ > 0.7 → Squeeze.</item>
-        ///   <item>Si |μᵢ| > 0.001 y ρᵢ > 0.6 → Trend.</item>
-        ///   <item>Si no → MeanReverting.</item>
-        /// </list>
-        /// Caso degenerado: si ningún estado mapea a Trend ni HighVolatility, se fuerza al menos
-        /// uno por cuartil (el de σ máxima → HighVolatility) para que el sistema NO quede sin
-        /// régimen "Trend" ni "HighVolatility" disponibles.
+        /// Construye un SemanticStateMapper a partir de las estadísticas por estado.
+        ///
+        /// Reglas adaptativas según el número de estados K:
+        /// - K=2: estado de σ mayor → HighVolatility candidato; el otro evalúa Trend/Squeeze/MeanReverting.
+        /// - K=3: tercios — última posición ordenada por σ → HighVolatility, primera posición (si ρ > 0.7) → Squeeze.
+        /// - K>=4: cuartiles tradicionales — top cuartil HighVolatility, bottom cuartil (con ρ > 0.7) Squeeze.
+        ///
+        /// Reglas comunes a todos los K:
+        /// - Estados no clasificados como HighVolatility ni Squeeze evalúan |μ| > 0.001 y ρ > 0.6 → Trend.
+        /// - Resto → MeanReverting.
+        /// - Caso degenerado (ningún estado HighVolatility ni Trend): forzar HighVolatility al de σ máxima.
+        ///
+        /// La adaptación por K es necesaria porque Math.Ceiling(K * 0.75) con K=3 produce 3, lo cual deja la
+        /// condición "positionInSorted >= 3" insatisfacible en un array de 3 elementos (ver ADR-024).
         /// </summary>
         public static SemanticStateMapper Build(IReadOnlyList<StateStatistics> statistics)
         {
@@ -80,8 +84,28 @@ namespace Trading.Strategies.Regimes
                 .ToList();
 
             int stateCount = sortedBySigma.Count;
-            int topQuartileThreshold = (int)Math.Ceiling(stateCount * 0.75);
-            int bottomQuartileThreshold = (int)Math.Floor(stateCount * 0.25);
+
+            // ADAPTATIVO A K:
+            //   K=2: el estado de σ mayor es HighVolatility candidato, el otro evalúa Trend/MeanReverting/Squeeze por su μ y ρ.
+            //   K=3: tercios — el último tercio es HighVolatility, el primer tercio (si ρ > 0.7) es Squeeze.
+            //   K>=4: cuartiles tradicionales — top cuartil HighVolatility, bottom cuartil (con ρ > 0.7) Squeeze.
+            int topThreshold;
+            int bottomThreshold;
+            if (stateCount == 2)
+            {
+                topThreshold = 1;
+                bottomThreshold = 1;
+            }
+            else if (stateCount == 3)
+            {
+                topThreshold = 2;
+                bottomThreshold = 1;
+            }
+            else
+            {
+                topThreshold = (int)Math.Ceiling(stateCount * 0.75);
+                bottomThreshold = (int)Math.Floor(stateCount * 0.25);
+            }
 
             var highVolatilityStateIndices = new HashSet<int>();
             var squeezeStateIndices = new HashSet<int>();
@@ -89,12 +113,12 @@ namespace Trading.Strategies.Regimes
             for (int positionInSorted = 0; positionInSorted < stateCount; positionInSorted++)
             {
                 var (stat, _) = sortedBySigma[positionInSorted];
-                bool isTopQuartile = positionInSorted >= topQuartileThreshold;
-                bool isBottomQuartile = positionInSorted < bottomQuartileThreshold;
+                bool isTopBracket = positionInSorted >= topThreshold;
+                bool isBottomBracket = positionInSorted < bottomThreshold;
 
-                if (isTopQuartile)
+                if (isTopBracket)
                     highVolatilityStateIndices.Add(stat.StateIndex);
-                else if (isBottomQuartile && stat.SelfTransitionProbability > 0.7)
+                else if (isBottomBracket && stat.SelfTransitionProbability > 0.7)
                     squeezeStateIndices.Add(stat.StateIndex);
             }
 
@@ -125,7 +149,6 @@ namespace Trading.Strategies.Regimes
             bool anyHighVol = highVolatilityStateIndices.Count > 0;
             if (!anyTrend && !anyHighVol)
             {
-                // Forzar HighVolatility al estado de σ máxima.
                 var maxSigmaState = statistics.OrderByDescending(stat => stat.StdDevReturn).First();
                 mapping[maxSigmaState.StateIndex] = RegimeLabel.HighVolatility;
             }
