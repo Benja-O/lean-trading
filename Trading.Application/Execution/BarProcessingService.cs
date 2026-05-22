@@ -28,6 +28,7 @@ namespace Trading.Application.Execution
         private readonly IClock _clock;
         private readonly MarketRegimeRegistry _regimeRegistry;
         private readonly IReadOnlyDictionary<string, StrategyRegimeCompatibility> _strategyCompatibilities;
+        private readonly IStrategyHealthMonitor _strategyHealthMonitor;
 
         public BarProcessingService(
             IPortfolioState portfolioState,
@@ -38,7 +39,8 @@ namespace Trading.Application.Execution
             IDomainEventBus eventBus,
             IClock clock,
             MarketRegimeRegistry regimeRegistry,
-            IReadOnlyDictionary<string, StrategyRegimeCompatibility> strategyCompatibilities)
+            IReadOnlyDictionary<string, StrategyRegimeCompatibility> strategyCompatibilities,
+            IStrategyHealthMonitor strategyHealthMonitor)
         {
             _portfolioState = portfolioState;
             _orderRouter = orderRouter;
@@ -49,6 +51,7 @@ namespace Trading.Application.Execution
             _clock = clock;
             _regimeRegistry = regimeRegistry ?? throw new ArgumentNullException(nameof(regimeRegistry));
             _strategyCompatibilities = strategyCompatibilities ?? throw new ArgumentNullException(nameof(strategyCompatibilities));
+            _strategyHealthMonitor = strategyHealthMonitor ?? throw new ArgumentNullException(nameof(strategyHealthMonitor));
         }
 
         public void ProcessBar(MarketBar marketBar, IReadOnlyList<StrategyExecutor> strategyExecutors)
@@ -87,6 +90,11 @@ namespace Trading.Application.Execution
                 }
 
                 if (_riskOrchestrator.IsKillSwitchActivated) continue;
+
+                if (_strategyHealthMonitor.IsExcluded(strategyExecutor.ExecutorIdentifier))
+                {
+                    continue;
+                }
 
                 SignalDirection signalDirection = strategyExecutor.Strategy.EvaluateSignal(marketBar);
 

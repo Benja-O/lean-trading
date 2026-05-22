@@ -271,6 +271,7 @@ Acción al disparar cualquier umbral:
   - La estrategia queda excluida del flujo de generación de señales en strategies.json.
   - RiskLimitBreachedEvent emitido con razón StrategyDegradation y umbral disparado.
   - Notificación al operador (log Critical + heartbeat marca degraded).
+  (Implementado runtime por StrategyHealthMonitor — OPS-2, ADR-023, 2026-05-21.)
 
 Reactivación: análisis escrito en DECISIONS.md/incidents/, reactivación manual en strategies.json.
               No se exige re-paper trading antes de reactivar en live.

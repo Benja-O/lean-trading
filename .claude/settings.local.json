@@ -3,7 +3,11 @@
     "allow": [
       "Bash(Get-Content *)",
       "Bash(dotnet build *)",
-      "Bash(dotnet test *)"
+      "Bash(dotnet test *)",
+      "Bash(Get-ChildItem -Path \"F:\\\\DesarrolloTrading\\\\QuantConnect\\\\Lean\" -Directory)",
+      "Bash(Select-Object Name)",
+      "PowerShell(ls \"F:\\\\DesarrolloTrading\\\\QuantConnect\\\\Lean\" | Where-Object { $_.PSIsContainer })",
+      "PowerShell(ls -Recurse \"F:\\\\DesarrolloTrading\\\\QuantConnect\\\\Lean\\\\Trading.Domain\" -Directory | Where-Object {$_.FullName -notmatch \"obj|bin\"})"
     ]
   }
 }

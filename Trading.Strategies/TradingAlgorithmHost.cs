@@ -248,10 +248,17 @@ namespace Trading.Strategies
             }
 
             // ===== Servicios que requieren la lista de executors ya armada =====
+            var strategyHealthThresholds = StrategyHealthThresholds.FromPolicyDefaults();
+            var strategyHealthMonitor = new StrategyHealthMonitor(
+                strategyHealthThresholds,
+                _clock,
+                _orderRouter,
+                _logger,
+                domainEventBus);
             _barProcessingService = new BarProcessingService(
                 _portfolioState, _orderRouter, _riskOrchestrator, _positionSizer,
                 _logger, domainEventBus, _clock,
-                regimeRegistry, strategyCompatibilities);
+                regimeRegistry, strategyCompatibilities, strategyHealthMonitor);
 
             _orderLifecycleService = new OrderLifecycleService(
                 _strategyExecutors, _consecutiveLossesMonitor, _orderRouter, _priceRounder, _logger, domainEventBus, _clock);

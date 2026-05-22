@@ -10,6 +10,46 @@
 
 ---
 
+## ADR-023 — StrategyHealthMonitor: componente autónomo fuera del array de IRiskMonitor del orchestrator
+**Fecha:** 2026-05-21
+**Estado:** Aceptada
+
+### Contexto
+
+POLICY sección 3 exige liquidación dirigida y exclusión de la estrategia ante degradación por métricas individuales (umbrales U1-U4). El refactor #4 produjo un `RiskOrchestrator` que gestiona un array de `IRiskMonitor`; cuando cualquiera dispara, ejecuta `LiquidateAll` + cooling-off de 24h compartido. Forzar el `StrategyHealthMonitor` al array de `IRiskMonitor` rompería la semántica de POLICY: la degradación de una estrategia individual no debe parar el sistema entero ni meterlo en cooling-off global. Hay precedente en ADR-017: el filtro de régimen no va por `IRiskMonitor` por la misma razón conceptual ("rechazar señal específica" ≠ "liquidar todo").
+
+### Decisión
+
+- `StrategyHealthMonitor` es un componente autónomo en `Trading.Application/Health/`. No implementa `IRiskMonitor`.
+- Se suscribe a `OrderFilledEvent` en su constructor (mismo patrón que `HealthHeartbeatTracker`). Handler síncrono bajo lock interno.
+- Mantiene métricas rolling por `ExecutorIdentifier`: equity acumulado, ATH, ventana de 30 trades cerrados, ventana de 30 puntos diarios de equity, contadores de días/trades sostenidos para U2/U3/U4.
+- Al cruzar cualquier umbral U1-U4 de POLICY 3.1: (1) llama `IOrderRouter.LiquidateInstrument` si hay posición abierta en ese instante, (2) setea flag `degraded`, (3) publica `RiskLimitBreachedEvent` con razón `StrategyDegradation`, (4) loguea `Critical`.
+- `BarProcessingService` consulta `IStrategyHealthMonitor.IsExcluded(executorIdentifier)` como guard pre-señal, análogo al filtro de régimen (ADR-017). Posicionado después del guard de kill switch global y antes del filtro de régimen.
+- Umbrales en `StrategyHealthThresholds` (POCO inmutable) con factory `FromPolicyDefaults()` que codifica literalmente POLICY 3.1. Cambio de POLICY → recompilación.
+- `IStrategyHealthMonitor` vive en `Trading.Domain/Abstractions/` por la misma razón que `IMarketRegimeClassifier`: es contrato consumido por Application sin acoplar a la implementación concreta.
+
+### Alternativas consideradas
+
+**A — `StrategyHealthMonitor : IRiskMonitor`:** descartada. Semántica incompatible: activaría `LiquidateAll` + cooling-off global de 24h ante degradación de una estrategia individual. También obligaría a refactorizar el orchestrator para dispatch razón→acción con flags por estrategia, ampliando el blast radius del cambio.
+
+**B — Componente autónomo (elegida):** liquidación dirigida vía `IOrderRouter.LiquidateInstrument(instrumentId, executorIdentifier)` que ya soporta liquidación por estrategia. El `RiskOrchestrator` queda intacto.
+
+**C — Persistencia de estado en disco entre reinicios:** descartada para OPS-2 (alcance medio). Aceptada como deuda técnica en OPS-3, antes de migrar a live serio (ver ROADMAP Bloque 4).
+
+### Consecuencias
+
+- El concepto "monitor de risk" del proyecto se clarifica: `IRiskMonitor` = kill switch global; otros monitors (régimen, salud por estrategia) viven fuera con contratos propios y semántica específica.
+- Las métricas no persisten entre reinicios. Si el proceso reinicia tras 30+ trades, vuelve a warm-up y U3/U4 se rearman tras los próximos 50 trades. Aceptable para paper; deuda explícita antes de live (OPS-3).
+- `HealthHeartbeatTracker` (INFRA-2) ya captura `RiskLimitBreachedEvent` por suscripción al bus; refleja `StrategyDegradation` sin código nuevo.
+- El `RiskOrchestrator` queda intacto. Monitors futuros per-strategy siguen el patrón OPS-2 (guard en `BarProcessingService`), no el de `IRiskMonitor`.
+- En la práctica, `LiquidateInstrument` en el momento del breach nunca tiene posición a liquidar: los breaches se evalúan al cerrar trades. La llamada es defensiva para cobertura futura si el flujo evoluciona.
+- Excepción para invariantes del monitor: `InvalidOperationException` (no existe `DomainException` base en el proyecto). Si en el futuro se crea una jerarquía de excepciones de dominio, este componente debería migrar.
+- **Jerarquía entre POLICY 2 (sistema) y POLICY 3 (estrategia).** POLICY 2.1 (DD global del portfolio > 25% → kill switch global + `LiquidateAll` + cooling-off de 24h) está implementada por `DrawdownMonitor` y sigue activa e independiente. POLICY 3.1 (DD del equity de una estrategia individual > 25% → liquidación dirigida + exclusión) la implementa OPS-2 sin interferir con la primera. Una estrategia puede apagarse mientras el portfolio sigue operando otras estrategias; el portfolio puede entrar en kill global aunque ninguna estrategia individual haya disparado U1. Son capas complementarias, no sustitutas. En el run del backtest de OPS-2 (21-05-2026), U1 individual disparó (DD 61% del equity de la estrategia) mientras el DD global del portfolio terminó en 2.3% — POLICY 3 actuó, POLICY 2 nunca se activó. Comportamiento deseado.
+- **Drawdown del equity de una estrategia ≠ pérdida absoluta en fase warm-up.** POLICY 3.2 define el equity de la estrategia como suma de P&L realizado desde el primer trade, y U1 como DD% desde el ATH de ese equity. En fase warm-up (primeros trades), un trade ganador inicial seguido de un trade perdedor normal puede producir un DD% grande aunque la estrategia esté todavía en territorio positivo. Caso concreto del run del 21-05-2026: EmaCross_BTCUSDT_1h ganó +3,996 USDT en el primer trade (ATH = 3,996), perdió −2,441 en el segundo (equity = +1,555), U1 disparó por DD del 61% desde ATH a pesar de que la estrategia seguía positiva en +1,555. El monitor está calculando exactamente lo que POLICY 3.2 define; la sensibilidad de U1 en warm-up es una propiedad emergente de medir "caída desde máximo local" sobre un equity de magnitud chica. Esta observación se traslada a Hito G como input para el walk-forward, no como corrección a POLICY ahora (ver POLICY 6.2: POLICY no se modifica durante un drawdown). La pregunta abierta para Hito G no es solo "¿es 25% el umbral correcto?" sino también "¿U1 debería medir devolución de ganancias o pérdida real?" — son métricas conceptualmente distintas.
+- **Baseline del backtest post-OPS-2.** El backtest del EmaCrossStrategy_BTCUSDT_1h pasa de 225 órdenes (pre-OPS-2) a 6 órdenes (post-OPS-2) por la combinación de las dos observaciones anteriores. Este es el nuevo baseline de no-regresión hasta que Hito G recalibre o redefina U1. Cualquier cambio futuro al monitor que altere este número requiere análisis explícito.
+
+---
+
 ## ADR-022 — POLICY.md: dos niveles de semáforo, calibración absoluta, liquidación inmediata, reactivación con análisis escrito
 **Fecha:** 2026-05-21
 **Estado:** Aceptada

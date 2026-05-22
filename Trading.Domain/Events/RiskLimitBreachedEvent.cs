@@ -24,7 +24,15 @@ namespace Trading.Domain.Events
         /// enum para que las emisiones diagnósticas del filtro (futuras, no en este paso)
         /// puedan categorizarse junto a las otras razones.
         /// </summary>
-        RegimeIncompatibility
+        RegimeIncompatibility,
+
+        /// <summary>
+        /// Una estrategia individual cruzó alguno de los umbrales U1-U4 de POLICY sección 3.
+        /// NO activa el kill switch global: solo liquida la posición de la estrategia y la
+        /// excluye de generación de señales hasta reinicio manual del proceso.
+        /// Emitido por StrategyHealthMonitor (OPS-2).
+        /// </summary>
+        StrategyDegradation
     }
 
     /// <summary>

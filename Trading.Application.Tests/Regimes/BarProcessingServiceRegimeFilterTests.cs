@@ -71,11 +71,12 @@ namespace Trading.Application.Tests.Regimes
             var eventBus = new DomainEventBus(_logger);
             var sizer = new PositionSizer(_portfolioState, _instrumentMetadata, _logger);
             var orchestrator = BuildInactiveOrchestrator();
+            var healthMonitor = new FakeStrategyHealthMonitor();
 
             return new BarProcessingService(
                 _portfolioState, _orderRouter, orchestrator, sizer,
                 _logger, eventBus, _clock,
-                registry, compatibilities);
+                registry, compatibilities, healthMonitor);
         }
 
         private MarketRegimeRegistry BuildRegistry(RegimeLabel label)

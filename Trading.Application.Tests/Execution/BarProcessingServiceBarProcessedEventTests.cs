@@ -54,7 +54,8 @@ namespace Trading.Application.Tests.Execution
             BuildService(
                 FakePortfolioState portfolioState,
                 MarketRegimeRegistry? registry = null,
-                IReadOnlyDictionary<string, StrategyRegimeCompatibility>? compatibilities = null)
+                IReadOnlyDictionary<string, StrategyRegimeCompatibility>? compatibilities = null,
+                FakeStrategyHealthMonitor? healthMonitor = null)
         {
             var eventBus = new DomainEventBus(_logger);
             var capturer = new CapturingEventSubscriber<BarProcessedEvent>(eventBus);
@@ -70,10 +71,11 @@ namespace Trading.Application.Tests.Execution
             registry ??= new MarketRegimeRegistry(
                 System.Array.Empty<IMarketRegimeClassifier>(), _clock, _logger);
             compatibilities ??= new Dictionary<string, StrategyRegimeCompatibility>();
+            healthMonitor ??= new FakeStrategyHealthMonitor();
 
             var service = new BarProcessingService(
                 portfolioState, _orderRouter, orchestrator, sizer,
-                _logger, eventBus, _clock, registry, compatibilities);
+                _logger, eventBus, _clock, registry, compatibilities, healthMonitor);
 
             return (service, capturer);
         }
@@ -126,6 +128,37 @@ namespace Trading.Application.Tests.Execution
             service.ProcessBar(BuildBar(), new[] { executor });
 
             capturer.CapturedEvents.Should().BeEmpty();
+        }
+
+        [Fact]
+        public void Process_StrategyExcluidaPorHealthMonitor_NoGeneraSignal_NiEmiteBarProcessedEvent()
+        {
+            var portfolio = new FakePortfolioState { TotalPortfolioValue = 100_000m };
+            var healthMonitor = new FakeStrategyHealthMonitor();
+            var executor = BuildExecutor(new ConfigurableSignalStrategy(SignalDirection.Long));
+            healthMonitor.ExcludedIdentifiers.Add(executor.ExecutorIdentifier);
+
+            var (service, capturer) = BuildService(portfolio, healthMonitor: healthMonitor);
+
+            service.ProcessBar(BuildBar(), new[] { executor });
+
+            capturer.CapturedEvents.Should().BeEmpty();
+            _orderRouter.SubmittedOrders.Should().BeEmpty();
+        }
+
+        [Fact]
+        public void Process_StrategyNoExcluida_PathHabitual_GeneraSignalNormal()
+        {
+            var portfolio = new FakePortfolioState { TotalPortfolioValue = 100_000m };
+            var healthMonitor = new FakeStrategyHealthMonitor(); // ExcludedIdentifiers vacío
+            var executor = BuildExecutor(new ConfigurableSignalStrategy(SignalDirection.Long));
+
+            var (service, capturer) = BuildService(portfolio, healthMonitor: healthMonitor);
+
+            service.ProcessBar(BuildBar(), new[] { executor });
+
+            capturer.CapturedEvents.Should().ContainSingle();
+            _orderRouter.SubmittedOrders.Should().ContainSingle();
         }
     }
 
