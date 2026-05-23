@@ -57,9 +57,18 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 │ OPS-2 — StrategyHealthMonitor (POLICY 3.1, U1-U4)     ✅   │
 └─────────────────────────────────────────────────────────────┘
                             ↓
-                  HITO C: Paper trading
-                            ↓
-                  HITO D: Live trading con capital chico
+┌─────────────────────────────────────────────────────────────┐
+│ HITO C: Paper trading                                       │
+│ Propósito: VALIDACIÓN OPERATIVA del sistema, no de la       │
+│ estrategia. La EmaCrossStrategy es estrategia de            │
+│ desarrollo (sin walk-forward, sin edge validado); que       │
+│ pierda plata virtual durante el paper es irrelevante,       │
+│ incluso útil para ejercitar umbrales U1-U4 de POLICY.       │
+│ Lo que se valida: heartbeat real cada 60s, pings a          │
+│ Healthchecks.io, alerta Telegram, cadencia humana real      │
+│ (POLICY 4), kill switch real, comportamiento de U1-U4       │
+│ con equity en movimiento, doble Initialize() en live.       │
+└─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
 │ HITO E: Segunda estrategia manual (ej. Mean Reversion)      │
@@ -88,6 +97,8 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 │ - Métricas estándar institucionales: Sharpe, Sortino,       │
 │   Calmar, MAR, recovery factor, profit factor, expectancy.  │
 │ - Métricas estratificadas por régimen (gracias a Hito B).   │
+│ PUERTA DE VALIDACIÓN: ninguna estrategia entra a Hito D     │
+│ sin walk-forward aprobado acá.                              │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -102,6 +113,31 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
+│ HITO D-prev: Validación de broker real (sin estrategia)     │
+│ Tareas que no requieren una estrategia corriendo y que      │
+│ valen la pena hacer una sola vez, contra Binance live:      │
+│ - Conexión, API keys, scopes/permissions, withdrawal lock.  │
+│ - Órdenes manuales de tamaño mínimo: confirmar fill,        │
+│   comisiones reales, slippage real medible.                 │
+│ - Funding fees en perpetuals (si aplica).                   │
+│ - Reconciliación portfolio interno vs portfolio del broker. │
+│ Separado de Hito D para evitar que "live con capital chico" │
+│ arranque solo porque el broker ya está conectado.           │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│ HITO D: Live trading con capital chico                      │
+│ REQUISITO: al menos UNA estrategia con walk-forward         │
+│ aprobado en Hito G. La EmaCrossStrategy NO opera live       │
+│ (ver POLICY 7.1).                                           │
+│ Capital chico = orden de magnitud del riesgo psicológico    │
+│ que el operador puede absorber sin que distorsione su       │
+│ juicio operativo. NO es "tan poco que no importa" —         │
+│ esa racionalización es exactamente lo que POLICY P4         │
+│ busca prevenir.                                             │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
 │ BLOQUE 4 — Cuando el sistema crezca (no urgente)            │
 ├─────────────────────────────────────────────────────────────┤
 │ Value Objects Money/Price/Quantity (cuando haya 2do asset)  │
@@ -112,7 +148,9 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**Resumen del flujo:** Bloques 1-3 + Hitos A-D te llevan a operar con capital real. Hitos E-F-G-H son la fábrica de estrategias del futuro — se construyen una vez que el sistema está vivo y con resultados.
+**Resumen del flujo:** Bloques 1-3 + Hito A-C te llevan al sistema operando en paper sobre la estrategia de desarrollo. Hitos E-F-G-H son la fábrica de estrategias del futuro — se construyen sobre el sistema ya validado operativamente en paper. Recién después, Hito D-prev (broker real) y Hito D (live con capital chico, requiere estrategia con walk-forward aprobado).
+
+**Cambio respecto a versiones anteriores del ROADMAP (2026-05-23):** el orden original tenía Hito D (live con capital chico) inmediatamente después de Hito C (paper), antes de Hitos E-H. Se invirtió porque la EmaCrossStrategy es estrategia de desarrollo sin walk-forward, y operar capital real — aunque chico — sobre una estrategia no validada cuantitativamente contradice el principio P1 de POLICY y el orden institucional (López de Prado: walk-forward antes de capital). Hito C se redefinió como validación operativa del sistema, no de la estrategia. Ver entrada de DECISIONS.md correspondiente.
 
 ---
 
@@ -146,14 +184,17 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 | ✅ | Paso 2 | Abstracciones de régimen (`IMarketRegimeClassifier`, `RegimeLabel`, `RegimeClassification`, `MarketRegimeRegistry`, `StrategyRegimeCompatibility`), classifier fake (`ConfigurableMarketRegimeClassifier`), filtro pre-orden en `BarProcessingService`, wiring en `TradingAlgorithmHost` con consolidator 4h dedicado | Completado 2026-05-15. Ver historial completado. |
 | ✅ | Paso 3 | HMM real con Accord.NET, trainer offline standalone, modelo entrenado de BTCUSDT perpetual de Binance (ventana 2020-2024, K∈{2,3,4} por BIC, mapeo semántico de estados) | Completado 2026-05-19. K=4 elegido por BIC con margen amplio (57644 vs 65912 vs 72556). Mapeo: {0:HighVolatility, 1:Squeeze, 2:Trend, 3:Trend}. Ver ADR-019 y historial completado. |
 
-### ⬜ HITOS POSTERIORES — Planificados (no urgentes hasta operar con capital real)
+### ⬜ HITOS POSTERIORES — Planificados
 
 | Estado | ID | Hito | Pre-requisito | Comentario |
 |---|---|---|---|---|
-| ⬜ | HITO-E | Segunda estrategia manual (ej. Mean Reversion) | Hito D | Construir SIN automatización. Sirve para validar que el sistema soporta múltiples estrategias coexistiendo y para identificar qué partes del flujo son repetitivas antes de automatizar. |
+| ⬜ | HITO-C | Paper trading (validación operativa del sistema) | Bloque 3 ✅ | Propósito explícito: validar el sistema bajo wall-clock real, **no** validar la EmaCrossStrategy (que es estrategia de desarrollo sin walk-forward). Validaciones específicas: ver checklist heredado de ADR-021 (heartbeat, pings, Telegram, DEUDA-2 en live) y validaciones nuevas de POLICY 4 (cadencia diaria/semanal real, comportamiento de U1/U2 con equity en movimiento, flujo de kill switch real). Que la estrategia pierda equity virtual durante el paper es irrelevante; incluso útil para ejercitar U1-U4 sin riesgo real. |
+| ⬜ | HITO-E | Segunda estrategia manual (ej. Mean Reversion) | Hito C | Construir SIN automatización. Sirve para validar que el sistema soporta múltiples estrategias coexistiendo y para identificar qué partes del flujo son repetitivas antes de automatizar. |
 | ⬜ | HITO-F | Strategy Scaffolder | Hito E | Comando/script que genera esqueleto de estrategia nueva: clase `IStrategy` + entrada JSON + tests de referencia + tests de comportamiento. Solo después de haber hecho dos estrategias manuales. |
-| ⬜ | HITO-G | Walk-Forward Analysis + Monte Carlo + Métricas | Hito F | Pipeline reproducible de validación: walk-forward, Monte Carlo de curva de equity, métricas estándar institucionales (Sharpe, Sortino, Calmar, MAR, profit factor, expectancy, recovery factor), estratificadas por régimen. |
+| ⬜ | HITO-G | Walk-Forward Analysis + Monte Carlo + Métricas | Hito F | Pipeline reproducible de validación: walk-forward, Monte Carlo de curva de equity, métricas estándar institucionales (Sharpe, Sortino, Calmar, MAR, profit factor, expectancy, recovery factor), estratificadas por régimen. **Puerta de validación**: ninguna estrategia entra a Hito D sin walk-forward aprobado acá. |
 | ⬜ | HITO-H | Optimización de Hiperparámetros | Hito G | Grid search / bayesiana con purged k-fold cross-validation (López de Prado) para evitar leakage temporal. El rango de búsqueda y el criterio los define el operador. |
+| ⬜ | HITO-D-prev | Validación de broker real (sin estrategia) | Hito H (o paralelo a Hito G/H si tiempo lo permite) | Tareas one-shot contra Binance live que no requieren estrategia corriendo: API keys + scopes + withdrawal locks; órdenes manuales de tamaño mínimo para medir comisiones reales y slippage real; funding fees en perpetuals; reconciliación portfolio interno vs broker. Separado de Hito D para que "live con capital chico" no arranque solo porque el broker ya está conectado. |
+| ⬜ | HITO-D | Live trading con capital chico | Hito D-prev + al menos una estrategia con walk-forward aprobado en Hito G | Requisito de entrada **inquebrantable**: estrategia con walk-forward aprobado. EmaCrossStrategy NO opera live (POLICY 7.1). El tamaño "chico" es el riesgo psicológico que el operador puede absorber sin distorsionar su juicio operativo; no es "tan poco que no importa" (POLICY P4). |
 
 ### ⬜ BLOQUE 4 — Postergado (no urgente)
 

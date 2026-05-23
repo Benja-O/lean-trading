@@ -250,11 +250,28 @@ Esta sección se actualiza con frecuencia operativa. Es la única sección que c
 
 ### 7.1 EmaCrossStrategy / BTCUSDT / 1h
 
+**Naturaleza de esta estrategia.** La `EmaCrossStrategy` se construyó como **estrategia de desarrollo**: su propósito original fue ejercitar la infraestructura del sistema (sizing, eventos, HMM, monitoring) en un backtest no trivial. No pasó por proceso de validación cuantitativa institucional (sin walk-forward analysis, sin purged k-fold cross-validation, sin Monte Carlo sobre la curva de equity). Ver ADR-022 (D2) para el racional de por qué los umbrales U1-U4 no se derivaron de su backtest.
+
+**Decisión de no promoción a live (2026-05-23).** Esta estrategia **nunca opera capital real**, aun si en algún momento pasara por Hito G y mostrara métricas favorables. Razón: arrancar live con una estrategia explícitamente construida como andamio de desarrollo manda mala señal cultural al proyecto y abre la puerta a racionalizar "es chico, no importa" — exactamente lo que P4 busca prevenir. Si en el futuro hay interés genuino en una estrategia de tipo EMA cross, se implementa como entrada nueva en `strategies.json` con nombre distinto, sus propios tests, su propio walk-forward, y su propia entrada en esta sección 7.
+
 ```
 Estado: pre-paper (no iniciada)
 Fecha inicio paper: <pendiente, ver Hito C del ROADMAP>
-Fecha inicio live: N/A
+Fecha inicio live: nunca (estrategia de desarrollo, no será promovida a live
+                          aunque pase Hito G — ver bloque explicativo arriba)
 Trades acumulados en vivo: 0
+
+Propósito durante paper trading (Hito C):
+  Validación operativa del SISTEMA, no de la estrategia.
+  - Verificar heartbeat real cada 60s de wall-clock.
+  - Verificar pings a Healthchecks.io.
+  - Verificar disparo de alerta Telegram al caer el proceso.
+  - Ejercitar U1-U4 con equity en movimiento real.
+  - Entrenar al operador en la cadencia diaria/semanal de POLICY 4.
+  - Detectar comportamientos solo observables fuera de backtest
+    (DEUDA-2 en live, doble Initialize, etc).
+  Que la estrategia pierda equity virtual durante el paper es esperado e
+  irrelevante para esta evaluación.
 
 Umbrales de apagado automático (cualquiera dispara → liquidación inmediata + pausa):
 
@@ -266,6 +283,10 @@ Umbrales de apagado automático (cualquiera dispara → liquidación inmediata +
   * U3 y U4 solo se arman tras 50 trades acumulados en vivo.
     Antes de 50 trades: solo U1 y U2 activos.
 
+  Nota: dado que esta estrategia no opera live, "trades acumulados en vivo"
+        cuenta exclusivamente trades de paper. Si paper termina antes de
+        50 trades, U3 y U4 nunca se arman para esta estrategia.
+
 Acción al disparar cualquier umbral:
   - Liquidación inmediata de la posición abierta de esta estrategia (a mercado).
   - La estrategia queda excluida del flujo de generación de señales en strategies.json.
@@ -273,8 +294,8 @@ Acción al disparar cualquier umbral:
   - Notificación al operador (log Critical + heartbeat marca degraded).
   (Implementado runtime por StrategyHealthMonitor — OPS-2, ADR-023, 2026-05-21.)
 
-Reactivación: análisis escrito en DECISIONS.md/incidents/, reactivación manual en strategies.json.
-              No se exige re-paper trading antes de reactivar en live.
+Reactivación (solo aplicable a reactivar paper, no live):
+  Análisis escrito en DECISIONS.md/incidents/, reactivación manual en strategies.json.
 
 Filtro de régimen: opera solo cuando AccordHmmClassifier clasifica el régimen 4h
                    de BTCUSDT como Trend (ver Hito B - Paso 3, ADR-017, ADR-019).

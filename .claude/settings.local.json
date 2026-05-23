@@ -7,7 +7,12 @@
       "Bash(Get-ChildItem -Path \"F:\\\\DesarrolloTrading\\\\QuantConnect\\\\Lean\" -Directory)",
       "Bash(Select-Object Name)",
       "PowerShell(ls \"F:\\\\DesarrolloTrading\\\\QuantConnect\\\\Lean\" | Where-Object { $_.PSIsContainer })",
-      "PowerShell(ls -Recurse \"F:\\\\DesarrolloTrading\\\\QuantConnect\\\\Lean\\\\Trading.Domain\" -Directory | Where-Object {$_.FullName -notmatch \"obj|bin\"})"
+      "PowerShell(ls -Recurse \"F:\\\\DesarrolloTrading\\\\QuantConnect\\\\Lean\\\\Trading.Domain\" -Directory | Where-Object {$_.FullName -notmatch \"obj|bin\"})",
+      "PowerShell(Copy-Item *)",
+      "PowerShell(Test-Path *)",
+      "PowerShell(New-Item *)",
+      "PowerShell(Add-Type -Assembly System.IO.Compression.FileSystem; $zip = [System.IO.Compression.ZipFile]::OpenRead\\(\"F:\\\\Mis Documentos\\\\Cripto monedas\\\\Trading\\\\Data\\\\Velas\\\\4h\\\\BTCUSDT\\\\2025-01.zip\"\\); $zip.Entries | Select-Object Name, Length | Format-Table -AutoSize; $zip.Dispose\\(\\))",
+      "PowerShell(Add-Type -Assembly System.IO.Compression.FileSystem; $zip = [System.IO.Compression.ZipFile]::OpenRead\\(\"F:\\\\Mis Documentos\\\\Cripto monedas\\\\Trading\\\\Data\\\\Velas\\\\4h\\\\BTCUSDT\\\\2025-01.zip\"\\); $entry = $zip.GetEntry\\(\"BTCUSDT-4h-2025-01.csv\"\\); $reader = New-Object System.IO.StreamReader\\($entry.Open\\(\\)\\); $lines = for \\($i = 0; $i -lt 5; $i++\\) { $reader.ReadLine\\(\\) }; $reader.Close\\(\\); $zip.Dispose\\(\\); $lines)"
     ]
   }
 }
