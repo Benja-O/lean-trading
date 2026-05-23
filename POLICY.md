@@ -152,30 +152,54 @@ Cuando una estrategia recién arranca paper trading, tiene < 50 trades acumulado
 
 La automatización cubre los umbrales de las secciones 2 y 3. Lo que NO automatiza es la observación de patrones que el sistema no sabe ver: degradación lenta dentro de banda, anomalías en la microestructura, slippage anómalo, comportamiento del exchange, eventos del mundo que el sistema desconoce.
 
-### 4.1 Diario (2-5 minutos)
+### 4.0 Principio: la cadencia escala con el portafolio activo
 
+Las tareas listadas en 4.1–4.4 se ejecutan en cada ciclo independientemente de cuántas estrategias o timeframes haya activos. Lo que escala es el **tiempo necesario para ejecutarlas**, no la frecuencia ni la naturaleza de las tareas.
+
+Los rangos de tiempo en cada sección son estimaciones para **una estrategia activa de baja densidad de trades** (orden de magnitud: una estrategia en 1h con ~1-3 trades por día). Si el portafolio activo es más complejo, multiplicar el tiempo de inspección por estrategia activa y por densidad de trades esperada.
+
+**Regla operativa:** si el portafolio activo hace inviable cumplir la cadencia con honestidad en una sesión razonable, **el problema es el portafolio, no la cadencia escrita**. Las dos opciones honestas son: reducir el portafolio (pausar estrategias, agregar filtros más restrictivos) o aceptar mayor latencia de inspección documentando la decisión en `DECISIONS.md`. Lo que NO es aceptable es marcar la cadencia como cumplida sin haberla cumplido.
+
+Esto es consistente con P4: el monitor automático cubre los umbrales duros; la inspección humana es la capa que detecta patrones que el monitor no ve. Si la inspección humana se vuelve teatro porque no hay tiempo de hacerla en serio, esa capa desaparece.
+
+### 4.1 Diario
+
+**Tareas (independientes del tamaño del portafolio):**
 - Verificar que `heartbeat.json` tenga timestamp reciente (< 5 minutos).
 - Verificar último ping a Healthchecks.io en el dashboard.
 - Revisar el JSONL del día previo: ¿hubo eventos Critical?, ¿órdenes en estado raro?, ¿el kill switch se activó y no me enteré?
-- Cinco minutos. Si no se hace, la cadencia se quiebra silenciosamente.
+- Revisar fills del día por estrategia activa: ¿órdenes huérfanas?, ¿discrepancias entre estrategias?
 
-### 4.2 Semanal (20-30 minutos)
+**Tiempo estimado:** 2-5 minutos por estrategia activa. Si no se hace, la cadencia se quiebra silenciosamente.
 
-- Calcular y registrar manualmente para cada estrategia activa: PF rolling 30 trades, expectancy rolling, DD desde ATH, DD rolling 30 días.
+### 4.2 Semanal
+
+**Tareas (por estrategia activa):**
+- Calcular y registrar manualmente: PF rolling 30 trades, expectancy rolling, DD desde ATH, DD rolling 30 días.
 - Revisar trades del período: ¿alguno con slippage anómalo (>2x el promedio)?, ¿alguno que se cerró por time exit en lugar de SL/TP (puede indicar señal mal calibrada)?
+- Anotar resultados en el cuaderno operativo (no en el repo del sistema; este cuaderno es del operador). Comparar con la semana previa: ¿hay tendencia de degradación que el monitor aún no detecta?
+
+**Tareas (cross-estrategia, una vez por semana):**
 - Cross-check contra calendario macro: ¿hay eventos de la sección 2.3 esta semana próxima que requieran pausa manual?
-- Anotar resultados en un cuaderno operativo (no en el repo del sistema; este cuaderno es del operador). Comparar con la semana previa: ¿hay tendencia de degradación que el monitor aún no detecta?
+- Si hay múltiples estrategias activas: ¿están correlacionadas en P&L de forma que el sistema agregado tenga concentración de riesgo que ninguna por sí sola refleja?
 
-### 4.3 Mensual (1-2 horas)
+**Tiempo estimado:** 15-25 minutos por estrategia activa + 5-10 minutos cross-estrategia.
 
+### 4.3 Mensual
+
+**Tareas (independientes del tamaño del portafolio):**
 - Revisar `DECISIONS.md/incidents/` del mes: ¿qué incidentes ocurrieron?, ¿qué patrones aparecen?
 - Revisar `ROADMAP.md`: ¿hay deudas (DEUDA-*) que ya se pueden cobrar?, ¿hay refactors postergados cuyo trigger se cumplió?
 - Revisar si algún aprendizaje del mes amerita ADR nuevo.
 - Backup del JSONL y `heartbeat.json` históricos a almacenamiento secundario.
 
+**Tiempo estimado:** 1-2 horas. Escala poco con el portafolio (la revisión de roadmap y deudas es global; la de incidentes escala con la cantidad de incidentes, no de estrategias).
+
 ### 4.4 Trimestral / al cierre de cada hito
 
+**Tareas:**
 - **Revisión de la propia POLICY.md.** Los umbrales que pusiste hace 3 meses, ¿siguen calibrados a la luz de los datos reales acumulados? Si una estrategia operó 3 meses con PF rolling consistentemente en 1.1-1.3 y nunca tocó el umbral, ¿los umbrales son razonables o son tan laxos que nunca van a disparar? Al revés también: si una estrategia sana fue apagada y el post-mortem reveló que era ruido normal, los umbrales están demasiado estrictos.
+- **Revisión de la cadencia (sección 4 misma).** ¿Los tiempos estimados aún reflejan la realidad del portafolio actual? ¿Estás cumpliendo la cadencia con honestidad o ya empezaste a saltearte pasos?
 - Cada cambio a POLICY: entrada en `DECISIONS.md` justificando.
 
 ---
@@ -240,7 +264,7 @@ Para que una estrategia entre al sistema (paper o live):
 1. Tiene sus tests de referencia y de comportamiento (regla del `AI.md`).
 2. Tiene entrada poblada en la sección 7 de POLICY (estado, umbrales, fechas).
 3. Tiene entrada en `DECISIONS.md` justificando la activación.
-4. Si va a live (no solo paper): operó un mínimo de paper trading sin disparar umbrales. La cantidad mínima la define el operador caso por caso; recomendación: 50 trades o 30 días, el que llegue antes.
+4. Si va a live (no solo paper): operó un mínimo de paper trading sin disparar umbrales. La cantidad mínima la define el operador caso por caso; recomendación: **50 trades o 30 días de wall clock, el que llegue después** (no antes). Razón: ambos criterios capturan dimensiones distintas — los trades dan significancia estadística, los días dan exposición a regímenes de mercado distintos. Una estrategia en 15m puede acumular 50 trades en una semana pero todavía no haber visto un cambio de régimen; una en 1d puede pasar 30 días y haber visto solo 10 trades. Esperar a que se cumplan ambos protege contra los dos sesgos.
 
 ---
 
