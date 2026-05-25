@@ -323,3 +323,9 @@ Si en el código provisto por el usuario detectás:
 - Un `double` donde debería haber `decimal`
 
 **Detente inmediatamente**, señala la violación citando la regla específica, y propone el refactor. **No continúes con la tarea solicitada hasta que el usuario apruebe el fix** (en código existente) o aplicalo directamente (en código nuevo que estés generando vos).
+
+## Code Navigation
+Always use LSP tools for C# code navigation:
+- Use LSP goToDefinition before modifying any unfamiliar code
+- Use LSP findReferences before any refactoring
+- Use LSP diagnostics to verify changes compile correctly

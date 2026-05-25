@@ -25,5 +25,11 @@ namespace Trading.Strategies.Adapters
             var symbol = _instrumentResolver.Resolve(instrumentId);
             return _algorithm.Portfolio[symbol].Invested;
         }
+
+        public decimal GetPositionQuantity(InstrumentId instrumentId)
+        {
+            var symbol = _instrumentResolver.Resolve(instrumentId);
+            return _algorithm.Portfolio[symbol].Quantity;
+        }
     }
 }

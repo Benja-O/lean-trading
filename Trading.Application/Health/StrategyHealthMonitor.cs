@@ -15,6 +15,11 @@ namespace Trading.Application.Health
     ///
     /// NO implementa IRiskMonitor: la degradación de una estrategia NO activa el kill switch
     /// global. Ver ADR-023.
+    ///
+    /// El parámetro <c>initialEquityPerStrategy</c> representa el capital atribuido a
+    /// CADA estrategia que reporte fills al monitor. En la fase actual (1 estrategia
+    /// activa por backtest) coincide con el capital total de la cuenta. Cuando se
+    /// implemente allocator multi-estrategia, será el monto asignado a cada una.
     /// </summary>
     public sealed class StrategyHealthMonitor : IStrategyHealthMonitor
     {
@@ -23,6 +28,7 @@ namespace Trading.Application.Health
         private readonly IOrderRouter _orderRouter;
         private readonly ITradingLogger _logger;
         private readonly IDomainEventBus _eventBus;
+        private readonly decimal _initialEquityPerStrategy;
 
         private readonly object _lock = new();
 
@@ -44,13 +50,20 @@ namespace Trading.Application.Health
             IClock clock,
             IOrderRouter orderRouter,
             ITradingLogger logger,
-            IDomainEventBus eventBus)
+            IDomainEventBus eventBus,
+            decimal initialEquityPerStrategy)
         {
+            if (initialEquityPerStrategy <= 0m)
+                throw new ArgumentOutOfRangeException(
+                    nameof(initialEquityPerStrategy),
+                    $"initialEquityPerStrategy debe ser > 0. Recibido: {initialEquityPerStrategy}.");
+
             _thresholds = thresholds ?? throw new ArgumentNullException(nameof(thresholds));
             _clock = clock ?? throw new ArgumentNullException(nameof(clock));
             _orderRouter = orderRouter ?? throw new ArgumentNullException(nameof(orderRouter));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _eventBus = eventBus ?? throw new ArgumentNullException(nameof(eventBus));
+            _initialEquityPerStrategy = initialEquityPerStrategy;
 
             eventBus.Subscribe<OrderFilledEvent>(OnOrderFilled);
         }
@@ -297,8 +310,8 @@ namespace Trading.Application.Health
             if (_openPositions.ContainsKey(id)) return;
             _openPositions[id] = null;
             _closedTrades[id] = new LinkedList<ClosedTrade>();
-            _equity[id] = 0m;
-            _ath[id] = 0m;
+            _equity[id] = _initialEquityPerStrategy;
+            _ath[id] = _initialEquityPerStrategy;
             _dailyEquity[id] = new LinkedList<DailyEquityPoint>();
             _lastEvaluatedDay[id] = null;
             _u2SustainedDaysCounter[id] = 0;

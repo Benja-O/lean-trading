@@ -43,7 +43,7 @@ namespace Trading.Application.Tests.Health
                 rollingWindowDays: windowDays);
 
         private (StrategyHealthMonitor monitor, IDomainEventBus bus, CapturingEventSubscriber<RiskLimitBreachedEvent> capturer)
-            Build(StrategyHealthThresholds? thresholds = null)
+            Build(StrategyHealthThresholds? thresholds = null, decimal initialEquityPerStrategy = 0.000001m)
         {
             var eventBus = new DomainEventBus(_logger);
             var capturer = new CapturingEventSubscriber<RiskLimitBreachedEvent>(eventBus);
@@ -52,7 +52,8 @@ namespace Trading.Application.Tests.Health
                 _clock,
                 _orderRouter,
                 _logger,
-                eventBus);
+                eventBus,
+                initialEquityPerStrategy);
             return (monitor, eventBus, capturer);
         }
 
@@ -109,7 +110,8 @@ namespace Trading.Application.Tests.Health
         public void OnCierre_CalculaPnlRealizado_CasoLong()
         {
             // Entry Long @100 qty=+1, SL @95 → PnL = (95-100)*1*1 = -5
-            var (monitor, bus, _) = Build();
+            // Capital grande para que la pérdida no dispare U1 (DD=5/10000=0.05%<<99%).
+            var (monitor, bus, _) = Build(initialEquityPerStrategy: 10_000m);
 
             Fill(bus, Id, OrderPurpose.Entry, price: 100m, qty: +1m);
             Fill(bus, Id, OrderPurpose.StopLoss, price: 95m, qty: -1m);
@@ -296,7 +298,11 @@ namespace Trading.Application.Tests.Health
             var lCapturer = new CapturingEventSubscriber<RiskLimitBreachedEvent>(lBus);
             var lMonitor = new StrategyHealthMonitor(
                 SafeThresholds(u1: 0.99m, u2Fraction: 0.15m, u2Days: 2),
-                lClock, lRouter, lLogger, lBus);
+                lClock, lRouter, lLogger, lBus,
+                // Capital inicial despreciable: simula la convención antigua donde el monitor
+                // partía de equity=0. Los tests están escritos en términos de PnL crudo y ese
+                // contrato se preserva.
+                initialEquityPerStrategy: 0.000001m);
 
             void LFill(string eid, OrderPurpose p, decimal price, decimal qty)
                 => lBus.Publish(new OrderFilledEvent(lClock.UtcNow, eid, Btc, p, qty, price));
@@ -353,8 +359,10 @@ namespace Trading.Application.Tests.Health
         public void U3_MenosDeLosTradesMinimosParaArmar_NoSeEvalua()
         {
             // minToArm=3, windowTrades=2, pfSustained=1. Tras 2 pérdidas (total<3): no armado, no dispara.
+            // Capital grande para que pérdidas de -20 no disparen U1 (DD=40/10000=0.4%<<99%).
             var (monitor, bus, capturer) = Build(SafeThresholds(
-                u1: 0.99m, minToArm: 3, windowTrades: 2, pfSustained: 1));
+                u1: 0.99m, minToArm: 3, windowTrades: 2, pfSustained: 1),
+                initialEquityPerStrategy: 10_000m);
 
             Fill(bus, Id, OrderPurpose.Entry, price: 100m, qty: +1m);
             Fill(bus, Id, OrderPurpose.StopLoss, price: 80m, qty: -1m);
@@ -406,8 +414,10 @@ namespace Trading.Application.Tests.Health
         {
             // minToArm=2, windowTrades=2, pfSustained=2.
             // Trade#2: arm, eval PF=0<1, counter=1. Trade#3: eval PF=0<1, counter=2 → TRIGGER.
+            // Capital grande para que pérdidas de -20 no disparen U1 (DD=60/10000=0.6%<<99%).
             var (monitor, bus, capturer) = Build(SafeThresholds(
-                u1: 0.99m, minToArm: 2, windowTrades: 2, pfSustained: 2));
+                u1: 0.99m, minToArm: 2, windowTrades: 2, pfSustained: 2),
+                initialEquityPerStrategy: 10_000m);
 
             Fill(bus, Id, OrderPurpose.Entry, price: 100m, qty: +1m);
             Fill(bus, Id, OrderPurpose.StopLoss, price: 80m, qty: -1m); // trade#1 → not armed
@@ -431,8 +441,10 @@ namespace Trading.Application.Tests.Health
             // Trade#2: arm, 2 pérdidas en ventana → PF=0<1, counter=1.
             // Trade#3: pérdida → PF=0<1, counter=2. No trigger (need 3).
             // Trade#4: ganancia → ventana=[pérdida, ganancia], PF>1 → counter=0. No dispara.
+            // Capital grande para que pérdidas de -20 no disparen U1 (DD=60/10000=0.6%<<99%).
             var (monitor, bus, capturer) = Build(SafeThresholds(
-                u1: 0.99m, minToArm: 2, windowTrades: 2, pfSustained: 3, expSustained: 100));
+                u1: 0.99m, minToArm: 2, windowTrades: 2, pfSustained: 3, expSustained: 100),
+                initialEquityPerStrategy: 10_000m);
 
             Fill(bus, Id, OrderPurpose.Entry, price: 100m, qty: +1m);
             Fill(bus, Id, OrderPurpose.StopLoss, price: 80m, qty: -1m); // trade#1, not armed
@@ -458,10 +470,12 @@ namespace Trading.Application.Tests.Health
         {
             // U3 deshabilitado con pfSustained=100. minToArm=2, windowTrades=2, expSustained=2.
             // Trade#2: arm, eval U3 counter=1 (<100), eval U4 exp<0 counter=1. Trade#3: U4 counter=2 → TRIGGER.
+            // Capital grande para que pérdidas de -20 no disparen U1 (DD=60/10000=0.6%<<99%).
             var (monitor, bus, capturer) = Build(SafeThresholds(
                 u1: 0.99m, u2Fraction: 0.99m,
                 minToArm: 2, windowTrades: 2,
-                pfSustained: 100, expSustained: 2));
+                pfSustained: 100, expSustained: 2),
+                initialEquityPerStrategy: 10_000m);
 
             Fill(bus, Id, OrderPurpose.Entry, price: 100m, qty: +1m);
             Fill(bus, Id, OrderPurpose.StopLoss, price: 80m, qty: -1m); // trade#1

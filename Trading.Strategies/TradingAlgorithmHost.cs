@@ -42,6 +42,8 @@ namespace Trading.Strategies
     /// </summary>
     public class TradingAlgorithmHost : QCAlgorithm
     {
+        private const decimal InitialAccountCashUsdt = 100_000m;
+
         private readonly StrategyConfigLoader _strategyConfigurationLoader = new();
         private readonly List<StrategyExecutor> _strategyExecutors = new();
 
@@ -77,11 +79,11 @@ namespace Trading.Strategies
             _portfolioState = new LeanPortfolioAdapter(this, _instrumentResolver);
             _instrumentMetadata = new LeanInstrumentMetadataAdapter(this, _instrumentResolver);
             _orderRegistry = new OrderRegistry();
-            _orderRouter = new LeanOrderRouter(this, _instrumentResolver, _orderRegistry);
             _clock = new LeanClock(this);
             // logs/trading-{fecha}.jsonl relativo al directorio de salida, retención 30 días
             _structuredLogSink = new JsonlFileLogSink(_clock);
             _logger = new LeanLogger(this, _structuredLogSink);
+            _orderRouter = new LeanOrderRouter(this, _instrumentResolver, _orderRegistry, _portfolioState, _logger);
             _priceRounder = new PriceRounder(_instrumentMetadata);
 
             // ===== Servicios de Application =====
@@ -111,7 +113,7 @@ namespace Trading.Strategies
             SetStartDate(2025, 1, 1);
             SetEndDate(2026, 3, 31);
             SetAccountCurrency("USDT");
-            SetCash("USDT", 100000);
+            SetCash("USDT", InitialAccountCashUsdt);
             SetCash("USD", 0);
 
             drawdownMonitor.InitializeWithCurrentValue();
@@ -249,12 +251,20 @@ namespace Trading.Strategies
 
             // ===== Servicios que requieren la lista de executors ya armada =====
             var strategyHealthThresholds = StrategyHealthThresholds.FromPolicyDefaults();
+
+            // Capital atribuido al monitor de salud por estrategia. Usamos la constante
+            // del cash inicial porque Portfolio.TotalPortfolioValue todavía es 0 durante
+            // Initialize() (Lean refleja el SetCash recién después de que Initialize
+            // retorna). En la fase actual hay 1 estrategia activa por backtest, así que
+            // toda la cuenta es suya.
+            // TODO: cuando exista allocator multi-estrategia, atribuir por executor.
             var strategyHealthMonitor = new StrategyHealthMonitor(
                 strategyHealthThresholds,
                 _clock,
                 _orderRouter,
                 _logger,
-                domainEventBus);
+                domainEventBus,
+                InitialAccountCashUsdt);
             _barProcessingService = new BarProcessingService(
                 _portfolioState, _orderRouter, _riskOrchestrator, _positionSizer,
                 _logger, domainEventBus, _clock,

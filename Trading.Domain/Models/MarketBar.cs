@@ -1,4 +1,3 @@
-using System;
 using Trading.Domain.ValueObjects;
 
 namespace Trading.Domain.Models

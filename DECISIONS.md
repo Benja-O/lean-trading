@@ -10,6 +10,70 @@
 
 ---
 
+## ADR-025 — LiquidateInstrument explícito y base de equity correcta en StrategyHealthMonitor
+**Fecha:** 2026-05-25
+**Estado:** Aceptada
+
+### Contexto
+
+Backtests de `EmaCrossStrategy_BTCUSDT_15m` (ene 2025 - mar 2026) lanzaron `OPS-2 invariante violado: Entry con posición ya abierta` de forma masiva, junto con disparos de U1 con DD absolutos imposibles (186 %, 26 %) sobre cuentas que apenas se habían movido. La estrategia degradaba a los pocos días, dejando el resto del backtest sin operar y los reportes inservibles.
+
+El diagnóstico (logs DIAG temporales en `OrderEventMapper`, `OrderLifecycleService`, `StrategyHealthMonitor`) reveló tres bugs distintos pero acoplados:
+
+**Bug 1 - Tag reusado por `_algorithm.Liquidate(symbol, tag)`.** Lean reutiliza el mismo tag cliente para las tres acciones que dispara: cancel SL, cancel TP, MarketOrder de cierre. El `OrderEventMapper` procesaba el primer evento (cancel SL), hacía `Forget(tag)`, y descartaba los siguientes como "residuales esperados" - incluido el `Filled` del MarketOrder que SÍ había cerrado la posición real. El monitor quedaba con `_openPositions[id]` no nulo y la próxima Entry violaba el invariante OPS-2.
+
+**Bug 2 - Equity base 0 en `StrategyHealthMonitor`.** `_equity[id]` y `_ath[id]` arrancaban en cero; acumulaban sólo PnL realizado. La fórmula U1 `(ATH - equity) / ATH` daba porcentajes enormes cuando el primer trade era winner y el segundo era loser modesto. Ejemplo real: trade winner +2814, trade loser -461 → DD calculado 26 % sobre una cuenta que cayó 0,45 %. U2 sufría el mismo bug por compartir la serie.
+
+**Bug 3 - Tag vacío en `Transactions.CancelOrder(id)`.** Lean propaga el evento `Canceled` con `OrderTicket.Tag` vacío cuando se cancela por esa vía. El mapper loguea `ERROR: evento sin tag` y los handles SL/TP del executor no reciben su evento Canceled (cosmético - el OnFilled del cierre real sí se publica al monitor con su tag nuevo, así que el invariante OPS-2 ya no se viola, pero el log queda contaminado).
+
+### Decisión
+
+**Fix 1 - `LeanOrderRouter.LiquidateInstrument` explícito.** Reemplazado el uso de `_algorithm.Liquidate(symbol, tag)` por una secuencia controlada:
+
+1. Cancelar las órdenes abiertas del símbolo invocando `OrderTicket.Cancel()` directamente (preserva el tag original). Cada evento Canceled llega al mapper con su tag propio (registrado como `StopLoss`/`TakeProfit`), se procesa, hace `Forget` y notifica al executor.
+2. Leer `IPortfolioState.GetPositionQuantity(instrumentId)`. Si la posición real es distinta de cero, enviar un `MarketOrder` con tag nuevo registrado bajo el `Purpose` solicitado (típicamente `TimeExit`). Su `Filled` se publica al monitor con la semántica correcta.
+
+Si no hay posición real (caso defensivo cuando SL/TP ya cerraron antes del Liquidate), no se envía MarketOrder; sólo se cancelan las órdenes abiertas residuales.
+
+**Fix 2 - `IPortfolioState` expone `GetPositionQuantity(InstrumentId)`.** Nuevo método en la abstracción del dominio. `LeanPortfolioAdapter` lo implementa con `_algorithm.Portfolio[symbol].Quantity`. Necesario para construir el MarketOrder de cierre sin depender de `Liquidate()`.
+
+**Fix 3 - `StrategyHealthMonitor` arranca equity y ATH en capital atribuido.** El constructor recibe un parámetro nuevo `decimal initialEquityPerStrategy` (validado > 0). `EnsureBuckets` inicializa `_equity[id]` y `_ath[id]` en ese valor en lugar de cero. La fórmula de U1 `(ATH - equity) / ATH` queda intacta; ahora opera sobre equity de cuenta y no sobre PnL crudo. U2, U3 y U4 también se benefician sin cambios adicionales.
+
+En `TradingAlgorithmHost`, el cash inicial se extrajo a constante `InitialAccountCashUsdt = 100_000m` y se pasa al monitor. `Portfolio.TotalPortfolioValue` no se puede usar en `Initialize()` porque devuelve 0 hasta que Lean completa la configuración de cuenta. Mientras haya UNA estrategia activa por backtest, `InitialAccountCashUsdt` representa todo el capital atribuido a esa estrategia. Cuando exista allocator multi-estrategia, ese parámetro se atribuye por executor; queda marcado como TODO en el wiring.
+
+### Alternativas consideradas
+
+**A - Parchear `OrderEventMapper` para no hacer `Forget` en Canceled de TimeExit y esperar el Filled del MarketOrder.** Descartada: requiere el mapper distinguir si el tag corresponde a un Liquidate combinado (cancel+market) o a un cancel "puro" (ej. cancelar StopLoss tras TakeProfit hit), información que el mapper no tiene. Además, si la posición ya estaba cerrada por SL/TP antes del Liquidate, no se genera MarketOrder y el Filled nunca llegaría, dejando el tag colgado.
+
+**B - Mantener `_algorithm.Liquidate(symbol)` global y resolver el tag reusado dentro del mapper.** Descartada por la misma razón: cualquier solución que mantenga `Liquidate` arrastra la ambigüedad semántica del tag compartido entre N acciones.
+
+**C (elegida) - Cancelaciones explícitas + MarketOrder con tag propio.** Mínima carga conceptual sobre el mapper: una orden = un tag = un ciclo de vida. La complejidad del Liquidate vive en una sola capa (`LeanOrderRouter`) y no se filtra al dominio.
+
+**D - Para el bug 2, inyectar `IPortfolioState` en `StrategyHealthMonitor` y leer `TotalPortfolioValue` en cada fill.** Descartada: el monitor está diseñado para ser estrategia-aislado (ADR-023). Cuando exista allocator multi-estrategia, `TotalPortfolioValue` no representa el equity atribuido a una estrategia individual. Además, agregar dependencia con el portfolio en la capa Application complica los tests sin beneficio en la fase actual.
+
+**E (elegida para el bug 2) - Parámetro `initialEquityPerStrategy` en el constructor.** Mantiene la abstracción intacta, atribuye capital explícitamente al monitor, y el contrato queda preparado para allocator multi-estrategia sin reescribir el componente.
+
+### Consecuencias
+
+- OPS-2 invariante violado: cerrado. Backtest 15m de 14 meses ahora corre limpio.
+- U1 y U2 disparan únicamente con DD reales contra el equity de cuenta.
+- Logs `OrderEventMapper: evento sin tag` durante TimeExit/Liquidate: eliminados. La línea sigue activa para detectar liquidaciones globales y órdenes externas, que es su propósito original.
+- `IPortfolioState` extendido con `GetPositionQuantity`. Cambio aditivo, no breaking. Fake en tests actualizado.
+- `LeanOrderRouter` constructor recibe `IPortfolioState` y `ITradingLogger` adicionales.
+- `StrategyHealthMonitor` constructor recibe `decimal initialEquityPerStrategy`. Cambio breaking en el wiring del host y en los tests; resuelto en una sola pasada.
+- `TradingAlgorithmHost.InitialAccountCashUsdt` quedó como constante de clase. Cambios futuros al cash inicial requieren editar un único punto.
+- Suite de tests creció a 121 verdes (de 97 previos). Los nuevos cubren la base de equity correcta del monitor.
+- Backtest `EmaCrossStrategy_BTCUSDT_15m` ene 2025 - mar 2026: 147 órdenes, end equity 87.148 USDT, DD 21.5 %, U2 dispara correctamente el 06/02/2025 con DD rolling 18.6 % sostenido 5 días, y la estrategia queda degradada para el resto del backtest. POLICY 3.1 se cumple sin código nuevo.
+- `EmaCrossStrategy_BTCUSDT_15m` confirma su loss rate de 68 % y expectancy negativa: la estrategia no es viable con esos parámetros, lo cual es consistente con su veto en POLICY P1 (sin walk-forward, no va a live).
+- ADR-023 sigue vigente en su diseño; este ADR documenta correcciones de implementación. Se agrega nota cruzada.
+
+### Riesgo residual
+
+- El comportamiento de `OrderTicket.Cancel()` vs `Transactions.CancelOrder(id)` respecto al tag depende del runtime de Lean. Si una actualización de Lean cambia el comportamiento, los tests no lo detectarían porque corren contra un fake. Mitigación: el test de integración con backtest real (que existe en CI) detectaría regresiones por el síntoma de logs `evento sin tag` durante Liquidate.
+- Cuando exista allocator multi-estrategia, el TODO en `TradingAlgorithmHost` requiere actualización. Trigger: implementación del Hito que introduzca múltiples estrategias activas en paralelo.
+
+---
+
 ## ADR-024 — SemanticStateMapper adaptativo a K + multi-seed Baum-Welch (resuelve ADR-020)
 **Fecha:** 2026-05-22
 **Estado:** Aceptada
@@ -107,6 +171,7 @@ POLICY sección 3 exige liquidación dirigida y exclusión de la estrategia ante
 - **Jerarquía entre POLICY 2 (sistema) y POLICY 3 (estrategia).** POLICY 2.1 (DD global del portfolio > 25% → kill switch global + `LiquidateAll` + cooling-off de 24h) está implementada por `DrawdownMonitor` y sigue activa e independiente. POLICY 3.1 (DD del equity de una estrategia individual > 25% → liquidación dirigida + exclusión) la implementa OPS-2 sin interferir con la primera. Una estrategia puede apagarse mientras el portfolio sigue operando otras estrategias; el portfolio puede entrar en kill global aunque ninguna estrategia individual haya disparado U1. Son capas complementarias, no sustitutas. En el run del backtest de OPS-2 (21-05-2026), U1 individual disparó (DD 61% del equity de la estrategia) mientras el DD global del portfolio terminó en 2.3% — POLICY 3 actuó, POLICY 2 nunca se activó. Comportamiento deseado.
 - **Drawdown del equity de una estrategia ≠ pérdida absoluta en fase warm-up.** POLICY 3.2 define el equity de la estrategia como suma de P&L realizado desde el primer trade, y U1 como DD% desde el ATH de ese equity. En fase warm-up (primeros trades), un trade ganador inicial seguido de un trade perdedor normal puede producir un DD% grande aunque la estrategia esté todavía en territorio positivo. Caso concreto del run del 21-05-2026: EmaCross_BTCUSDT_1h ganó +3,996 USDT en el primer trade (ATH = 3,996), perdió −2,441 en el segundo (equity = +1,555), U1 disparó por DD del 61% desde ATH a pesar de que la estrategia seguía positiva en +1,555. El monitor está calculando exactamente lo que POLICY 3.2 define; la sensibilidad de U1 en warm-up es una propiedad emergente de medir "caída desde máximo local" sobre un equity de magnitud chica. Esta observación se traslada a Hito G como input para el walk-forward, no como corrección a POLICY ahora (ver POLICY 6.2: POLICY no se modifica durante un drawdown). La pregunta abierta para Hito G no es solo "¿es 25% el umbral correcto?" sino también "¿U1 debería medir devolución de ganancias o pérdida real?" — son métricas conceptualmente distintas.
 - **Baseline del backtest post-OPS-2.** El backtest del EmaCrossStrategy_BTCUSDT_1h pasa de 225 órdenes (pre-OPS-2) a 6 órdenes (post-OPS-2) por la combinación de las dos observaciones anteriores. Este es el nuevo baseline de no-regresión hasta que Hito G recalibre o redefina U1. Cualquier cambio futuro al monitor que altere este número requiere análisis explícito.
+- La implementación inicial tenía dos bugs de cómputo de equity y base que se manifestaron en el backtest real de ene-mar 2025: equity arrancaba en cero (no en el capital atribuido a la estrategia) y `LiquidateInstrument` reusaba tags con consecuencias en el mapper. Ambos resueltos en ADR-025 sin alterar el diseño documentado en este ADR.
 
 ---
 

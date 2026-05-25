@@ -10,14 +10,6 @@
     },
     "15m": {
       "Strategies": [
-
-      ]
-    },
-    "30m": {
-      "Strategies": []
-    },
-    "1h": {
-      "Strategies": [
         {
           "StrategyName": "EmaCrossStrategy",
           "FileModelName": "",
@@ -32,6 +24,14 @@
           "MaxBars": 20,
           "CombineWithTimeExit": true
         }
+      ]
+    },
+    "30m": {
+      "Strategies": []
+    },
+    "1h": {
+      "Strategies": [
+
       ]
     },
     "4h": {

@@ -22,5 +22,12 @@ namespace Trading.Domain.Abstractions
         /// Equivale a Lean's Portfolio[symbol].Invested.
         /// </summary>
         bool IsInvested(InstrumentId instrumentId);
+
+        /// <summary>
+        /// Cantidad neta de la posición abierta en el instrumento dado. Positivo si long, negativo si short,
+        /// cero si no hay posición. Equivale a Lean's Portfolio[symbol].Quantity. Necesario para construir
+        /// órdenes de cierre explícitas que no dependan de Liquidate().
+        /// </summary>
+        decimal GetPositionQuantity(InstrumentId instrumentId);
     }
 }

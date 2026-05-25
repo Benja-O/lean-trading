@@ -12,7 +12,12 @@
       "PowerShell(Test-Path *)",
       "PowerShell(New-Item *)",
       "PowerShell(Add-Type -Assembly System.IO.Compression.FileSystem; $zip = [System.IO.Compression.ZipFile]::OpenRead\\(\"F:\\\\Mis Documentos\\\\Cripto monedas\\\\Trading\\\\Data\\\\Velas\\\\4h\\\\BTCUSDT\\\\2025-01.zip\"\\); $zip.Entries | Select-Object Name, Length | Format-Table -AutoSize; $zip.Dispose\\(\\))",
-      "PowerShell(Add-Type -Assembly System.IO.Compression.FileSystem; $zip = [System.IO.Compression.ZipFile]::OpenRead\\(\"F:\\\\Mis Documentos\\\\Cripto monedas\\\\Trading\\\\Data\\\\Velas\\\\4h\\\\BTCUSDT\\\\2025-01.zip\"\\); $entry = $zip.GetEntry\\(\"BTCUSDT-4h-2025-01.csv\"\\); $reader = New-Object System.IO.StreamReader\\($entry.Open\\(\\)\\); $lines = for \\($i = 0; $i -lt 5; $i++\\) { $reader.ReadLine\\(\\) }; $reader.Close\\(\\); $zip.Dispose\\(\\); $lines)"
+      "PowerShell(Add-Type -Assembly System.IO.Compression.FileSystem; $zip = [System.IO.Compression.ZipFile]::OpenRead\\(\"F:\\\\Mis Documentos\\\\Cripto monedas\\\\Trading\\\\Data\\\\Velas\\\\4h\\\\BTCUSDT\\\\2025-01.zip\"\\); $entry = $zip.GetEntry\\(\"BTCUSDT-4h-2025-01.csv\"\\); $reader = New-Object System.IO.StreamReader\\($entry.Open\\(\\)\\); $lines = for \\($i = 0; $i -lt 5; $i++\\) { $reader.ReadLine\\(\\) }; $reader.Close\\(\\); $zip.Dispose\\(\\); $lines)",
+      "Bash(Select-String -Pattern \"error|warning|succeeded|failed\")",
+      "Bash(Select-Object -Last 30)",
+      "Bash(Select-String -Pattern \"error CS|warning CS|succeeded|failed|Error\")",
+      "Bash(Select-Object -Last 20)",
+      "Bash(findstr /i \"error warning Build succeeded\")"
     ]
   }
 }

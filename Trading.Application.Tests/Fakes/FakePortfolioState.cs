@@ -21,5 +21,16 @@ namespace Trading.Application.Tests.Fakes
             if (invested) _investedTickers.Add(instrumentId.Ticker);
             else _investedTickers.Remove(instrumentId.Ticker);
         }
+
+        private readonly Dictionary<string, decimal> _quantities = new();
+
+        public decimal GetPositionQuantity(InstrumentId instrumentId) =>
+            _quantities.TryGetValue(instrumentId.Ticker, out var q) ? q : 0m;
+
+        public void SetPositionQuantity(InstrumentId instrumentId, decimal quantity)
+        {
+            _quantities[instrumentId.Ticker] = quantity;
+            SetInvested(instrumentId, quantity != 0m);
+        }
     }
 }

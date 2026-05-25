@@ -14,15 +14,21 @@ namespace Trading.Strategies.Adapters
         private readonly QCAlgorithm _algorithm;
         private readonly LeanInstrumentResolver _instrumentResolver;
         private readonly OrderRegistry _orderRegistry;
+        private readonly IPortfolioState _portfolioState;
+        private readonly ITradingLogger _logger;
 
         public LeanOrderRouter(
             QCAlgorithm algorithm,
             LeanInstrumentResolver instrumentResolver,
-            OrderRegistry orderRegistry)
+            OrderRegistry orderRegistry,
+            IPortfolioState portfolioState,
+            ITradingLogger logger)
         {
             _algorithm = algorithm;
             _instrumentResolver = instrumentResolver;
             _orderRegistry = orderRegistry;
+            _portfolioState = portfolioState;
+            _logger = logger;
         }
 
         public IOrderHandle SubmitMarketOrder(
@@ -54,12 +60,43 @@ namespace Trading.Strategies.Adapters
             return new LeanOrderHandle(orderTicket);
         }
 
+        /// <summary>
+        /// Cierra la posición del instrumento de forma explícita: primero cancela todas las órdenes abiertas
+        /// (SL/TP) con su tag original ya registrado, luego emite un MarketOrder de cierre con tag propio.
+        /// NO usa _algorithm.Liquidate(symbol, tag) porque Lean reutiliza ese mismo tag para el Canceled del SL,
+        /// el Canceled del TP y el Filled del MarketOrder de cierre, haciendo que OrderEventMapper interprete el
+        /// primer Canceled como cierre completo y descarte el Filled real del MarketOrder.
+        /// </summary>
         public void LiquidateInstrument(
             InstrumentId instrumentId, OrderPurpose purpose, string executorIdentifier)
         {
-            string clientTag = _orderRegistry.Register(purpose, executorIdentifier, instrumentId);
             var symbol = _instrumentResolver.Resolve(instrumentId);
-            _algorithm.Liquidate(symbol, tag: clientTag);
+
+            // 1) Cancelar todas las órdenes abiertas del símbolo a través de su OrderTicket.
+            //    Lean tiene un bug donde Transactions.CancelOrder(id) propaga el evento Canceled
+            //    con OrderTicket.Tag VACÍO. Usar OrderTicket.Cancel() directamente preserva el
+            //    tag original (registrado previamente como StopLoss/TakeProfit), de modo que el
+            //    OrderEventMapper resuelve el tag, procesa el Canceled, y hace Forget del tag
+            //    correspondiente a cada orden cancelada.
+            var openOrders = _algorithm.Transactions.GetOpenOrders(symbol);
+            foreach (var openOrder in openOrders)
+            {
+                var openTicket = _algorithm.Transactions.GetOrderTicket(openOrder.Id);
+                openTicket?.Cancel();
+            }
+
+            decimal positionQty = _portfolioState.GetPositionQuantity(instrumentId);
+            if (positionQty != 0m)
+            {
+                string clientTag = _orderRegistry.Register(purpose, executorIdentifier, instrumentId);
+                _algorithm.MarketOrder(symbol, -positionQty, tag: clientTag);
+            }
+            else
+            {
+                _logger.Info(
+                    "LiquidateInstrument: {ExecutorIdentifier} sin posición real en {InstrumentId}; sólo se cancelaron órdenes abiertas.",
+                    executorIdentifier, instrumentId);
+            }
         }
 
         public void LiquidateAll()
