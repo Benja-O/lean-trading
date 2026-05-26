@@ -10,6 +10,93 @@
 
 ---
 
+## ADR-026 — Validación multi-timeframe del subsistema de ejecución/monitoreo sobre BTCUSDT
+**Fecha:** 2026-05-26
+**Estado:** Aceptada
+
+### Contexto
+
+ADR-025 cerró los bugs acoplados del subsistema de ejecución/monitoreo (OPS-2 invariante violado, U1 con DD falso, tag vacío en cancels) sobre el backtest de referencia `EmaCrossStrategy_BTCUSDT_15m`. La validación quedó constreñida a ese único timeframe. El sistema fue construido con la intención declarada de ser agnóstico al timeframe — el wiring extrae el TF de `strategies.json`, `StrategyExecutor.ExecutorIdentifier` lo incorpora como sufijo automático, y los consolidators se construyen per-TF en `TradingAlgorithmHost`. Pero "diseñado para ser agnóstico" y "verificado como agnóstico" son afirmaciones distintas, y la segunda no estaba hecha.
+
+Adicionalmente, durante el análisis previo a esta validación se identificó que `BarProcessingService.ProcessBar` chequea `IPortfolioState.IsInvested(instrumentId)` para bloquear nuevas entradas, lo cual implementa la decisión de "una posición por símbolo a la vez" (decisión de diseño del operador, no bug). Esa decisión hace inviable correr múltiples executors del mismo símbolo en paralelo para esta validación: los executors competirían por la única posición permitida y el resultado sería ruido del acoplamiento, no datos limpios del subsistema bajo prueba.
+
+### Decisión
+
+Validar agnosticismo al timeframe del subsistema mediante **tres backtests secuenciales sobre BTCUSDT**, un único timeframe activo por backtest, mismo período (2025-01-01 → 2026-03-31), con `EmaCrossStrategy` (estrategia vetada para live por POLICY P1, usada exclusivamente como instrumento de validación de infraestructura).
+
+**Parámetros por timeframe**, derivados de la heurística "aislar el TF como única variable":
+
+| Parámetro              | 15m  | 1h  | 4h  | Justificación                                                            |
+|------------------------|------|-----|-----|--------------------------------------------------------------------------|
+| StopLossPercentage     | 1.0  | 2.0 | 4.0 | Escala ×2 por step de TF para no disparar SL por ruido intra-bar.        |
+| TakeProfitPercentage   | 2.0  | 4.0 | 8.0 | Mantiene R:R = 1:2 idéntico en los tres TFs.                              |
+| RiskPerTradePercentage | 2.0  | 2.0 | 2.0 | Política de portfolio, no escala con TF.                                  |
+| MaxBars                | 20   | 20  | 20  | Unidad natural de la estrategia; aislar TF como única variable.          |
+| CombineWithTimeExit    | true | true| true| Heredado de 15m sin cambio.                                              |
+| CompatibleRegimes      | Trend| Trend| Trend| El clasificador HMM es 4h global, independiente del TF de la estrategia. |
+
+**Criterios de aceptación** (todos exigidos a cumplirse en los tres backtests):
+
+- Cero ocurrencias de `OPS-2 invariante violado`.
+- Cero ocurrencias de `OrderEventMapper: evento sin tag` durante TimeExit/Liquidate dirigido (LiquidateAll/kill switch exceptuado por diseño).
+- Si U1 o U2 disparan, lo hacen con DD real coherente con POLICY 3.1 — no falsos positivos.
+- `ExecutorIdentifier` único bien etiquetado por TF en logs.
+- Config A (15m) además debe reproducir la baseline numérica de ADR-025 (147 órdenes, end equity 87.148 USDT, DD 21.5%, U2 dispara 2025-02-06) como smoke test de no-regresión.
+
+### Resultados
+
+| Métrica            | 15m (A)    | 1h (B)     | 4h (C)     |
+|--------------------|------------|------------|------------|
+| Total Orders       | 147        | 116        | 28         |
+| End Equity (USDT)  | 87.148     | 86.676     | 100.879    |
+| Net Profit         | -12.85%    | -13.32%    | +0.88%     |
+| Max Drawdown       | 21.5%      | 19.4%      | 8.6%       |
+| Win Rate           | 32%        | 41%        | 38%        |
+| P/L Ratio          | 1.42       | 0.77       | 1.92       |
+| Sharpe             | -1.288     | -1.689     | -0.825     |
+| U2 dispara         | 2025-02-06 | 2025-10-20 | No dispara |
+| OPS-2 inv. violado | 0          | 0          | 0          |
+| Evento sin tag     | 0          | 0          | 0          |
+
+**Config A** reprodujo exactamente la baseline de ADR-025. Sin regresión.
+
+**Configs B y C** cumplieron todos los criterios cualitativos. U2 disparó en 1h con DD rolling 30d 16.80% sostenido 5 días el 2025-10-20 — desplazamiento esperado del disparo respecto a 15m porque SL/TP escalados absorben el crash de febrero 2025 que en 15m había costado el 21.5% de DD. En 4h, ningún umbral cruzó: DD máximo 8.6%, lejos del 15% rolling de U2 y muy lejos del 25% absoluto de U1.
+
+**Conclusión:** el subsistema de ejecución/monitoreo es agnóstico al timeframe sobre BTCUSDT. Los fixes introducidos en ADR-025 operan correctamente en los tres TFs sin código adicional.
+
+### Alternativas consideradas
+
+**A — Tres timeframes en paralelo en un solo backtest.** Plan inicial de la sesión. Descartado al auditar `BarProcessingService.ProcessBar`: la regla "una posición por símbolo" hace que executors del mismo símbolo compitan por la única posición permitida. El resultado serían métricas dominadas por quién ganó la carrera de entrada, no por el comportamiento del subsistema. La validación sería ruidosa hasta el punto de inservible.
+
+**B — Multi-timeframe cross-símbolo (15m BTC + 1h ETH + 4h SOL, por ejemplo).** Habría eludido la regla del símbolo compartido. Descartado para esta sesión por dos razones acopladas: (1) el clasificador HMM está entrenado y operativo solo sobre BTCUSDT; activar la estrategia en otros símbolos haría que el filtro de régimen no aplique (Unknown → fail-safe → señales pasan), y la métrica entre TFs/símbolos dejaría de ser comparable; (2) habría requerido decidir antes si entrenar HMM por símbolo o deshabilitar el filtro explícitamente, decisiones de diseño que merecen tratarse al inicio de su propia sesión, no embutidas en una validación de agnosticismo al TF.
+
+**C — Secuencial sobre BTCUSDT (elegida).** Limpia, ejecutable hoy, valida el criterio declarado de agnosticismo al TF sin acoplarlo a decisiones pendientes sobre multi-símbolo. Trade-off explícitamente aceptado: no exhibe paralelismo entre executors. Eso es objetivo legítimo de una sesión futura, no de esta.
+
+### Consecuencias
+
+**Positivas:**
+- El subsistema queda formalmente validado como agnóstico al TF sobre BTCUSDT. Los fixes de ADR-025 son robustos en 15m, 1h, 4h.
+- Hay baseline numérica de referencia para 1h y 4h sobre BTCUSDT — si en el futuro se introducen cambios al subsistema, esos números sirven para detectar regresión por TF, no solo por 15m.
+- El comportamiento de U2 en 1h (2025-10-20) es punto de referencia adicional al de 15m (2025-02-06) para futuras pruebas del monitor: dos eventos reales de degradación legítima, con DDs conocidos.
+- POLICY 3.1 queda evidenciada operando correctamente en 1h además de 15m (en 4h no hubo evento que la ejercitara).
+
+**Neutras / aceptadas:**
+- En 1h el P/L ratio es 0.77, sustancialmente peor que 15m (1.42) y 4h (1.92). Evidencia experimental de que `MaxBars=20` constante penaliza más al 1h por ventana de tiempo absoluto corta (20 horas vs 5 horas en 15m y 80 horas en 4h) — los winners cierran por TimeExit antes de llegar al TP escalado. Esto NO es problema del sistema; es comportamiento de la estrategia bajo la decisión deliberada de aislar el TF como única variable. Si en el futuro se quisiera optimizar la estrategia por TF, `MaxBars` escalado es candidato natural — fuera de alcance acá.
+- La estrategia `EmaCrossStrategy` sigue vetada para live por POLICY P1. Ningún resultado positivo en 4h (+0.88%) cambia eso. Una corrida única sobre un período acotado no es evidencia de edge.
+
+**Negativas / hallazgos pendientes (no resueltos por este ADR):**
+- **POLICY 7.1 está titulada `EmaCrossStrategy / BTCUSDT / 1h`** pero el sistema corre 15m. Coherente con el bug del JSON espontáneo de la sesión anterior (`strategies.json` cambió de 15m a 1h sin intervención del operador, causa raíz no auditada). Esta sesión cerró restaurando Config A (15m). La discrepancia entre POLICY 7.1 y el estado real persiste hasta que ese bug se audite.
+- **No existe ADR formal documentando "una posición por símbolo"** como decisión arquitectónica. La regla está implementada en `BarProcessingService.ProcessBar` chequeando `IPortfolioState.IsInvested(instrumentId)` agregado, pero no aparece en este registro con número correlativo previo. Cuando se aborde multi-estrategia real, conviene documentarla retroactivamente o emitir nuevo ADR que la relaje/preserve explícitamente.
+- **Precondición conocida para multi-timeframe cross-símbolo:** decidir el tratamiento del filtro de régimen en símbolos no-BTC (entrenar HMM por símbolo vs deshabilitarlo explícitamente vs declararlo opt-in en `strategies.json`). Trigger sugerido: inicio de la sesión que aborde multi-símbolo.
+- **TODO ya conocido**: el `InitialAccountCashUsdt = 100_000` se pasa idéntico a cada executor (`TradingAlgorithmHost`). Al haber un solo executor activo por backtest en esta validación, la distorsión es nula. Persiste como precondición de allocator multi-estrategia (ya marcado en ADR-025).
+
+### Riesgo residual
+
+- La validación se hizo sobre un período único (2025-01-01 → 2026-03-31) y un único símbolo (BTCUSDT). Comportamiento del subsistema en períodos de régimen significativamente distinto (ej. mercado lateral prolongado en TF alto) no está cubierto. Mitigación: el subsistema no toma decisiones basadas en el régimen — solo el filtro pre-orden lo hace, y ese filtro está fuera del alcance de esta validación. La probabilidad de que un período distinto exhiba bugs específicos del subsistema de ejecución/monitoreo no cubiertos por esta validación es baja.
+- La afirmación "agnóstico al TF" se sostiene sobre tres TFs muestreados (15m, 1h, 4h). TFs no probados (1m, 5m, 30m, 1d) podrían exhibir comportamientos no observados — por ejemplo, 1m podría exponer problemas de granularidad temporal en el clock del monitor que TFs más lentos enmascaran. Si en algún momento se activa un TF no probado, conviene revalidar con el mismo protocolo.
+
+---
+
 ## ADR-025 — LiquidateInstrument explícito y base de equity correcta en StrategyHealthMonitor
 **Fecha:** 2026-05-25
 **Estado:** Aceptada
