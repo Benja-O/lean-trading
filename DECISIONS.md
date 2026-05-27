@@ -10,6 +10,327 @@
 
 ---
 
+## ADR-028 — Validación multi-símbolo + fix estructural OPS-2
+**Fecha:** 2026-05-26 / 2026-05-27
+**Estado:** Aceptada
+**ADRs relacionados:** ADR-026 (validación multi-timeframe BTCUSDT), ADR-027 (re-entrenamiento BTC multi-seed)
+
+### Contexto
+
+ADR-026 había validado el subsistema de ejecución/monitoreo como agnóstico al
+timeframe sobre BTCUSDT mediante tres backtests secuenciales (15m, 1h, 4h).
+Quedaba pendiente validar agnosticismo al símbolo en operación concurrente
+real, lo que requería sumar al menos dos símbolos más con sus propios
+clasificadores de régimen.
+
+Esta sesión cubre:
+1. Entrenamiento de modelos HMM para ETHUSDT y TRBUSDT bajo Opción A
+   (un HMM por símbolo).
+2. Configuración multi-símbolo en `strategies.json` con los tres símbolos
+   en TF 1h (decisión de aislar símbolo como única variable de validación,
+   habiendo ya cubierto TF en ADR-026).
+3. Validación del subsistema sobre el backtest paralelo 2025-01-01 →
+   2026-03-31.
+
+Durante la validación apareció un bug estructural latente preexistente del
+flujo `LiquidateAll` del kill switch global, que no se manifestaba en
+configuraciones single-symbol y que causó dos violaciones del invariante
+OPS-2 en el primer backtest multi-símbolo. La sesión se extendió para
+arreglar la causa raíz.
+
+### Decisiones tomadas
+
+#### Decisión 1 — `MinimumRequiredBars` del trainer baja de 10000 a 5000
+
+Calibrado al piso técnico defendible para HMM-GMM con K=4 y D=7 features
+multi-seed (rule of thumb ~10-50 obs/parámetro sobre ~155 parámetros del
+modelo). El threshold previo de 10000 no estaba calibrado — era un valor
+genérico conservador. 5000 deja margen claro y permite incluir activos
+con historia de listado posterior a 2020-01 (TRB, listado 2020-09).
+
+Criterio asociado: **el sistema no se acomoda al activo**. Los thresholds
+de promoción de modelo son uniformes; los activos que no cumplen se
+rechazan, no se acomodan. La elasticidad legítima por activo vive en
+`strategies.json` (SL/TP/Risk paramétricos), no en el modelo de régimen.
+
+#### Decisión 2 — Default de output del trainer pasa al staging
+
+`models/regime/staging/{ticker}-perp-binance.hmm.json` por defecto. La
+promoción a `models/regime/{ticker}-perp-binance.hmm.json` es manual y
+gateada por criterios de inspección uniformes (K ∈ {3,4}, al menos un
+estado Trend, ningún estado decodificado <5% ni >70%, ningún label
+agregado >85%).
+
+Este cambio aplica también a BTC. Cierra la deuda implícita "el archivo
+en `models/regime/` se trataba como artefacto histórico congelado en
+lugar de output regenerable del trainer", que el incidente del `.bak`
+preDEUDA1 reveló (ADR-027).
+
+#### Decisión 3 — Criterios de promoción de modelo uniformes
+
+ETHUSDT y TRBUSDT entrenados con el trainer multi-seed y evaluados
+contra los criterios uniformes. **Ambos pasaron los 6 criterios:**
+
+- **ETHUSDT (K=4, BIC 56707.84):** Trend 52.07% / Squeeze 31.10% /
+  HighVolatility 16.83%. Mapping: state 0→Trend, 1→Trend, 2→HighVol,
+  3→Squeeze.
+- **TRBUSDT (K=4, BIC 49814.19, 9405 barras post warm-up):** Trend
+  46.66% / Squeeze 40.49% / HighVolatility 12.85%. Mapping: state
+  0→Squeeze, 1→Trend, 2→HighVol, 3→Trend.
+
+Ambos promovidos a `models/regime/`. La flota de modelos en producción
+al cierre de sesión es: BTCUSDT (re-entrenado multi-seed en ADR-027),
+ETHUSDT, TRBUSDT.
+
+#### Decisión 4 — Eliminar `IOrderRouter.LiquidateAll()` (fix estructural OPS-2)
+
+Bug detectado: `LeanBrokerageAdapter.LiquidateAll()` llamaba
+`_algorithm.Liquidate()` (helper global de Lean). Las órdenes resultantes
+llevaban `Tag = "Liquidated"`, ese tag no proviene de `OrderRegistry`, y
+`OrderEventMapper` las descartaba como "liquidación global ignorada".
+`StrategyHealthMonitor` nunca recibía el close. Resultado:
+desincronización entre Lean (posición cerrada físicamente) y el monitor
+(estado "posición abierta"). Días después, una nueva señal compatible
+pasaba el filtro pre-orden de `BarProcessingService` (porque
+`IPortfolioState.IsInvested` consultaba Lean directamente y reportaba
+`false`), hacía fill, y el monitor lanzaba OPS-2 invariante violado.
+
+El comentario explícito en el código del propio `LiquidateAll()` admitía
+el problema: *"NO se registra (no hay executor único). Los eventos
+resultantes serán ignorados por OrderEventMapper con log de
+advertencia."* Esa "advertencia" era exactamente la causa de OPS-2 en
+multi-símbolo.
+
+**Fix aplicado:**
+
+- `IOrderRouter.LiquidateAll()` eliminado del contrato del dominio.
+- `LeanBrokerageAdapter.LiquidateAll()` eliminado de la implementación.
+- `LiquidateAllRiskAction` refactorizado: recibe la lista de instrumentos
+  activos por inyección, itera sobre ellos, consulta
+  `IPortfolioState.IsInvested(instrumentId)`, y emite
+  `LiquidateInstrument` (que ya usaba la disciplina correcta de
+  `OrderRegistry` y tags propios) solo para los invertidos.
+- `OrderPurpose.Liquidate` agregado al enum del dominio.
+- `ExecutorIdentifier` para órdenes del kill switch global:
+  `"RiskOrchestrator_KillSwitch"` (identificador sintético, no
+  corresponde a una estrategia). Discutido al diseñar el fix; se aceptó
+  romper la convención `{Strategy}_{Symbol}_{Timeframe}` para que en logs
+  sea obvio que el cierre provino del kill switch global, no de una
+  estrategia.
+- `TradingAlgorithmHost.ExtractActiveInstruments` agregado para construir
+  la lista de instrumentos únicos desde `strategies.json` durante el
+  wiring del orchestrator.
+- `IPortfolioState` **NO se extendió**. La lista de instrumentos activos
+  proviene del wiring, no del dominio. Decisión deliberada: el dominio
+  no debe contaminarse con métodos para resolver un problema de
+  infraestructura cuando la información ya está disponible en el callsite.
+
+**`OrderEventMapper` no se tocó.** Su lógica defensiva de ignorar tags
+no registrados sigue siendo correcta para órdenes genuinamente externas
+(operador manual en producción, ajustes del broker, etc). El bug no era
+el receptor — era que el sistema emitía órdenes que no se hacía cargo de
+registrar.
+
+#### Decisión 5 — Aceptar dos cambios técnicos fuera del brief original
+
+Durante la implementación del fix de Decisión 4, Claude Code descubrió
+que el identificador sintético `RiskOrchestrator_KillSwitch` no era
+reconocido por `OrderLifecycleService` como executor existente y los
+fills se descartaban. Sin reportar al operador, agregó dos cambios:
+
+- **`OrderLifecycleService.cs`**: cuando llega un evento con
+  `Purpose == OrderPurpose.Liquidate` y `Status == OrderEventStatus.Filled`
+  cuyo `ExecutorIdentifier` no se encuentra entre los executors
+  registrados, broadcast del evento a **todos los executors del mismo
+  instrumento**. Cualquier otra combinación de purpose/status con executor
+  desconocido sigue al `_logger.Error` original.
+- **`StrategyHealthMonitor.cs`**: case nuevo en el switch de
+  `OnOrderFilled` para `OrderPurpose.Liquidate`. Si el monitor tiene
+  posición abierta para ese executor, llama `ProcessTradeClose`. Si no,
+  no-op. El `default` del switch sigue lanzando para purposes
+  desconocidos.
+
+**Auditoría de los diffs confirmó que los cambios son la solución correcta
+y mínima** del problema real:
+- El broadcast está doble-condicionado a `Liquidate + Filled` y no
+  cambia la semántica de flujos normales (SL/TP/TimeExit).
+- El case del monitor está guardado con `_openPositions[id] is not null`
+  y preserva la invariante "purpose desconocido = bug".
+
+Los cambios se aceptan. La nota de proceso queda registrada:
+**Claude Code debió haber pausado y consultado al operador antes de
+extender el brief.** El brief original especificaba "detener y reportar
+si el `ExecutorIdentifier` sintético no pasa alguna validación en
+`OrderRegistry` o `StrategyHealthMonitor`". La falla ocurrió en
+`OrderLifecycleService`, que no estaba listado explícitamente —
+interpretación literal cuando el espíritu del brief era "ante adyacencias
+no triviales, pausar". Heurística futura: cuando un brief especifica
+"detener si X" y aparece un caso adyacente con solución no obvia, el
+default es pausar. Bajo costo de pausar (un mensaje), alto costo de
+proceder sin consultar (deuda escondida, cambios no documentados).
+
+#### Decisión 6 — DEUDA-2 registrada (OrderListHash no determinista)
+
+Durante la verificación de equivalencia conductual del modelo BTC
+re-entrenado (ADR-027), se descubrió que `OrderListHash` no es
+determinista entre corridas del mismo modelo y misma configuración.
+La verificación se hizo entonces por comparación directa de
+`transaction-log.csv` (147 order events idénticos en orderId, timestamp,
+fill price y fill quantity entre modelo preDEUDA1 y modelo nuevo). DEUDA-2
+queda registrada en `DECISIONS.md` con workaround documentado. No
+bloqueante.
+
+### Resultados de la validación multi-símbolo
+
+Backtest paralelo 2025-01-01 → 2026-03-31, `strategies.json` con tres
+entradas en TF 1h:
+
+- `BTCUSDT 1h`: SL 1.0%, TP 2.0%, Risk 2.0%, MaxBars 20, CompatibleRegimes [Trend].
+- `ETHUSDT 1h`: SL 1.2%, TP 2.4%, Risk 2.0%, MaxBars 20, CompatibleRegimes [Trend].
+- `TRBUSDT 1h`: SL 2.0%, TP 4.0%, Risk 2.0%, MaxBars 20, CompatibleRegimes [Trend].
+
+**Métricas portfolio (run post-fix, 2026-05-27 15:35):**
+
+| Métrica            | Valor          |
+|--------------------|----------------|
+| Start Equity       | 100,000 USDT   |
+| End Equity         | 63,131.87 USDT |
+| Net Profit         | −36.87%        |
+| Max Drawdown       | 47.0%          |
+| Sharpe             | −1.096         |
+| Sortino            | −1.082         |
+| Win Rate           | 33% (40/122)   |
+| P/L Ratio          | 1.56           |
+| Total Orders       | 377            |
+| Total Round Trips  | 122            |
+| Avg Trade Duration | 6h 44m         |
+
+**Trades por executor (post-fix):**
+
+| Executor                       | Round trips | Primer cierre    | Último cierre    |
+|--------------------------------|-------------|------------------|------------------|
+| EmaCrossStrategy_BTCUSDT_1h    | 24          | 2025-01-08 12:04 | 2025-05-20 08:00 |
+| EmaCrossStrategy_ETHUSDT_1h    | 58          | 2025-01-07 17:02 | 2025-08-29 10:07 |
+| EmaCrossStrategy_TRBUSDT_1h    | 38          | 2025-02-09 08:51 | 2026-02-18 13:44 |
+
+BTC deja de operar el 2025-05-20 por degradación U2 (DD rolling 30d
+21.48% sostenido 5 días). ETH deja de operar el 2025-08-29 por
+degradación U2 (DD rolling 30d 15.81% sostenido 5 días) y U3/U4 armados
+en 2025-08-17. TRB nunca alcanzó 50 trades acumulados para armar U3/U4.
+
+**Kill switches (3 activaciones):**
+
+| Fecha/hora          | Monitor                  | Razón                   | LiquidateInstrument calls       |
+|---------------------|--------------------------|-------------------------|---------------------------------|
+| 2025-04-17 09:40    | DrawdownMonitor          | Drawdown 25.09% ≥ 25%   | 0 (ningún instrumento invertido)|
+| 2025-05-26 09:57    | ConsecutiveLossesMonitor | 8 pérdidas consecutivas | 0 (ningún instrumento invertido)|
+| 2025-08-28 08:26    | DrawdownMonitor          | Drawdown 25.00% ≥ 25%   | 0 (ningún instrumento invertido)|
+
+En los tres kill switches del run post-fix, las posiciones estaban
+cerradas antes del breach por SL/TP normales 1-24h antes. El path de
+broadcast del fix (Decisión 5) no se ejercitó por el backtest pero **sí
+queda cubierto por 8 tests unitarios** (4 en `OrderLifecycleServiceLiquidateTests`
++ uno agregado durante el ciclo: `LiquidateCanceled_ExecutorDesconocido_LoguaError_NoBroadcast`;
+3 en `StrategyHealthMonitorTests`). La confianza en el fix viene del
+análisis estructural + cobertura unitaria, no de "tuvimos suerte de
+ejercitar el path en este run".
+
+**Criterios cualitativos del subsistema (5×3):**
+
+| Criterio                                                          | BTC | ETH | TRB |
+|-------------------------------------------------------------------|-----|-----|-----|
+| Cero OPS-2 invariante violado                                     | ✅  | ✅  | ✅  |
+| Cero `OrderEventMapper: evento sin tag` durante TimeExit/Liquidate| ✅  | ✅  | ✅  |
+| U1/U2 disparan con DD coherente (no por bug)                      | ✅  | ✅  | ✅  |
+| `ExecutorIdentifier` único bien etiquetado                        | ✅  | ✅  | ✅  |
+| Operación independiente entre executors                           | ✅  | ✅  | ✅  |
+
+**15/15 criterios cualitativos verdes.** Subsistema validado como
+agnóstico al símbolo bajo operación concurrente real.
+
+### Hallazgos secundarios (no actuados)
+
+1. **Trades fantasma del bug previo**: el run del Brief 3 pre-fix produjo
+   159 trades; el run post-fix produjo 122. La diferencia (~37 trades)
+   son entradas que el bug del `LiquidateAll` permitía bajo estado
+   inconsistente. El fix no solo cumple el invariante formal — también
+   elimina trades que no debieron existir.
+
+2. **Net Profit −36.87% y Max Drawdown 47.0%** son números feos. NO son
+   criterio de validación de esta sesión (el objetivo era validar
+   agnosticismo del subsistema, no rentabilidad de la estrategia).
+   EmaCrossStrategy sigue VETADA para live por POLICY P1 (sin
+   walk-forward). Su uso actual sigue siendo exclusivamente como
+   instrumento de validación del subsistema.
+
+3. **Varianza numérica del trainer en dígitos 12+**: el trainer
+   multi-seed produce JSONs que difieren en dígitos 12-15 de los doubles
+   serializados entre corridas (con K y mapping idénticos). Causa
+   probable: orden de iteración de Dictionary interno o reducciones
+   parallelas en Accord. Benign — las clasificaciones que el modelo
+   produce sobre cualquier barra son indistinguibles. Aislable por
+   inspección visual del modelo antes de promover (POLICY 7). No
+   bloqueante.
+
+4. **Test suite final: 132 verdes** (de 121 originales + 11 nuevos: 4
+   `LiquidateAllRiskActionTests` (3 inicialmente + 1 borde), 4
+   `OrderLifecycleServiceLiquidateTests` + 1 agregado en cobertura del
+   ciclo, 3 `StrategyHealthMonitorTests`).
+
+### Deudas que quedan abiertas al cierre
+
+- **DEUDA-2**: `OrderListHash` no determinista entre corridas. Workaround
+  documentado en `DECISIONS.md`. Pendiente de fix separado.
+- **Allocator multi-estrategia**: cada executor ve `InitialAccountCashUsdt =
+  100_000` como suyo para calcular DD, cuando la cuenta es compartida.
+  Distorsión per-monitor aceptada provisoriamente. Hito propio futuro.
+- **POLICY 7.1 título "1h" vs config "1h" actual**: hallazgo de ADR-026,
+  re-anotado. Fix separado.
+- **EmaCrossStrategy vetada para live** (POLICY P1): sin walk-forward
+  analysis. Su uso queda como instrumento de validación del subsistema.
+
+### Consecuencias
+
+**Positivas:**
+- Subsistema de ejecución/monitoreo formalmente validado como agnóstico
+  al símbolo y al timeframe (ADR-026 + ADR-028).
+- Bug estructural del `LiquidateAll` resuelto. El sistema mantiene la
+  invariante "toda orden emitida por el sistema pasa por `OrderRegistry`".
+- Flota de tres modelos HMM consistente, todos generados por el mismo
+  pipeline multi-seed, todos en `models/regime/` con criterios uniformes
+  de promoción.
+- Test suite expandida en 11 tests con cobertura específica del nuevo
+  flujo de liquidación dirigida por instrumento.
+
+**Neutras / aceptadas:**
+- El fix de `LiquidateAll` cambió métricas y comportamiento del backtest
+  vs Brief 3 pre-fix. Esto es consecuencia correcta del fix, no
+  regresión.
+- Los kill switches del run post-fix no ejercitaron el path del
+  broadcast. Cobertura del path por tests unitarios, no por backtest
+  end-to-end. Aceptado.
+
+**Negativas / hallazgos pendientes:**
+- Cambios fuera del brief original se aplicaron en el loop autónomo de
+  Claude Code sin consulta. La práctica futura debe ser pausar y
+  consultar ante adyacencias no triviales. Registrado como nota de
+  proceso.
+
+### Riesgo residual
+
+- Si en el futuro se agrega otra fuente de liquidación (margin call
+  simulado, kill switch nuevo, intervención manual), tiene que usar
+  `LiquidateInstrument` (o el patrón equivalente con `OrderRegistry`),
+  NO una llamada directa al broker. El fix elimina `LiquidateAll()`
+  precisamente para forzar esa disciplina.
+- Si en el futuro se permite más de un executor por instrumento (lo que
+  el allocator multi-estrategia eventualmente habilitará), el broadcast
+  del Decisión 5 enviará el close a todos los executors del instrumento.
+  Esto puede ser correcto o no según el diseño del allocator —
+  revisitar entonces.
+
+---
+
 ## ADR-027 — Re-entrenamiento de BTC con trainer multi-seed (alineación post-DEUDA-1)
 **Fecha:** 2026-05-26
 **Estado:** Aceptada

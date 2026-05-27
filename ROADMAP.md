@@ -184,6 +184,51 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 | ✅ | Paso 2 | Abstracciones de régimen (`IMarketRegimeClassifier`, `RegimeLabel`, `RegimeClassification`, `MarketRegimeRegistry`, `StrategyRegimeCompatibility`), classifier fake (`ConfigurableMarketRegimeClassifier`), filtro pre-orden en `BarProcessingService`, wiring en `TradingAlgorithmHost` con consolidator 4h dedicado | Completado 2026-05-15. Ver historial completado. |
 | ✅ | Paso 3 | HMM real con Accord.NET, trainer offline standalone, modelo entrenado de BTCUSDT perpetual de Binance (ventana 2020-2024, K∈{2,3,4} por BIC, mapeo semántico de estados) | Completado 2026-05-19. K=4 elegido por BIC con margen amplio (57644 vs 65912 vs 72556). Mapeo: {0:HighVolatility, 1:Squeeze, 2:Trend, 3:Trend}. Ver ADR-019 y historial completado. |
 
+### ⬜ Post-ADR-028 — Validaciones y deudas pendientes
+
+#### ⬜ Validación multi-símbolo + multi-timeframe simultáneos
+**Bloque:** continuación de la validación del subsistema.
+**Estado:** pendiente, post-ADR-028.
+**Descripción:** Validar que el subsistema sigue agnóstico cuando los
+tres símbolos operan en TFs distintos simultáneamente
+(BTC-15m / ETH-1h / TRB-4h o combinación equivalente).
+Configuración tentativa, parámetros a calibrar en sesión. Aporta evidencia
+adicional de que el wiring de consolidators independientes por símbolo +
+TF no interactúa de forma inesperada con el subsistema de ejecución
+bajo concurrencia mixta. **Pre-requisito:** ADR-028 cerrado (cumplido).
+**Bloqueantes:** ninguno técnico. Decisión del operador sobre prioridad
+relativa al hito de allocator multi-estrategia.
+
+#### ⬜ Allocator multi-estrategia
+**Bloque:** hito propio.
+**Estado:** pendiente.
+**Descripción:** Hoy cada executor ve `InitialAccountCashUsdt = 100_000`
+como suyo para calcular DD, cuando la cuenta es realmente compartida
+entre todos los executors. Esto distorsiona las métricas de DD
+per-monitor en operación multi-estrategia y multi-símbolo. El hito
+introduce un allocator que asigne capital nominal a cada executor con
+visión coherente de la cuenta total. Trabajo arquitectónico no trivial.
+**Bloqueantes:** ninguno. Decisión del operador sobre cuándo abordarlo.
+
+#### ⬜ DEUDA-2 — `OrderListHash` no determinista
+**Estado:** pendiente, no bloqueante.
+**Descripción:** Ver detalle en `DECISIONS.md` (DEUDA-2). El campo
+`OrderListHash` del summary del backtest no es bit-idéntico entre
+corridas del mismo modelo con la misma configuración, aunque los order
+events sean idénticos. Workaround actual: validar no-regresión por
+comparación de `transaction-log.csv`. Fix consiste en identificar qué
+campos no-deterministas entran al hash y excluirlos.
+
+#### ⬜ Fix POLICY 7.1 título "1h" vs config "1h"
+**Estado:** pendiente, deuda documental.
+**Descripción:** Hallazgo de ADR-026 re-anotado en ADR-027 y ADR-028. La
+entrada de la estrategia de referencia en `POLICY.md` sección 7.1 está
+titulada como TF "1h" pero el sistema corre actualmente la
+configuración Config A que está en 1h (con baselines de los runs
+post-fix de ADR-028). Trabajo: alinear título de la entrada con la
+config real, o reescribir la entrada para no aludir a un TF específico
+dado que la estrategia se ha validado en 15m, 1h y 4h.
+
 ### ⬜ HITOS POSTERIORES — Planificados
 
 | Estado | ID | Hito | Pre-requisito | Comentario |
@@ -216,6 +261,54 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 ## Historial completado
 
 > Los refactors completados se mueven acá con su fecha y un resumen de qué cambió. Orden cronológico: más antiguo arriba.
+
+### ✅ Validación multi-símbolo + fix estructural OPS-2 (ADR-028)
+**Fecha:** 2026-05-26 / 2026-05-27
+**Resumen:** Cierre de la validación de agnosticismo del subsistema de
+ejecución/monitoreo bajo operación concurrente real con tres símbolos
+(BTCUSDT, ETHUSDT, TRBUSDT) en mismo TF (1h), con sus propios
+clasificadores HMM independientes (Opción A — un HMM por símbolo).
+Cambios principales: `HmmTrainer` parametrizado por instrumento vía
+CLI (`--instrument`, `--data-dir`, `--output`), `MinimumRequiredBars`
+ajustado de 10000 a 5000 (piso técnico defendible para HMM-GMM K=4
+multi-seed), output default del trainer pasa a `models/regime/staging/`
+con promoción manual gateada por criterios uniformes (K∈{3,4}, al menos
+un estado Trend, ningún estado <5% ni >70%, ningún label agregado >85%).
+ETHUSDT entrenado (K=4, BIC 56707.84, Trend 52% / Squeeze 31% / HighVol
+17%) y TRBUSDT entrenado (K=4, BIC 49814.19, Trend 47% / Squeeze 40% /
+HighVol 13%) — ambos pasan los 6 criterios y promovidos a producción.
+Modelo BTC re-entrenado con multi-seed en ADR-027 antes de esta
+validación. **Hallazgo crítico durante el primer backtest paralelo:**
+dos violaciones del invariante OPS-2 producidas por un bug estructural
+latente del flujo `LiquidateAll` del kill switch global, que existía
+desde antes pero no se manifestaba en single-symbol. Causa raíz:
+`LeanBrokerageAdapter.LiquidateAll` llamaba `_algorithm.Liquidate()`
+(helper de Lean) produciendo órdenes con `Tag = "Liquidated"` no
+registradas en `OrderRegistry`, que `OrderEventMapper` descartaba y
+dejaban a `StrategyHealthMonitor` desincronizado de Lean. Fix
+estructural: `IOrderRouter.LiquidateAll()` eliminado del contrato,
+`LeanBrokerageAdapter.LiquidateAll()` eliminado de la implementación,
+`LiquidateAllRiskAction` refactorizado para recibir lista de
+instrumentos activos por inyección e iterar con
+`LiquidateInstrument(instrumentId, OrderPurpose.Liquidate,
+"RiskOrchestrator_KillSwitch")` solo para los efectivamente invertidos.
+`OrderPurpose.Liquidate` agregado al enum del dominio. Cambios
+colaterales aceptados (con nota de proceso por desviación del brief
+original): `OrderLifecycleService` broadcast del fill al executor del
+instrumento cuando el `ExecutorIdentifier` sintético del kill switch no
+matcha, condicionado a `Purpose==Liquidate && Status==Filled`;
+`StrategyHealthMonitor` case nuevo `Liquidate` con guard de posición
+abierta. **Backtest post-fix 2025-01-01 → 2026-03-31:** cero OPS-2
+invariante violado, cero `OrderEventMapper: evento sin tag` durante
+liquidación dirigida, 5/5 criterios cualitativos verdes en los 3
+executors, 3 kill switches activados sin ejercitar el path del
+broadcast por estado real (cobertura del path por 8 tests unitarios
+nuevos). Test suite final: 132 verdes (11 nuevos: 4
+`LiquidateAllRiskActionTests`, 5 `OrderLifecycleServiceLiquidateTests`,
+3 `StrategyHealthMonitorTests`). Deudas que quedan abiertas: DEUDA-2
+(`OrderListHash` no determinista), allocator multi-estrategia, POLICY 7.1
+título "1h" vs "15m" actual, varianza numérica del trainer en dígitos
+12+. EmaCrossStrategy sigue VETADA para live por POLICY P1. Ver ADR-028.
 
 ### ✅ ADR-027 — Re-entrenamiento de BTC con trainer multi-seed (alineación post-DEUDA-1)
 **Fecha:** 2026-05-26
