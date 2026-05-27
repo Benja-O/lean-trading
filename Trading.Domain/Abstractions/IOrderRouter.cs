@@ -27,11 +27,6 @@ namespace Trading.Domain.Abstractions
         void LiquidateInstrument(InstrumentId instrumentId, OrderPurpose purpose, string executorIdentifier);
 
         /// <summary>
-        /// Liquida toda la cartera. Reservado para kill switch global.
-        /// </summary>
-        void LiquidateAll();
-
-        /// <summary>
         /// Indica si existen órdenes abiertas para el instrumento dado.
         /// Necesario para evitar duplicar entradas mientras una orden previa está pending.
         /// </summary>

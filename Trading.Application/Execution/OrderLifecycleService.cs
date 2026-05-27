@@ -49,6 +49,23 @@ namespace Trading.Application.Execution
 
             if (strategyExecutor == null)
             {
+                if (lifecycleEvent.Purpose == OrderPurpose.Liquidate &&
+                    lifecycleEvent.Status == OrderEventStatus.Filled)
+                {
+                    foreach (var exec in _strategyExecutors
+                        .Where(e => e.InstrumentId == lifecycleEvent.InstrumentId))
+                    {
+                        _eventBus.Publish(new OrderFilledEvent(
+                            TimestampUtc: _clock.UtcNow,
+                            ExecutorIdentifier: exec.ExecutorIdentifier,
+                            InstrumentId: lifecycleEvent.InstrumentId,
+                            Purpose: OrderPurpose.Liquidate,
+                            FillQuantity: lifecycleEvent.FillQuantity,
+                            FillPrice: lifecycleEvent.FillPrice));
+                    }
+                    return;
+                }
+
                 _logger.Error(
                     "OrderLifecycleService: ExecutorIdentifier '{ExecutorIdentifier}' no encontrado. " +
                     "Evento ignorado (Status={Status}, Purpose={Purpose}).",

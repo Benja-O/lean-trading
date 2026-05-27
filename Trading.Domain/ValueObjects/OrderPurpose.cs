@@ -9,6 +9,7 @@ namespace Trading.Domain.ValueObjects
         Entry,
         StopLoss,
         TakeProfit,
-        TimeExit
+        TimeExit,
+        Liquidate
     }
 }

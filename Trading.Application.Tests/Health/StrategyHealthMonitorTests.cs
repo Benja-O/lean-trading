@@ -546,5 +546,44 @@ namespace Trading.Application.Tests.Health
                 e.Description.Contains(Id) &&
                 e.Description.Contains("U1"));
         }
+
+        // ===== Liquidate (kill switch) =====
+
+        [Fact]
+        public void Liquidate_ConPosicionAbierta_CierraPosicionYNoCausaOps2()
+        {
+            var (monitor, bus, _) = Build(initialEquityPerStrategy: 10_000m);
+
+            Fill(bus, Id, OrderPurpose.Entry, price: 100m, qty: +1m);
+            Fill(bus, Id, OrderPurpose.Liquidate, price: 95m, qty: -1m);
+
+            _logger.ErrorEntries.Should().BeEmpty();
+            monitor.IsExcluded(Id).Should().BeFalse();
+        }
+
+        [Fact]
+        public void Liquidate_SinPosicionAbierta_EsNoOp_NoCausaOps2()
+        {
+            var (monitor, bus, _) = Build();
+
+            Fill(bus, Id, OrderPurpose.Liquidate, price: 95m, qty: -1m);
+
+            _logger.ErrorEntries.Should().BeEmpty();
+            monitor.IsExcluded(Id).Should().BeFalse();
+        }
+
+        [Fact]
+        public void Liquidate_DespuesDeLiquidate_NuevaEntryFunciona()
+        {
+            var (monitor, bus, _) = Build(initialEquityPerStrategy: 10_000m);
+
+            Fill(bus, Id, OrderPurpose.Entry, price: 100m, qty: +1m);
+            Fill(bus, Id, OrderPurpose.Liquidate, price: 95m, qty: -1m);
+            // nueva entrada después del kill switch
+            Fill(bus, Id, OrderPurpose.Entry, price: 90m, qty: +1m);
+
+            _logger.ErrorEntries.Should().BeEmpty();
+            monitor.IsExcluded(Id).Should().BeFalse();
+        }
     }
 }

@@ -6,7 +6,6 @@ namespace Trading.Application.Tests.Fakes
 {
     public class FakeOrderRouter : IOrderRouter
     {
-        public int LiquidateAllCallCount { get; private set; }
         public List<LiquidateInstrumentRecord> LiquidateInstrumentCalls { get; } = new();
         public List<SubmittedOrderRecord> SubmittedOrders { get; } = new();
 
@@ -43,11 +42,6 @@ namespace Trading.Application.Tests.Fakes
         {
             LiquidateInstrumentCalls.Add(new LiquidateInstrumentRecord(
                 instrumentId, purpose, executorIdentifier));
-        }
-
-        public void LiquidateAll()
-        {
-            LiquidateAllCallCount++;
         }
 
         public bool HasOpenOrders(InstrumentId instrumentId) =>

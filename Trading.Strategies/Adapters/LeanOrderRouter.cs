@@ -99,13 +99,6 @@ namespace Trading.Strategies.Adapters
             }
         }
 
-        public void LiquidateAll()
-        {
-            // Liquidación global: NO se registra (no hay executor único).
-            // Los eventos resultantes serán ignorados por OrderEventMapper con log de advertencia.
-            _algorithm.Liquidate();
-        }
-
         public bool HasOpenOrders(InstrumentId instrumentId)
         {
             var symbol = _instrumentResolver.Resolve(instrumentId);

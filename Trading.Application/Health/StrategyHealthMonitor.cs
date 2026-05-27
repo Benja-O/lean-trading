@@ -108,6 +108,11 @@ namespace Trading.Application.Health
                         ProcessTradeClose(id, e);
                         break;
 
+                    case OrderPurpose.Liquidate:
+                        if (_openPositions[id] is not null)
+                            ProcessTradeClose(id, e);
+                        break;
+
                     default:
                         throw new InvalidOperationException(
                             $"OPS-2 invariante violado: OrderPurpose '{e.Purpose}' no manejado.");

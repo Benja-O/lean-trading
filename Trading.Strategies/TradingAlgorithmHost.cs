@@ -96,18 +96,19 @@ namespace Trading.Strategies
             _httpClient = new HttpClient();
             _healthchecksPinger = new HealthchecksIoPinger(pingUrl, _httpClient, _clock, _logger);
 
+            // ===== Carga y validación de configuración =====
+            string strategiesFilePath = System.IO.Path.Combine(System.AppContext.BaseDirectory, "strategies.json");
+            var rootConfiguration = _strategyConfigurationLoader.Load(strategiesFilePath);
+
             var drawdownMonitor = new DrawdownMonitor(_portfolioState, 0.25m);
             _consecutiveLossesMonitor = new ConsecutiveLossesMonitor(8);
-            var riskAction = new LiquidateAllRiskAction(_orderRouter);
+            var activeInstruments = ExtractActiveInstruments(rootConfiguration);
+            var riskAction = new LiquidateAllRiskAction(_orderRouter, _portfolioState, activeInstruments);
             var coolingOffTracker = new CoolingOffTracker(_clock, TimeSpan.FromDays(1));
             _riskOrchestrator = new RiskOrchestrator(
                 new IRiskMonitor[] { drawdownMonitor, _consecutiveLossesMonitor },
                 riskAction, coolingOffTracker, _clock, _logger, domainEventBus);
             _positionSizer = new PositionSizer(_portfolioState, _instrumentMetadata, _logger);
-
-            // ===== Carga y validación de configuración =====
-            string strategiesFilePath = System.IO.Path.Combine(System.AppContext.BaseDirectory, "strategies.json");
-            var rootConfiguration = _strategyConfigurationLoader.Load(strategiesFilePath);
 
             // ===== Configuración del entorno de trading =====
             SetStartDate(2025, 1, 1);
@@ -371,6 +372,22 @@ namespace Trading.Strategies
                     {
                         instruments.Add(new InstrumentId(strategyDefinition.Symbol));
                     }
+                }
+            }
+            return instruments;
+        }
+
+        private static IReadOnlyList<InstrumentId> ExtractActiveInstruments(
+            Trading.Domain.Models.RootConfig rootConfiguration)
+        {
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var instruments = new List<InstrumentId>();
+            foreach (var timeframeNode in rootConfiguration.Timeframes)
+            {
+                foreach (var strategyDefinition in timeframeNode.Value.Strategies)
+                {
+                    if (seen.Add(strategyDefinition.Symbol))
+                        instruments.Add(new InstrumentId(strategyDefinition.Symbol));
                 }
             }
             return instruments;
