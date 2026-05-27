@@ -17,7 +17,22 @@
       "Bash(Select-Object -Last 30)",
       "Bash(Select-String -Pattern \"error CS|warning CS|succeeded|failed|Error\")",
       "Bash(Select-Object -Last 20)",
-      "Bash(findstr /i \"error warning Build succeeded\")"
+      "Bash(findstr /i \"error warning Build succeeded\")",
+      "PowerShell(dotnet build *)",
+      "PowerShell(dotnet test *)",
+      "PowerShell(& \"F:\\\\DesarrolloTrading\\\\QuantConnect\\\\Lean\\\\Trading.Strategies\\\\Tools\\\\HmmTrainer\\\\bin\\\\Release\\\\net10.0\\\\HmmTrainer.exe\" 2>&1)",
+      "PowerShell(Rename-Item *)",
+      "PowerShell(& \"F:\\\\DesarrolloTrading\\\\QuantConnect\\\\Lean\\\\Trading.Strategies\\\\Tools\\\\HmmTrainer\\\\bin\\\\Release\\\\net10.0\\\\HmmTrainer.exe\" --instrument BTCUSDT --data-dir \"F:\\\\Mis Documentos\\\\Cripto monedas\\\\Trading\\\\Data\\\\Velas\\\\4h\\\\BTCUSDT\" 2>&1)",
+      "Bash(git -C \"F:/DesarrolloTrading/QuantConnect/Lean\" log --oneline --all -- \"F:/Lean/data/results/transaction-log.csv\")",
+      "Bash(git -C \"F:/DesarrolloTrading/QuantConnect/Lean\" log --oneline --all -- \"F:/Lean/data/results/Trading.Strategies.TradingAlgorithmHost-summary.json\")",
+      "Bash(git -C \"F:/DesarrolloTrading/QuantConnect/Lean\" log --oneline --format=\"%h %ai %s\" -- DECISIONS.md)",
+      "Bash(git -C \"F:/DesarrolloTrading/QuantConnect/Lean\" show 923f577 --name-only)",
+      "Bash(git -C \"F:/DesarrolloTrading/QuantConnect/Lean\" show 923f577:DECISIONS.md)",
+      "Bash(./QuantConnect.Lean.Launcher.exe)",
+      "Bash(\"F:/DesarrolloTrading/QuantConnect/Lean/Trading.Strategies/Tools/HmmTrainer/bin/Release/net10.0/HmmTrainer.exe\" --instrument BTCUSDT --data-dir \"F:/Mis Documentos/Cripto monedas/Trading/Data/Velas/4h/BTCUSDT\")",
+      "Bash(\"Trading.Strategies\\\\Tools\\\\HmmTrainer\\\\bin\\\\Release\\\\net10.0\\\\HmmTrainer.exe\" --instrument BTCUSDT --data-dir \"F:\\\\Mis Documentos\\\\Cripto monedas\\\\Trading\\\\Data\\\\Velas\\\\4h\\\\BTCUSDT\")",
+      "Bash(\"Trading.Strategies\\\\Tools\\\\HmmTrainer\\\\bin\\\\Release\\\\net10.0\\\\HmmTrainer.exe\" --instrument ETHUSDT --data-dir \"F:\\\\Mis Documentos\\\\Cripto monedas\\\\Trading\\\\Data\\\\Velas\\\\4h\\\\ETHUSDT\")",
+      "Bash(\"Trading.Strategies\\\\Tools\\\\HmmTrainer\\\\bin\\\\Release\\\\net10.0\\\\HmmTrainer.exe\" --instrument TRBUSDT --data-dir \"F:\\\\Mis Documentos\\\\Cripto monedas\\\\Trading\\\\Data\\\\Velas\\\\4h\\\\TRBUSDT\")"
     ]
   }
 }

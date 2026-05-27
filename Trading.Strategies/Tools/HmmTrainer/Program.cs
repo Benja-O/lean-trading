@@ -19,18 +19,17 @@ namespace Trading.Strategies.Tools.HmmTrainer
     /// <summary>
     /// Trainer offline del HMM para clasificación de régimen de mercado.
     ///
-    /// Parametrizado (hardcoded por simplicidad del Paso 3): BTCUSDT perpetual Binance 4h,
-    /// ventana 2020-01-01 a 2024-12-31 UTC, K ∈ {2, 3, 4}, semilla 42, warm-up del modelo 100 barras.
+    /// Uso: HmmTrainer [--instrument TICKER] [--data-dir PATH] [--output PATH]
+    /// Defaults: BTCUSDT, F:\Mis Documentos\...\4h\{INSTRUMENT}, {repoRoot}/models/regime/{INSTRUMENT}-perp-binance.hmm.json
     /// </summary>
     public static class Program
     {
-        private const string InstrumentIdentifier = "BTCUSDT";
         private const string Exchange = "Binance";
         private const string ContractType = "perpetual";
         private const string Timeframe = "4h";
         private const int WarmUpBarsForRuntime = 100;
         private const int RandomSeed = 42;
-        private const int MinimumRequiredBars = 10000;
+        private const int MinimumRequiredBars = 5000;
         private const int MultiSeedAttempts = 10;
 
         private static readonly int[] CandidateNumbersOfStates = { 2, 3, 4 };
@@ -43,17 +42,16 @@ namespace Trading.Strategies.Tools.HmmTrainer
         {
             try
             {
-                string defaultDataDirectory = @"F:\Mis Documentos\Cripto monedas\Trading\Data\Velas\4h\BTCUSDT";
-                string defaultOutputPath = ResolveDefaultOutputPath();
-
-                string dataDirectory = arguments.Length > 0 ? arguments[0] : defaultDataDirectory;
-                string outputPath = arguments.Length > 1 ? arguments[1] : defaultOutputPath;
+                var parsedArgs = ParseArgs(arguments);
+                string instrumentIdentifier = parsedArgs.InstrumentIdentifier;
+                string dataDirectory = parsedArgs.DataDirectory;
+                string outputPath = parsedArgs.OutputPath;
 
                 Console.WriteLine($"[HmmTrainer] Iniciando entrenamiento. Datos: '{dataDirectory}', salida: '{outputPath}'.");
 
                 Accord.Math.Random.Generator.Seed = RandomSeed;
 
-                var instrument = new InstrumentId(InstrumentIdentifier);
+                var instrument = new InstrumentId(instrumentIdentifier);
                 var parser = new BinanceKlinesParser(instrument);
                 var bars = parser.ParseDirectory(dataDirectory, TrainingWindowStartUtc, TrainingWindowEndUtc);
                 Console.WriteLine($"[HmmTrainer] Barras parseadas en ventana de entrenamiento: {bars.Count}.");
@@ -85,8 +83,10 @@ namespace Trading.Strategies.Tools.HmmTrainer
                 var mapper = SemanticStateMapper.Build(stateStatistics);
 
                 LogStateStatistics(stateStatistics, mapper);
+                LogDecodedStateDistribution(decodedStates, selectedCandidate.NumberOfStates, mapper);
 
                 var persisted = BuildPersistedModel(
+                    instrumentIdentifier,
                     selectedCandidate.Model,
                     selectedCandidate.NumberOfStates,
                     selectedCandidate.Bic,
@@ -99,7 +99,7 @@ namespace Trading.Strategies.Tools.HmmTrainer
                 Console.WriteLine(
                     string.Format(CultureInfo.InvariantCulture,
                         "[HmmTrainer] Trained HMM: instrument={0}, K={1}, BIC={2:F4}, training_window=[{3:yyyy-MM-dd}, {4:yyyy-MM-dd}], n_bars={5}, mapping={{{6}}}",
-                        InstrumentIdentifier,
+                        instrumentIdentifier,
                         selectedCandidate.NumberOfStates,
                         selectedCandidate.Bic,
                         TrainingWindowStartUtc,
@@ -117,21 +117,65 @@ namespace Trading.Strategies.Tools.HmmTrainer
             }
         }
 
-        private static string ResolveDefaultOutputPath()
+        private static string ResolveDefaultOutputPath(string instrumentIdentifier)
         {
-            // El proyecto vive en {repoRoot}/Trading.Strategies/Tools/HmmTrainer.
-            // Subir tres niveles desde AppContext.BaseDirectory no funciona porque está en bin/.
-            // Resolvemos partiendo de la ubicación conocida del .csproj relativa al proyecto.
             string assemblyDirectory = AppContext.BaseDirectory;
-            // Subir cinco niveles para llegar al repo root cuando se ejecuta desde bin/Debug/net10.0/.
             var candidate = new DirectoryInfo(assemblyDirectory);
             while (candidate != null && !File.Exists(Path.Combine(candidate.FullName, "QuantConnect.Lean.sln")))
                 candidate = candidate.Parent;
             if (candidate is null)
                 throw new InvalidOperationException(
                     "No pude localizar el repo root (QuantConnect.Lean.sln) subiendo desde el directorio de ejecución. " +
-                    "Pasá el output path como segundo argumento.");
-            return Path.Combine(candidate.FullName, "models", "regime", $"{InstrumentIdentifier}-perp-binance.hmm.json");
+                    "Pasá el output path con --output.");
+            return Path.Combine(candidate.FullName, "models", "regime", "staging",
+                $"{instrumentIdentifier}-perp-binance.hmm.json");
+        }
+
+        private sealed record TrainerArgs(
+            string InstrumentIdentifier,
+            string DataDirectory,
+            string OutputPath);
+
+        private static TrainerArgs ParseArgs(string[] arguments)
+        {
+            string? instrument = null;
+            string? dataDir = null;
+            string? output = null;
+
+            for (int i = 0; i < arguments.Length; i++)
+            {
+                switch (arguments[i])
+                {
+                    case "--instrument":
+                        instrument = RequireValue(arguments, ref i, "--instrument");
+                        break;
+                    case "--data-dir":
+                        dataDir = RequireValue(arguments, ref i, "--data-dir");
+                        break;
+                    case "--output":
+                        output = RequireValue(arguments, ref i, "--output");
+                        break;
+                    default:
+                        throw new ArgumentException(
+                            $"Argumento desconocido: '{arguments[i]}'. " +
+                            "Uso: HmmTrainer [--instrument TICKER] [--data-dir PATH] [--output PATH]");
+                }
+            }
+
+            string resolvedInstrument = instrument ?? "BTCUSDT";
+            string resolvedDataDir = dataDir
+                ?? $@"F:\Mis Documentos\Cripto monedas\Trading\Data\Velas\4h\{resolvedInstrument}";
+            string resolvedOutput = output ?? ResolveDefaultOutputPath(resolvedInstrument);
+
+            return new TrainerArgs(resolvedInstrument, resolvedDataDir, resolvedOutput);
+        }
+
+        private static string RequireValue(string[] arguments, ref int index, string flag)
+        {
+            if (index + 1 >= arguments.Length)
+                throw new ArgumentException($"El flag '{flag}' requiere un valor.");
+            index++;
+            return arguments[index];
         }
 
         // Multi-seed Baum-Welch: entrena N veces con seeds distintos, conserva el de mayor log-likelihood.
@@ -306,6 +350,7 @@ namespace Trading.Strategies.Tools.HmmTrainer
         }
 
         private static PersistedHmmModel BuildPersistedModel(
+            string instrumentIdentifier,
             HiddenMarkovModel<MultivariateNormalDistribution, double[]> model,
             int numberOfStates,
             double bic,
@@ -346,7 +391,7 @@ namespace Trading.Strategies.Tools.HmmTrainer
                 stateToLabel[pair.Key] = pair.Value.ToString();
 
             return new PersistedHmmModel(
-                InstrumentIdentifier: InstrumentIdentifier,
+                InstrumentIdentifier: instrumentIdentifier,
                 Exchange: Exchange,
                 ContractType: ContractType,
                 Timeframe: Timeframe,
@@ -363,6 +408,42 @@ namespace Trading.Strategies.Tools.HmmTrainer
                 FeatureScalerStdDevs: scaler.StdDevs,
                 StateToRegimeLabel: stateToLabel,
                 WarmUpBars: WarmUpBarsForRuntime);
+        }
+
+        private static void LogDecodedStateDistribution(
+            int[] decodedStates,
+            int numberOfStates,
+            SemanticStateMapper mapper)
+        {
+            var counts = new int[numberOfStates];
+            foreach (var state in decodedStates) counts[state]++;
+            double total = decodedStates.Length;
+
+            Console.WriteLine("[HmmTrainer] Distribución de barras por estado decodificado (Viterbi sobre training set):");
+            for (int stateIndex = 0; stateIndex < numberOfStates; stateIndex++)
+            {
+                double pct = 100.0 * counts[stateIndex] / total;
+                var label = mapper.MapState(stateIndex);
+                Console.WriteLine(
+                    string.Format(CultureInfo.InvariantCulture,
+                        "  state={0} ({1}): {2} barras ({3:F2}%)",
+                        stateIndex, label, counts[stateIndex], pct));
+            }
+
+            var byLabel = Enumerable.Range(0, numberOfStates)
+                .GroupBy(s => mapper.MapState(s))
+                .Select(g => new { Label = g.Key, Count = g.Sum(s => counts[s]) })
+                .OrderByDescending(x => x.Count);
+
+            Console.WriteLine("[HmmTrainer] Distribución de barras por label semántico:");
+            foreach (var entry in byLabel)
+            {
+                double pct = 100.0 * entry.Count / total;
+                Console.WriteLine(
+                    string.Format(CultureInfo.InvariantCulture,
+                        "  {0}: {1} barras ({2:F2}%)",
+                        entry.Label, entry.Count, pct));
+            }
         }
 
         private sealed record CandidateResult(

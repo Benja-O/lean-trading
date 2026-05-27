@@ -10,6 +10,70 @@
 
 ---
 
+## ADR-027 — Re-entrenamiento de BTC con trainer multi-seed (alineación post-DEUDA-1)
+**Fecha:** 2026-05-26
+**Estado:** Aceptada
+
+### Contexto
+
+Al abrir sesión multi-símbolo (entrenamiento de ETHUSDT y TRBUSDT con Opción A — un HMM por símbolo), se ejecutó verificación de no-regresión del refactor de parametrización del `HmmTrainer`. La verificación reveló que el archivo `models/regime/BTCUSDT-perp-binance.hmm.json` (`TrainedAtUtc = 2026-05-19T15:36:48Z`) precedía al commit `6f72dcc` (DEUDA-1, multi-seed Baum-Welch, 2026-05-22) y por lo tanto fue generado con el trainer single-seed pre-DEUDA-1. ADR-024 había documentado explícitamente la decisión de NO re-entrenar tras DEUDA-1 para preservar el baseline de ADR-023 (6 órdenes).
+
+Esa decisión queda inválida ahora porque entrenar ETH y TRB con el trainer actual (multi-seed) genera una flota inconsistente: BTC pre-DEUDA-1, alts post-DEUDA-1. Las clasificaciones de régimen entre símbolos dejan de ser conceptualmente comparables.
+
+### Decisión
+
+Re-entrenar BTC con el trainer multi-seed actual. Reemplazar `models/regime/BTCUSDT-perp-binance.hmm.json` por el modelo nuevo. Conservar el modelo viejo como `BTCUSDT-perp-binance.hmm.json.preDEUDA1` en el mismo directorio para evidencia histórica.
+
+### Resultados del re-entrenamiento
+
+- **K seleccionado:** 4
+- **BIC final:** 57643.8833 (preDEUDA1: 57643.9366 — multi-seed encontró óptimo local marginalmente mejor)
+- **Mapping semántico:** `{0:Trend, 1:Trend, 2:Squeeze, 3:HighVolatility}`
+- **Validación granular ventana 3** (`ProductionHmmGranularQueryTests`): crash de Feb 3 sigue clasificado como `Trend` en las 12 barras 4h del período 2025-02-03→04 ✓
+  - Las 6 barras del 2025-02-02 aparecen como `Squeeze` (igual que con el modelo preDEUDA1 — comportamiento correcto: el mercado entró en compresión el día previo al crash)
+
+### Resultados del backtest BTC-15m post-re-entrenamiento
+
+El modelo nuevo produce resultados bit-idénticos al baseline de ADR-026:
+
+| Métrica            | preDEUDA1 (ADR-026) | postDEUDA1 (nuevo) |
+|--------------------|---------------------|--------------------|
+| Total Orders       | 147                 | 147                |
+| End Equity (USDT)  | 87148               | 87148.16           |
+| Net Profit         | -12.85%             | -12.852%           |
+| Max Drawdown       | 21.5%               | 21.500%            |
+| Win Rate           | 32%                 | 32%                |
+| P/L Ratio          | 1.42                | 1.42               |
+| Sharpe             | -1.288              | -1.288             |
+| U2 dispara         | 2025-02-06          | 2025-02-06         |
+| OPS-2 inv. violado | 0                   | 0                  |
+| Evento sin tag     | 0                   | 0                  |
+
+La identidad de resultados se explica por la invarianza semántica: aunque los índices numéricos de los estados difieren (permutación entre runs), el mapeo semántico produce exactamente las mismas clasificaciones de régimen sobre el período 2025-01-01→2026-03-31, por lo tanto las mismas señales de entrada, las mismas órdenes, el mismo equity curve. Los criterios cualitativos del subsistema se confirman verdes.
+
+**Equivalencia conductual confirmada al nivel de order list.** Backtest comparativo ejecutado con modelo preDEUDA1 restaurado temporalmente. Resultado: 82 fills idénticos (timestamp, fillPrice, fillQuantity) y 65 cancels idénticos (orderId, timestamp) entre ambos modelos. El `OrderListHash` de Lean no es un comparador fiable entre corridas — varía entre runs del mismo modelo por no-determinismo interno del motor — pero la comparación directa de order-events.json confirma equivalencia conductual completa: el modelo nuevo y el preDEUDA1 son indistinguibles para el backtest BTC-15m del período 2025-01-01 → 2026-03-31 al nivel de ejecución de órdenes.
+
+### Consecuencias
+
+**Positivas:**
+- Flota de modelos HMM consistente: BTC, y próximamente ETH y TRB, todos generados por el mismo pipeline multi-seed.
+- El archivo de modelo queda alineado con el código que lo genera. Re-correr el trainer reproduce el archivo (módulo `TrainedAtUtc`).
+- Cierre operativo de la deuda implícita "modelo en disco desincronizado del trainer" que existía desde 2026-05-22.
+
+**Neutras / aceptadas:**
+- El baseline de ADR-023 (6 órdenes) y de ADR-026 (147 órdenes BTC-15m) quedan técnicamente invalidados por cambio de modelo, pero los nuevos números son idénticos: el baseline numérico de no-regresión BTC-15m es el documentado en este ADR.
+- Si el modelo nuevo cambia clasificaciones de barras borde, las estrategias operan sobre decisiones de filtro marginalmente distintas. En la práctica no ocurrió: el backtest es bit-idéntico.
+
+**Negativas / hallazgos pendientes:**
+- DEUDA-1 inspeccionó 5 ventanas históricas con el modelo preDEUDA1. Solo la ventana 3 quedó con test granular automatizado. Las otras 4 se documentaron informalmente y no se re-validan automáticamente con este re-entrenamiento. Mitigación: el delta de BIC entre modelos es marginal (9·10⁻⁷ relativo) y el backtest de 15 meses es bit-idéntico, por lo que re-clasificación sustantiva de las otras 4 ventanas es muy improbable.
+
+### Riesgo residual
+
+- El test granular cubre solo la ventana 3 (crash feb 2025). Si en el futuro se descubre que el modelo nuevo clasifica mal alguna otra ventana histórica relevante, el modelo puede compararse con el `preDEUDA1` conservado para diagnóstico.
+- POLICY 7.1 está titulada "EmaCrossStrategy/BTCUSDT/1h" pero el backtest de referencia corre a 15m. Discrepancia de documentación identificada en ADR-026, no resuelta en este brief.
+
+---
+
 ## ADR-026 — Validación multi-timeframe del subsistema de ejecución/monitoreo sobre BTCUSDT
 **Fecha:** 2026-05-26
 **Estado:** Aceptada
