@@ -48,7 +48,10 @@
       "Bash(Get-ChildItem \"F:\\\\Lean\\\\data\\\\results\\\\\" | Sort-Object LastWriteTime -Descending | Select-Object Name, Length, LastWriteTime | Head 20 *)",
       "PowerShell(Get-Process *)",
       "Bash(dotnet QuantConnect.Lean.Launcher.dll)",
-      "Bash(python3 -c ' *)"
+      "Bash(python3 -c ' *)",
+      "Bash(dotnet QuantConnect.Lean.Launcher.dll --config config.json)",
+      "Bash(dir *)",
+      "Bash(awk '/^2025-02-22 1[3-6]:[0-9][0-9]:[0-9][0-9]/' \"F:/Lean/data/results/Trading.Strategies.TradingAlgorithmHost-log.txt\")"
     ]
   }
 }

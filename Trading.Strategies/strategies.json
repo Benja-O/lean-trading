@@ -2,9 +2,7 @@
   "Timeframes": {
     "1m":  { "Strategies": [] },
     "5m":  { "Strategies": [] },
-    "15m": { "Strategies": [] },
-    "30m": { "Strategies": [] },
-    "1h": {
+    "15m": {
       "Strategies": [
         {
           "StrategyName": "EmaCrossStrategy",
@@ -19,7 +17,12 @@
           "RiskPerTradePercentage": 2.0,
           "MaxBars": 20,
           "CombineWithTimeExit": true
-        },
+        }
+      ]
+    },
+    "30m": { "Strategies": [] },
+    "1h": {
+      "Strategies": [
         {
           "StrategyName": "EmaCrossStrategy",
           "FileModelName": "",
@@ -33,15 +36,19 @@
           "RiskPerTradePercentage": 2.0,
           "MaxBars": 20,
           "CombineWithTimeExit": true
-        },
+        }
+      ]
+    },
+    "4h":  {
+      "Strategies": [
         {
           "StrategyName": "EmaCrossStrategy",
           "FileModelName": "",
           "Symbol": "TRBUSDT",
           "CompatibleRegimes": [ "Trend" ],
           "StopTakeMode": "Percentage",
-          "StopLossPercentage": 2.0,
-          "TakeProfitPercentage": 4.0,
+          "StopLossPercentage": 4.0,
+          "TakeProfitPercentage": 8.0,
           "StopLossAtrMultiplier": 0,
           "TakeProfitAtrMultiplier": 0,
           "RiskPerTradePercentage": 2.0,
@@ -50,7 +57,6 @@
         }
       ]
     },
-    "4h":  { "Strategies": [] },
     "1d":  { "Strategies": [] }
   }
 }
