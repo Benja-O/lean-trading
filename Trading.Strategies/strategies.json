@@ -2,7 +2,9 @@
   "Timeframes": {
     "1m":  { "Strategies": [] },
     "5m":  { "Strategies": [] },
-    "15m": {
+    "15m": { "Strategies": [] },
+    "30m": { "Strategies": [] },
+    "1h": {
       "Strategies": [
         {
           "StrategyName": "EmaCrossStrategy",
@@ -17,12 +19,38 @@
           "RiskPerTradePercentage": 2.0,
           "MaxBars": 20,
           "CombineWithTimeExit": true
+        },
+        {
+          "StrategyName": "EmaCrossStrategy",
+          "FileModelName": "",
+          "Symbol": "ETHUSDT",
+          "CompatibleRegimes": [ "Trend" ],
+          "StopTakeMode": "Percentage",
+          "StopLossPercentage": 1.2,
+          "TakeProfitPercentage": 2.4,
+          "StopLossAtrMultiplier": 0,
+          "TakeProfitAtrMultiplier": 0,
+          "RiskPerTradePercentage": 2.0,
+          "MaxBars": 20,
+          "CombineWithTimeExit": true
+        },
+        {
+          "StrategyName": "EmaCrossStrategy",
+          "FileModelName": "",
+          "Symbol": "TRBUSDT",
+          "CompatibleRegimes": [ "Trend" ],
+          "StopTakeMode": "Percentage",
+          "StopLossPercentage": 2.0,
+          "TakeProfitPercentage": 4.0,
+          "StopLossAtrMultiplier": 0,
+          "TakeProfitAtrMultiplier": 0,
+          "RiskPerTradePercentage": 2.0,
+          "MaxBars": 20,
+          "CombineWithTimeExit": true
         }
       ]
     },
-    "30m": { "Strategies": [] },
-    "1h":  { "Strategies": [] },
-    "4h": { "Strategies": [] },
+    "4h":  { "Strategies": [] },
     "1d":  { "Strategies": [] }
   }
 }
