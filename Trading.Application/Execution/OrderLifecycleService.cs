@@ -23,6 +23,7 @@ namespace Trading.Application.Execution
         private readonly ITradingLogger _logger;
         private readonly IDomainEventBus _eventBus;
         private readonly IClock _clock;
+        private readonly RiskOrchestrator _riskOrchestrator;
 
         public OrderLifecycleService(
             IReadOnlyList<StrategyExecutor> strategyExecutors,
@@ -31,7 +32,8 @@ namespace Trading.Application.Execution
             IPriceRounder priceRounder,
             ITradingLogger logger,
             IDomainEventBus eventBus,
-            IClock clock)
+            IClock clock,
+            RiskOrchestrator riskOrchestrator)
         {
             _strategyExecutors = strategyExecutors;
             _consecutiveLossesMonitor = consecutiveLossesMonitor;
@@ -40,6 +42,8 @@ namespace Trading.Application.Execution
             _logger = logger;
             _eventBus = eventBus;
             _clock = clock;
+            _riskOrchestrator = riskOrchestrator
+                ?? throw new System.ArgumentNullException(nameof(riskOrchestrator));
         }
 
         public void Handle(OrderLifecycleEvent lifecycleEvent)
@@ -126,6 +130,14 @@ namespace Trading.Application.Execution
                     strategyExecutor.TakeProfitOrderHandle?.Cancel("Time Exit Hit");
                     strategyExecutor.ResetState();
                     break;
+                case OrderPurpose.Liquidate:
+                    _logger.Info(
+                        "Cancelando StopLoss y TakeProfit de '{ExecutorIdentifier}' por {Reason}.",
+                        strategyExecutor.ExecutorIdentifier, "Liquidate Hit");
+                    strategyExecutor.StopLossOrderHandle?.Cancel("Liquidate Hit");
+                    strategyExecutor.TakeProfitOrderHandle?.Cancel("Liquidate Hit");
+                    strategyExecutor.ResetState();
+                    break;
             }
         }
 
@@ -135,6 +147,41 @@ namespace Trading.Application.Execution
 
             var instrumentId = lifecycleEvent.InstrumentId;
             decimal fillQuantity = lifecycleEvent.FillQuantity;
+
+            // Defensa contra race entre submit Entry y disparo del kill switch:
+            // si un Entry se llena durante el cooling-off, liquidar inmediatamente
+            // sin emitir brackets. El RiskOrchestrator no puede detectarlo en
+            // LiquidateAllRiskAction porque ese se ejecuta una sola vez al momento
+            // del breach, antes de que el Entry pending se haya materializado en
+            // IPortfolioState.IsInvested. Ver ADR-029.
+            if (_riskOrchestrator.IsKillSwitchActivated)
+            {
+                _logger.Critical(
+                    "Entry filled durante cooling-off para '{ExecutorIdentifier}' " +
+                    "(instrumentId={InstrumentId}, qty={FillQuantity}). " +
+                    "Liquidando inmediatamente sin emitir SL/TP.",
+                    strategyExecutor.ExecutorIdentifier,
+                    instrumentId.Ticker,
+                    fillQuantity);
+
+                _orderRouter.LiquidateInstrument(
+                    instrumentId,
+                    OrderPurpose.Liquidate,
+                    strategyExecutor.ExecutorIdentifier);
+
+                _eventBus.Publish(new OrderSubmittedEvent(
+                    TimestampUtc: _clock.UtcNow,
+                    ExecutorIdentifier: strategyExecutor.ExecutorIdentifier,
+                    InstrumentId: instrumentId,
+                    Purpose: OrderPurpose.Liquidate,
+                    Quantity: 0m,
+                    LimitPrice: null,
+                    StopPrice: null,
+                    ClientTag: string.Empty));
+
+                return;
+            }
+
             decimal entryPrice = lifecycleEvent.FillPrice;
 
             decimal stopLossFraction = strategyExecutor.RiskParameters.StopLossFraction;

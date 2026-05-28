@@ -10,6 +10,7 @@ using Trading.Domain.Events;
 using Trading.Domain.Models;
 using Trading.Domain.ValueObjects;
 using Xunit;
+#nullable enable
 
 namespace Trading.Application.Tests.Execution
 {
@@ -40,8 +41,23 @@ namespace Trading.Application.Tests.Execution
             return new StrategyExecutor(definition, timeframe, instrumentId, new FakeStrategy(), riskParams);
         }
 
+        private RiskOrchestrator BuildOrchestrator(bool activateKillSwitch = false)
+        {
+            var eventBus = new DomainEventBus(_logger);
+            var orchestrator = new RiskOrchestrator(
+                System.Array.Empty<IRiskMonitor>(),
+                new FakeRiskAction(),
+                new CoolingOffTracker(_clock, TimeSpan.FromDays(1)),
+                _clock,
+                _logger,
+                eventBus);
+            if (activateKillSwitch)
+                orchestrator.ActivateKillSwitchManually("Test");
+            return orchestrator;
+        }
+
         private (OrderLifecycleService service, CapturingEventSubscriber<OrderFilledEvent> capturer)
-            Build(IReadOnlyList<StrategyExecutor> executors)
+            Build(IReadOnlyList<StrategyExecutor> executors, RiskOrchestrator? riskOrchestrator = null)
         {
             var eventBus = new DomainEventBus(_logger);
             var capturer = new CapturingEventSubscriber<OrderFilledEvent>(eventBus);
@@ -52,7 +68,8 @@ namespace Trading.Application.Tests.Execution
                 new PassThroughPriceRounder(),
                 _logger,
                 eventBus,
-                _clock);
+                _clock,
+                riskOrchestrator ?? BuildOrchestrator());
             return (service, capturer);
         }
 
@@ -146,6 +163,83 @@ namespace Trading.Application.Tests.Execution
             service.Handle(unknownEvent);
 
             _logger.ErrorEntries.Should().ContainSingle();
+        }
+
+        // ── Tests ADR-029: race Entry pending / kill switch ──────────────────
+
+        [Fact]
+        public void HandleEntryFill_WhenKillSwitchInactive_EmitsStopLossAndTakeProfit()
+        {
+            var executor = BuildExecutor("EmaCross", Eth, "1h");
+            var (service, _) = Build(new[] { executor }, BuildOrchestrator(activateKillSwitch: false));
+
+            var entryFill = new OrderLifecycleEvent(
+                status: OrderEventStatus.Filled,
+                purpose: OrderPurpose.Entry,
+                executorIdentifier: executor.ExecutorIdentifier,
+                instrumentId: Eth,
+                fillQuantity: 10m,
+                fillPrice: 3_000m,
+                timestampUtc: _clock.UtcNow);
+
+            service.Handle(entryFill);
+
+            _orderRouter.SubmittedOrders.Should().Contain(o => o.Purpose == OrderPurpose.StopLoss);
+            _orderRouter.SubmittedOrders.Should().Contain(o => o.Purpose == OrderPurpose.TakeProfit);
+            _orderRouter.LiquidateInstrumentCalls.Should().BeEmpty();
+        }
+
+        [Fact]
+        public void HandleEntryFill_WhenKillSwitchActive_LiquidatesAndDoesNotEmitBrackets()
+        {
+            var executor = BuildExecutor("EmaCross", Eth, "1h");
+            var (service, _) = Build(new[] { executor }, BuildOrchestrator(activateKillSwitch: true));
+
+            var entryFill = new OrderLifecycleEvent(
+                status: OrderEventStatus.Filled,
+                purpose: OrderPurpose.Entry,
+                executorIdentifier: executor.ExecutorIdentifier,
+                instrumentId: Eth,
+                fillQuantity: 10m,
+                fillPrice: 3_000m,
+                timestampUtc: _clock.UtcNow);
+
+            service.Handle(entryFill);
+
+            _orderRouter.LiquidateInstrumentCalls.Should().ContainSingle(c =>
+                c.InstrumentId == Eth &&
+                c.Purpose == OrderPurpose.Liquidate &&
+                c.ExecutorIdentifier == executor.ExecutorIdentifier);
+            _orderRouter.SubmittedOrders.Should().NotContain(o =>
+                o.Purpose == OrderPurpose.StopLoss || o.Purpose == OrderPurpose.TakeProfit);
+            _logger.CriticalEntries.Should().ContainSingle(e => e.MessageTemplate.Contains("cooling-off"));
+        }
+
+        [Fact]
+        public void Handle_LiquidateFilled_CancelsBracketsAndResetsState()
+        {
+            var executor = BuildExecutor("EmaCross", Eth, "1h");
+            var (service, _) = Build(new[] { executor });
+
+            var slHandle = new FakeOrderHandle();
+            var tpHandle = new FakeOrderHandle();
+            executor.StopLossOrderHandle = slHandle;
+            executor.TakeProfitOrderHandle = tpHandle;
+
+            var liquidateFill = new OrderLifecycleEvent(
+                status: OrderEventStatus.Filled,
+                purpose: OrderPurpose.Liquidate,
+                executorIdentifier: executor.ExecutorIdentifier,
+                instrumentId: Eth,
+                fillQuantity: -10m,
+                fillPrice: 2_950m,
+                timestampUtc: _clock.UtcNow);
+
+            service.Handle(liquidateFill);
+
+            slHandle.CancelCallCount.Should().Be(1);
+            tpHandle.CancelCallCount.Should().Be(1);
+            executor.HasActivePosition.Should().BeFalse();
         }
     }
 

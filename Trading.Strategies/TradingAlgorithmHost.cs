@@ -272,7 +272,8 @@ namespace Trading.Strategies
                 regimeRegistry, strategyCompatibilities, strategyHealthMonitor);
 
             _orderLifecycleService = new OrderLifecycleService(
-                _strategyExecutors, _consecutiveLossesMonitor, _orderRouter, _priceRounder, _logger, domainEventBus, _clock);
+                _strategyExecutors, _consecutiveLossesMonitor, _orderRouter, _priceRounder, _logger, domainEventBus, _clock,
+                _riskOrchestrator);
 
             // Flush inicial: deja el heartbeat.json creado con el estado al boot.
             // Se ejecuta tanto en backtest como en live.
