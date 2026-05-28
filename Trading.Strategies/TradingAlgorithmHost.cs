@@ -111,11 +111,17 @@ namespace Trading.Strategies
             _positionSizer = new PositionSizer(_portfolioState, _instrumentMetadata, _logger);
 
             // ===== Configuración del entorno de trading =====
-            SetStartDate(2025, 1, 1);
-            SetEndDate(2026, 3, 31);
             SetAccountCurrency("USDT");
-            SetCash("USDT", InitialAccountCashUsdt);
-            SetCash("USD", 0);
+
+            if (!LiveMode)
+            {
+                // Backtest: ventana temporal y cash simulado.
+                SetStartDate(2025, 1, 1);
+                SetEndDate(2026, 3, 31);
+                SetCash("USDT", InitialAccountCashUsdt);
+                SetCash("USD", 0);
+            }
+            // En live, el cash y el rango temporal los provee el brokerage / wall clock.
 
             drawdownMonitor.InitializeWithCurrentValue();
 
