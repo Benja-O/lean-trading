@@ -903,11 +903,19 @@ namespace QuantConnect.Brokerages.Binance
             public string OrganizationId;
         }
 
+        // ADR-030: marcador de trazabilidad en binario (static readonly para sobrevivir Release optimizer)
+        private static readonly string _adr030BinaryMarker = "ADR-030-BYPASS-VALIDATE-SUBSCRIPTION";
+
         /// <summary>
         /// Validate the user of this project has permission to be using it via our web API.
         /// </summary>
         private static void ValidateSubscription()
         {
+            // PARCHE ADR-030: bypass local de validación de suscripción QC.
+            // Ver Trading_Brief/ADR-030-bypass-validate-subscription.md
+            _ = _adr030BinaryMarker;
+            return;
+#pragma warning disable CS0162 // Código inalcanzable — original preservado para reversión (ADR-030)
             try
             {
                 const int productId = 176;
@@ -1031,6 +1039,7 @@ namespace QuantConnect.Brokerages.Binance
                 Log.Error($"ValidateSubscription(): Failed during validation, shutting down. Error : {e.Message}");
                 Environment.Exit(1);
             }
+#pragma warning restore CS0162
         }
     }
 }
