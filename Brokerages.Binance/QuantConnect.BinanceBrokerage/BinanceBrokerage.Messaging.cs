@@ -1,0 +1,347 @@
+/*
+ * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
+ * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+*/
+
+using QuantConnect.Brokerages.Binance.Messages;
+using QuantConnect.Data.Market;
+using QuantConnect.Logging;
+using QuantConnect.Orders;
+using QuantConnect.Orders.Fees;
+using QuantConnect.Securities;
+using System;
+using Newtonsoft.Json.Linq;
+using QuantConnect.Data;
+using System.Linq;
+using QuantConnect.Brokerages.Binance.Extensions;
+using QuantConnect.Brokerages.Binance.Enums;
+
+namespace QuantConnect.Brokerages.Binance
+{
+    public partial class BinanceBrokerage
+    {
+        private IDataAggregator _aggregator;
+
+        /// <summary>
+        /// Locking object for the Ticks list in the data queue handler
+        /// </summary>
+        protected readonly object TickLocker = new object();
+
+        private void OnUserMessage(WebSocketMessage webSocketMessage)
+        {
+            var e = (WebSocketClientWrapper.TextMessage)webSocketMessage.Data;
+
+            try
+            {
+                if (Log.DebuggingEnabled)
+                {
+                    Log.Debug($"BinanceBrokerage.OnUserMessage(): {e.Message}");
+                }
+
+                var obj = JObject.Parse(e.Message);
+
+                var objError = obj["error"];
+                if (objError != null)
+                {
+                    var error = objError.ToObject<ErrorMessage>();
+                    OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Error, error.Code, error.Message));
+                    return;
+                }
+
+                var objData = obj;
+                if (TryGetExecution(objData, out var execution, out var action))
+                {
+                    switch (action)
+                    {
+                        case ExecutionAction.Cancel:
+                        case ExecutionAction.Fill:
+                            OnFillOrder(execution);
+                            break;
+                        case ExecutionAction.NewOrder:
+                            OnNewBrokerageOrder(execution);
+                            break;
+                            // ExecutionAction.None: routine update — nothing to do
+                    }
+                }
+            }
+            catch (Exception exception)
+            {
+                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Error, -1, $"Parsing wss message failed. Data: {e.Message} Exception: {exception}"));
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Tries to parse a WebSocket JSON payload into an <see cref="Execution"/> and determines
+        /// what action the brokerage should take for it.
+        /// </summary>
+        /// <remarks>
+        /// Handles three wire formats:
+        /// <list type="number">
+        ///   <item><c>{ "e": "executionReport", … }</c> — standard Spot stream</item>
+        ///   <item><c>{ "e": "ORDER_TRADE_UPDATE", "o": { … } }</c> — Futures stream</item>
+        ///   <item><c>{ "subscriptionId": …, "event": { "e": "executionReport", … } }</c> — Spot WS-API</item>
+        /// </list>
+        /// </remarks>
+        internal static bool TryGetExecution(JObject objData, out Execution execution, out ExecutionAction action)
+        {
+            action = ExecutionAction.None;
+            execution = null;
+            var objEventType = objData["e"];
+            if (objEventType != null)
+            {
+                var eventType = objEventType.ToObject<string>();
+                switch (eventType)
+                {
+                    case "executionReport":
+                        execution = objData.ToObject<Execution>();
+                        break;
+                    case "ORDER_TRADE_UPDATE":
+                        execution = objData["o"].ToObject<Execution>();
+                        break;
+                    default:
+                        return false;
+                }
+            }
+            else if (objData["event"]?["e"]?.Value<string>() == "executionReport")
+            {
+                execution = objData["event"].ToObject<Execution>();
+            }
+
+            if (execution == null)
+            {
+                return false;
+            }
+
+            switch (execution.ExecutionType?.ToUpperInvariant())
+            {
+                case "TRADE":
+                    action = ExecutionAction.Fill;
+                    break;
+                // x:EXPIRED, o:STOP / STOP_MARKET, er:0 — the stop price was hit and the trigger
+                // order is consumed normally; the child limit/market order arrives in a separate
+                // NEW event. Skip this event to avoid marking the Lean order as 'Invalid'.
+                // When er is non-zero (e.g. 8 = FOK rejected after trigger) the stop order
+                // genuinely failed and must be reported — fall through to the general EXPIRED case.
+                case "EXPIRED"
+                when (execution.OrderType.Equals("STOP", StringComparison.OrdinalIgnoreCase)
+                    || execution.OrderType.Equals("STOP_MARKET", StringComparison.OrdinalIgnoreCase))
+                    && execution.ExpiredReason == FuturesExpiredReason.None:
+                    action = ExecutionAction.None;
+                    break;
+                case "EXPIRED":
+                    action = ExecutionAction.Fill;
+                    break;
+                case "NEW":
+                    action = ExecutionAction.NewOrder;
+                    break;
+                case "CANCELED":
+                    action = ExecutionAction.Cancel;
+                    break;
+                default:
+                    action = ExecutionAction.None;
+                    break;
+            }
+
+            return true;
+        }
+
+        private void OnDataMessage(WebSocketMessage webSocketMessage)
+        {
+            var e = (WebSocketClientWrapper.TextMessage)webSocketMessage.Data;
+
+            try
+            {
+                var obj = JObject.Parse(e.Message);
+
+                var objError = obj["error"];
+                if (objError != null)
+                {
+                    var error = objError.ToObject<ErrorMessage>();
+                    OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Error, error.Code, error.Message));
+                    return;
+                }
+
+                var objData = obj;
+
+                var objEventType = objData["e"];
+                if (objEventType != null)
+                {
+                    var eventType = objEventType.ToObject<string>();
+
+                    switch (eventType)
+                    {
+                        case "trade":
+                        case "aggTrade":
+                            var trade = objData.ToObject<Trade>();
+                            // futures feed send upper and lower case T confusing json
+                            trade.Time = objData["T"].ToObject<long>();
+                            EmitTradeTick(
+                                _symbolMapper.GetLeanSymbol(trade.Symbol, GetSupportedSecurityType(), MarketName),
+                                Time.UnixMillisecondTimeStampToDateTime(trade.Time),
+                                trade.Price,
+                                trade.Quantity);
+                            break;
+                        case "bookTicker":
+                            // futures stream the event type but spot doesn't, that's why we have the next 'else if'
+                            HandleQuoteTick(objData);
+                            break;
+                    }
+                }
+                else if (objData["u"] != null)
+                {
+                    HandleQuoteTick(objData);
+                }
+            }
+            catch (Exception exception)
+            {
+                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Error, -1, $"Parsing wss message failed. Data: {e.Message} Exception: {exception}"));
+                throw;
+            }
+        }
+
+        private void HandleQuoteTick(JObject objData)
+        {
+            var quote = objData.ToObject<BestBidAskQuote>();
+            EmitQuoteTick(
+                _symbolMapper.GetLeanSymbol(quote.Symbol, GetSupportedSecurityType(), MarketName),
+                quote.BestBidPrice,
+                quote.BestBidSize,
+                quote.BestAskPrice,
+                quote.BestAskSize);
+        }
+
+        private void EmitQuoteTick(Symbol symbol, decimal bidPrice, decimal bidSize, decimal askPrice, decimal askSize)
+        {
+            var tick = new Tick
+            {
+                AskPrice = askPrice,
+                BidPrice = bidPrice,
+                Time = DateTime.UtcNow,
+                Symbol = symbol,
+                TickType = TickType.Quote,
+                AskSize = askSize,
+                BidSize = bidSize
+            };
+            tick.SetValue();
+
+            lock (TickLocker)
+            {
+                _aggregator.Update(tick);
+            }
+        }
+
+        private void EmitTradeTick(Symbol symbol, DateTime time, decimal price, decimal quantity)
+        {
+            var tick = new Tick
+            {
+                Symbol = symbol,
+                Value = price,
+                Quantity = Math.Abs(quantity),
+                Time = time,
+                TickType = TickType.Trade
+            };
+
+            lock (TickLocker)
+            {
+                _aggregator.Update(tick);
+            }
+        }
+
+        internal void OnFillOrder(Execution data)
+        {
+            try
+            {
+                var order = GetLeanOrder(data.AlgoOrderId) ?? GetLeanOrder(data.OrderId);
+                if (order == null)
+                {
+                    // not our order, nothing else to do here
+                    Log.Error($"BinanceBrokerage.OnFillOrder(): order not found: {data.OrderId}[AlgoOrderId: {data.AlgoOrderId}");
+                    return;
+                }
+
+                var status = ConvertOrderStatus(data.OrderStatus, out var message);
+                // CancelOrder (REST) fires OnOrderEvent(Canceled) immediately on success.
+                // The subsequent WS CANCELED event is a duplicate — skip it to avoid
+                // sending the same terminal status twice. External cancels arrive here
+                // with the order in a non-canceled state, so they still propagate correctly.
+                if (order.Status == status && status == OrderStatus.Canceled)
+                {
+                    return;
+                }
+
+                var fillPrice = data.LastExecutedPrice;
+                var fillQuantity = data.Direction == OrderDirection.Sell ? -data.LastExecutedQuantity : data.LastExecutedQuantity;
+                var updTime = Time.UnixMillisecondTimeStampToDateTime(data.TransactionTime);
+                var orderFee = OrderFee.Zero;
+                if (!string.IsNullOrEmpty(data.FeeCurrency))
+                {
+                    // might not be sent if zero fee
+                    orderFee = new OrderFee(new CashAmount(data.Fee, data.FeeCurrency));
+                }
+                message ??= $"Binance Order Event {data.Direction}";
+                var orderEvent = new OrderEvent
+                (
+                    order.Id, order.Symbol, updTime, status,
+                    data.Direction, fillPrice, fillQuantity,
+                    orderFee, message
+                );
+
+                OnOrderEvent(orderEvent);
+            }
+            catch (Exception e)
+            {
+                Log.Error(e);
+                throw;
+            }
+        }
+
+        internal void OnNewBrokerageOrder(Execution execution)
+        {
+            // If Lean already tracks this order (placed via PlaceOrder), skip it
+            var existingOrder = GetLeanOrder(execution.AlgoOrderId) ?? GetLeanOrder(execution.OrderId);
+            if (existingOrder != null)
+            {
+                return;
+            }
+
+            var openOrder = execution.MapExecutionToOpenOrder();
+            if (!TryCreateLeanOrder(openOrder, out var order))
+            {
+                Log.Error($"BinanceBrokerage.OnNewBrokerageOrder(): unsupported order type '{execution.OrderType}' for order {execution.OrderId}");
+                return;
+            }
+
+            OnNewBrokerageOrderNotification(new NewBrokerageOrderNotificationEventArgs(order));
+
+            // Lean assigns order.Id > 0 when it accepts the notification
+            if (order.Id != 0)
+            {
+                OnOrderEvent(new OrderEvent(order,
+                    Time.UnixMillisecondTimeStampToDateTime(execution.TransactionTime),
+                    OrderFee.Zero, "Order was submitted outside Lean")
+                { Status = OrderStatus.Submitted });
+            }
+        }
+
+        internal virtual Orders.Order GetLeanOrder(string brokerageOrderId)
+        {
+            // Binance may send "0" as the order id for algo orders
+            if (string.IsNullOrEmpty(brokerageOrderId) || brokerageOrderId.Equals("0", StringComparison.InvariantCultureIgnoreCase))
+            {
+                return null;
+            }
+            return _algorithm.Transactions.GetOrdersByBrokerageId(brokerageOrderId)?.SingleOrDefault();
+        }
+    }
+}

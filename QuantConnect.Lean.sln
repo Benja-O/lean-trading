@@ -75,6 +75,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Trading.Application.Tests",
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Trading.Strategies.Tests", "Trading.Strategies.Tests\Trading.Strategies.Tests.csproj", "{D54D8CD6-92DE-4ED6-90D5-87C78DF64DE7}"
 EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "QuantConnect.BinanceBrokerage", "Brokerages.Binance\QuantConnect.BinanceBrokerage\QuantConnect.BinanceBrokerage.csproj", "{6EF23A13-02E8-474A-AADC-966278F60744}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -443,6 +445,18 @@ Global
 		{D54D8CD6-92DE-4ED6-90D5-87C78DF64DE7}.Release|x64.Build.0 = Release|Any CPU
 		{D54D8CD6-92DE-4ED6-90D5-87C78DF64DE7}.Release|x86.ActiveCfg = Release|Any CPU
 		{D54D8CD6-92DE-4ED6-90D5-87C78DF64DE7}.Release|x86.Build.0 = Release|Any CPU
+		{6EF23A13-02E8-474A-AADC-966278F60744}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6EF23A13-02E8-474A-AADC-966278F60744}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6EF23A13-02E8-474A-AADC-966278F60744}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{6EF23A13-02E8-474A-AADC-966278F60744}.Debug|x64.Build.0 = Debug|Any CPU
+		{6EF23A13-02E8-474A-AADC-966278F60744}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{6EF23A13-02E8-474A-AADC-966278F60744}.Debug|x86.Build.0 = Debug|Any CPU
+		{6EF23A13-02E8-474A-AADC-966278F60744}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6EF23A13-02E8-474A-AADC-966278F60744}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6EF23A13-02E8-474A-AADC-966278F60744}.Release|x64.ActiveCfg = Release|Any CPU
+		{6EF23A13-02E8-474A-AADC-966278F60744}.Release|x64.Build.0 = Release|Any CPU
+		{6EF23A13-02E8-474A-AADC-966278F60744}.Release|x86.ActiveCfg = Release|Any CPU
+		{6EF23A13-02E8-474A-AADC-966278F60744}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

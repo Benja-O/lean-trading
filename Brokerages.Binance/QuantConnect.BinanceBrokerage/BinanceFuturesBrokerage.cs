@@ -1,0 +1,191 @@
+﻿/*
+ * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
+ * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+using System.Collections.Generic;
+using QuantConnect.Data;
+using QuantConnect.Util;
+using QuantConnect.Packets;
+using QuantConnect.Securities;
+using QuantConnect.Interfaces;
+using QuantConnect.Configuration;
+using QuantConnect.Brokerages.Binance.Constants;
+using System;
+using QuantConnect.Brokerages.Binance.Messages;
+
+namespace QuantConnect.Brokerages.Binance
+{
+    /// <summary>
+    /// Binance USDT Futures brokerage implementation
+    /// </summary>
+    [BrokerageFactory(typeof(BinanceFuturesBrokerageFactory))]
+    public class BinanceFuturesBrokerage : BinanceBrokerage
+    {
+        /// <summary>
+        /// Gets the trade channel name used for streaming trade information in the overridden context.
+        /// </summary>
+        /// <remarks>
+        /// The <see cref="TradeChannelName"/> property represents the specific trade channel name utilized for streaming
+        /// trade data in the overridden context. In this specific implementation, it returns the constant value
+        /// <see cref="TradeChannels.FutureTradeChannelName"/>, indicating the use of Future Trade Streams.
+        /// </remarks>
+        /// <value>
+        /// The value is the channel name for Future Trade Streams: <c>aggTrade</c>.
+        /// </value>
+        protected override string TradeChannelName => TradeChannels.FutureTradeChannelName;
+
+        public BinanceFuturesBrokerage() : base(Market.Binance)
+        {
+        }
+
+        /// <summary>
+        /// Constructor for brokerage
+        /// </summary>
+        /// <param name="apiKey">api key</param>
+        /// <param name="apiSecret">api secret</param>
+        /// <param name="restApiUrl">The rest api url</param>
+        /// <param name="webSocketBaseUrl">The web socket base url</param>
+        /// <param name="algorithm">the algorithm instance is required to retrieve account type</param>
+        /// <param name="aggregator">the aggregator for consolidating ticks</param>
+        /// <param name="job">The live job packet</param>
+        public BinanceFuturesBrokerage(string apiKey, string apiSecret, string restApiUrl, string webSocketBaseUrl, IAlgorithm algorithm, IDataAggregator aggregator, LiveNodePacket job)
+            : base(apiKey, apiSecret, restApiUrl, webSocketBaseUrl, webSocketBaseUrl, algorithm, aggregator, job, Market.Binance)
+        {
+        }
+
+        protected override void SetJobInit(LiveNodePacket job, IDataAggregator aggregator)
+        {
+            Initialize(
+                BinanceFuturesBrokerageFactory.GetPrivateWsUrl(job.BrokerageData[BinanceFuturesBrokerageFactory.WebSocketUrlKeyName]),
+                orderWsUrl: null,
+                job.BrokerageData[BinanceFuturesBrokerageFactory.ApiUrlKeyName],
+                job.BrokerageData["binance-api-key"],
+                job.BrokerageData["binance-api-secret"],
+                null,
+                aggregator,
+                job,
+                Market.Binance
+            );
+        }
+
+        /// <summary>
+        /// Checks if this brokerage supports the specified symbol
+        /// </summary>
+        /// <param name="symbol">The symbol</param>
+        /// <returns>returns true if brokerage supports the specified symbol; otherwise false</returns>
+        protected override bool CanSubscribe(Symbol symbol)
+        {
+            if (!base.CanSubscribe(symbol))
+            {
+                return false;
+            }
+            CurrencyPairUtil.DecomposeCurrencyPair(symbol, out var _, out var quoteCurrency);
+
+            return quoteCurrency.Equals("USDT", StringComparison.InvariantCultureIgnoreCase)
+                || quoteCurrency.Equals("BUSD", StringComparison.InvariantCultureIgnoreCase)
+                || quoteCurrency.Equals("USDC", StringComparison.InvariantCultureIgnoreCase);
+        }
+
+        /// <summary>
+        /// Returns a rate limiter configured based on the deployment target.
+        /// </summary>
+        /// <param name="deploymentTarget">The deployment target.</param>
+        /// <returns>A RateGate instance with the appropriate limits.</returns>
+        protected override RateGate GetRateLimiter(DeploymentTarget deploymentTarget)
+        {
+            // Lower limits for CloudPlatform since all deployments share one IP
+            var maxRequests = deploymentTarget == DeploymentTarget.CloudPlatform ? 100 : 300;
+            return new RateGate(maxRequests, TimeSpan.FromSeconds(10));
+        }
+
+        /// <summary>
+        /// Get's the appropiate API client to use
+        /// </summary>
+        protected override BinanceBaseRestApiClient GetApiClient(ISymbolMapper symbolMapper, ISecurityProvider securityProvider,
+            string restApiUrl, string apiKey, string apiSecret, RateGate rateGate)
+        {
+            restApiUrl ??= Config.Get(BinanceFuturesBrokerageFactory.ApiUrlKeyName, "https://fapi.binance.com");
+            return new BinanceFuturesRestApiClient(symbolMapper, securityProvider, apiKey, apiSecret, restApiUrl, rateGate);
+        }
+
+        /// <summary>
+        /// Get's the supported security type by the brokerage
+        /// </summary>
+        protected override SecurityType GetSupportedSecurityType()
+        {
+            return SecurityType.CryptoFuture;
+        }
+
+        private protected override Dictionary<TickType, DataQueueHandlerSubscriptionManager> CreateSubscriptionManager(
+            string dataWsUrl,
+            int maximumWebSocketConnections,
+            Dictionary<Symbol, int> symbolWeights,
+            int maximumSymbolsPerConnection,
+            Action<WebSocketMessage> onDataMessage)
+        {
+            // dataWsUrl is the private user-data stream; derive sibling
+            // market (aggTrade) and public (bookTicker) stream URLs.
+            var tradeUrl = dataWsUrl.Replace("/private/", "/market/");
+            var quoteUrl = dataWsUrl.Replace("/private/", "/public/");
+
+            var tradeManager = new BrokerageMultiWebSocketSubscriptionManager(
+                tradeUrl,
+                maximumSymbolsPerConnection,
+                maximumWebSocketConnections,
+                symbolWeights,
+                () => new BinanceWebSocketWrapper(null),
+                SubscribeTrade,
+                UnsubscribeTrade,
+                onDataMessage,
+                new TimeSpan(23, 45, 0));
+
+            var quoteManager = new BrokerageMultiWebSocketSubscriptionManager(
+                quoteUrl,
+                maximumSymbolsPerConnection,
+                maximumWebSocketConnections,
+                symbolWeights,
+                () => new BinanceWebSocketWrapper(null),
+                SubscribeQuote,
+                UnsubscribeQuote,
+                onDataMessage,
+                new TimeSpan(23, 45, 0));
+
+            return new()
+            {
+                [TickType.Trade] = tradeManager,
+                [TickType.Quote] = quoteManager
+            };
+        }
+
+        private bool SubscribeTrade(IWebSocket ws, Symbol symbol)
+        {
+            return Send(ws, symbol, (bs, requestId) => new TradeChannelSubscribeRequest(requestId, bs, TradeChannelName));
+        }
+
+        private bool UnsubscribeTrade(IWebSocket ws, Symbol symbol)
+        {
+            return Send(ws, symbol, (bs, requestId) => new TradeChannelUnsubscribeRequest(requestId, bs, TradeChannelName));
+        }
+
+        private bool SubscribeQuote(IWebSocket ws, Symbol symbol)
+        {
+            return Send(ws, symbol, (bs, requestId) => new QuoteChannelSubscribeRequest(requestId, bs));
+        }
+
+        private bool UnsubscribeQuote(IWebSocket ws, Symbol symbol)
+        {
+            return Send(ws, symbol, (bs, requestId) => new QuoteChannelUnsubscribeRequest(requestId, bs));
+        }
+    }
+}

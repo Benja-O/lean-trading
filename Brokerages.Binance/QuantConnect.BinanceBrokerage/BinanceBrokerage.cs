@@ -1,0 +1,1036 @@
+/*
+ * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
+ * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using QuantConnect.Configuration;
+using QuantConnect.Data;
+using QuantConnect.Data.Market;
+using QuantConnect.Interfaces;
+using QuantConnect.Logging;
+using QuantConnect.Orders;
+using QuantConnect.Packets;
+using QuantConnect.Securities;
+using QuantConnect.Util;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net;
+using System.Net.NetworkInformation;
+using System.Security.Cryptography;
+using System.Text;
+using System.Threading;
+using QuantConnect.Api;
+using RestSharp;
+using Timer = System.Timers.Timer;
+using QuantConnect.Brokerages.Binance.Constants;
+using QuantConnect.Brokerages.Binance.Enums;
+using System.Runtime.CompilerServices;
+
+[assembly: InternalsVisibleTo("QuantConnect.Brokerages.Binance.Tests")]
+
+namespace QuantConnect.Brokerages.Binance
+{
+    /// <summary>
+    /// Binance brokerage implementation
+    /// </summary>
+    [BrokerageFactory(typeof(BinanceBrokerageFactory))]
+    public partial class BinanceBrokerage : BaseWebsocketsBrokerage, IDataQueueHandler
+    {
+        private IAlgorithm _algorithm;
+        private SymbolPropertiesDatabaseSymbolMapper _symbolMapper;
+
+        // Binance allows 5 messages per second, but we still get rate limited if we send a lot of messages at that rate
+        // By sending 3 messages per second, evenly spaced out, we can keep sending messages without being limited
+        private readonly RateGate _webSocketRateLimiter = new RateGate(1, TimeSpan.FromMilliseconds(330));
+        private RateGate _webApiRateLimiter;
+        private long _lastRequestId;
+
+        private LiveNodePacket _job;
+        private string _webSocketBaseUrl;
+        private Timer _keepAliveTimer;
+        private Timer _reconnectTimer;
+        private Lazy<BinanceBaseRestApiClient> _apiClientLazy;
+
+        private BrokerageConcurrentMessageHandler<WebSocketMessage> _messageHandler;
+        private Dictionary<TickType, DataQueueHandlerSubscriptionManager> SubscriptionManagers { get; set; }
+
+        private bool _unsupportedAssetHistoryLogged;
+        private bool _unsupportedResolutionHistoryLogged;
+        private bool _unsupportedTickTypeHistoryLogged;
+        private bool _invalidTimeRangeHistoryLogged;
+
+        private const int MaximumSymbolsPerConnection = 512;
+
+        /// <summary>
+        /// Identifies how the user data WebSocket stream is authenticated and maintained.
+        /// </summary>
+        private BinanceConnectionMode _connectionMode;
+
+        private string _listenKey;
+        /// <summary>
+        /// Listen key for authenticating Binance user data stream websocket sessions
+        /// used to receive order updates across all account types
+        /// (US, Futures, Coin Futures, Margin, and Cross Margin).
+        /// </summary>
+        private string ListenKey
+        {
+            get => _listenKey;
+            set
+            {
+                _listenKey = value;
+                Log.Trace($"{nameof(BinanceBrokerage)}: Listen key was updated.");
+            }
+        }
+
+        protected BinanceBaseRestApiClient ApiClient => _apiClientLazy?.Value;
+        protected string MarketName { get; set; }
+
+        /// <summary>
+        /// Gets or sets the trade channel used for streaming trade information.
+        /// </summary>
+        /// <remarks>
+        /// The <see cref="TradeChannelName"/> property represents the specific trade channel utilized for streaming trade data.
+        /// It is initialized with the constant value <see cref="TradeChannels.SpotTradeChannelName"/>, indicating the use of
+        /// Spot Trade Streams by default.
+        /// </remarks>
+        /// <value>
+        /// The default value is the channel name for Spot Trade Streams: <c>trade</c>.
+        /// </value>
+        protected virtual string TradeChannelName { get; } = TradeChannels.SpotTradeChannelName;
+
+        /// <summary>
+        /// Enables or disables concurrent processing of messages to and from the brokerage.
+        /// </summary>
+        public override bool ConcurrencyEnabled => true;
+
+        /// <summary>
+        /// Parameterless constructor for brokerage
+        /// </summary>
+        public BinanceBrokerage() : this(Market.Binance)
+        {
+        }
+
+        /// <summary>
+        /// Constructor for brokerage
+        /// </summary>
+        public BinanceBrokerage(string marketName) : base(marketName)
+        {
+            MarketName = marketName;
+        }
+
+        /// <summary>
+        /// Constructor for brokerage
+        /// </summary>
+        /// <param name="apiKey">api key</param>
+        /// <param name="apiSecret">api secret</param>
+        /// <param name="restApiUrl">The rest api url</param>
+        /// <param name="webSocketBaseUrl">The web socket base url</param>
+        /// <param name="orderWebSocketBaseUrl">The order web socket base url</param>
+        /// <param name="algorithm">the algorithm instance is required to retrieve account type</param>
+        /// <param name="aggregator">the aggregator for consolidating ticks</param>
+        /// <param name="job">The live job packet</param>
+        public BinanceBrokerage(string apiKey, string apiSecret, string restApiUrl, string webSocketBaseUrl, string orderWebSocketBaseUrl, IAlgorithm algorithm, IDataAggregator aggregator, LiveNodePacket job)
+            : this(apiKey, apiSecret, restApiUrl, webSocketBaseUrl, orderWebSocketBaseUrl, algorithm, aggregator, job, Market.Binance)
+        {
+        }
+
+        /// <summary>
+        /// Constructor for brokerage
+        /// </summary>
+        /// <param name="apiKey">api key</param>
+        /// <param name="apiSecret">api secret</param>
+        /// <param name="restApiUrl">The rest api url</param>
+        /// <param name="webSocketBaseUrl">The web socket base url</param>
+        /// <param name="orderWebSocketBaseUrl">The order web socket base url</param>
+        /// <param name="algorithm">the algorithm instance is required to retrieve account type</param>
+        /// <param name="aggregator">the aggregator for consolidating ticks</param>
+        /// <param name="job">The live job packet</param>
+        /// <param name="marketName">Actual market name</param>
+        public BinanceBrokerage(string apiKey, string apiSecret, string restApiUrl, string webSocketBaseUrl, string orderWebSocketBaseUrl, IAlgorithm algorithm, IDataAggregator aggregator, LiveNodePacket job, string marketName)
+            : base(marketName)
+        {
+            Initialize(
+                webSocketBaseUrl,
+                orderWebSocketBaseUrl,
+                restApiUrl,
+                apiKey,
+                apiSecret,
+                algorithm,
+                aggregator,
+                job,
+                marketName
+            );
+        }
+
+        #region IBrokerage
+
+        /// <summary>
+        /// Checks if the websocket connection is connected or in the process of connecting
+        /// WebSocket is responsible for Binance UserData stream only.
+        /// </summary>
+        public override bool IsConnected => _apiClientLazy?.IsValueCreated != true || WebSocket?.IsOpen == true;
+
+        /// <summary>
+        /// Creates wss connection
+        /// </summary>
+        public override void Connect()
+        {
+            if (IsConnected)
+                return;
+
+            // cannot reach this code if rest api client is not created
+            // WebSocket is  responsible for Binance UserData stream only
+            // as a result we don't need to connect user data stream if BinanceBrokerage is used as DQH only
+            // or until Algorithm is actually initialized
+            ListenKey = ApiClient.CreateListenKey();
+            Connect(ApiClient.SessionId);
+        }
+
+        /// <summary>
+        /// Closes the websockets connection
+        /// </summary>
+        public override void Disconnect()
+        {
+            if (WebSocket?.IsOpen != true)
+                return;
+
+            _reconnectTimer.Stop();
+            WebSocket.Close();
+        }
+
+        /// <summary>
+        /// Gets all open positions
+        /// </summary>
+        /// <returns>The list of all account holdings</returns>
+        public override List<Holding> GetAccountHoldings()
+        {
+            var holdings = ApiClient.GetAccountHoldings();
+            if (holdings.Count > 0)
+            {
+                return holdings;
+            }
+            return base.GetAccountHoldings(_job?.BrokerageData, _algorithm.Securities.Values);
+        }
+
+        /// <summary>
+        /// Gets the total account cash balance for specified account type
+        /// </summary>
+        /// <returns></returns>
+        public override List<CashAmount> GetCashBalance()
+        {
+            var balances = ApiClient.GetCashBalance();
+            if (balances == null || !balances.Any())
+                return new List<CashAmount>();
+
+            if (balances.Any(b => b.Asset.Equals("BNFCR", StringComparison.InvariantCultureIgnoreCase)))
+            {
+                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "BinanceFuturesCreditsTradingMode",
+                    "Binance Futures Credits Trading Mode detected. " +
+                    "Margin will be calculated using all available collateral assets in the account."));
+            }
+
+            return balances
+                .Select(b => new CashAmount(b.Amount, b.Asset.LazyToUpper()))
+                .ToList();
+        }
+
+        /// <summary>
+        /// Gets all orders not yet closed
+        /// </summary>
+        /// <returns></returns>
+        public override List<Order> GetOpenOrders()
+        {
+            var orders = ApiClient.GetOpenOrders();
+            List<Order> list = new List<Order>();
+            foreach (var item in orders)
+            {
+                if (TryCreateLeanOrder(item, out var order))
+                {
+                    list.Add(order);
+                }
+            }
+
+            return list;
+        }
+
+        /// <summary>
+        /// Attempts to create a Lean <see cref="Order"/> from a Binance <see cref="Messages.OpenOrder"/>.
+        /// Sets <see cref="Order.BrokerId"/> on success.
+        /// Returns <c>false</c> for unsupported order types.
+        /// </summary>
+        internal bool TryCreateLeanOrder(Messages.OpenOrder item, out Order order)
+        {
+            var orderQuantity = item.Quantity;
+            var orderLeanSymbol = _symbolMapper.GetLeanSymbol(item.Symbol, GetSupportedSecurityType(), MarketName);
+            var orderTime = Time.UnixMillisecondTimeStampToDateTime(item.Time);
+
+            switch (item.Type.LazyToUpper())
+            {
+                case "MARKET":
+                    order = new MarketOrder(orderLeanSymbol, orderQuantity, orderTime);
+                    break;
+
+                case "LIMIT":
+                case "LIMIT_MAKER":
+                    order = new LimitOrder(orderLeanSymbol, orderQuantity, item.Price, orderTime);
+                    break;
+
+                case "STOP_LOSS":
+                case "TAKE_PROFIT" when orderLeanSymbol.SecurityType == SecurityType.Crypto:
+                    order = new StopMarketOrder(orderLeanSymbol, orderQuantity, item.StopPrice, orderTime);
+                    break;
+
+                case "STOP_LOSS_LIMIT":
+                case "TAKE_PROFIT_LIMIT":
+                case "STOP" or "TAKE_PROFIT" when orderLeanSymbol.SecurityType == SecurityType.CryptoFuture:
+                    order = new StopLimitOrder(orderLeanSymbol, orderQuantity, item.StopPrice, item.Price, orderTime);
+                    break;
+
+                case "STOP_MARKET":
+                    order = new StopMarketOrder(orderLeanSymbol, orderQuantity, item.StopPrice, orderTime);
+                    break;
+
+                default:
+                    order = null;
+                    OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Error, -1,
+                        "BinanceBrokerage.GetOpenOrders: Unsupported order type returned from brokerage: " + item.Type));
+                    return false;
+            }
+
+            order.BrokerId.Add(item.Id);
+            order.Status = ConvertOrderStatus(item.Status);
+            return true;
+        }
+
+        /// <summary>
+        /// Places a new order and assigns a new broker ID to the order
+        /// </summary>
+        /// <param name="order">The order to be placed</param>
+        /// <returns>True if the request for a new order has been placed, false otherwise</returns>
+        public override bool PlaceOrder(Order order)
+        {
+            if (!CanSubscribe(order.Symbol))
+            {
+                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, -1, $"Symbol is not supported {order.Symbol}"));
+                return false;
+            }
+            var submitted = false;
+
+            _messageHandler.WithLockedStream(() =>
+            {
+                submitted = ApiClient.PlaceOrder(order);
+            });
+
+            return submitted;
+        }
+
+        /// <summary>
+        /// Updates the order with the same id
+        /// </summary>
+        /// <param name="order">The new order information</param>
+        /// <returns>True if the request was made for the order to be updated, false otherwise</returns>
+        public override bool UpdateOrder(Order order)
+        {
+            throw new NotSupportedException("BinanceBrokerage.UpdateOrder: Order update not supported. Please cancel and re-create.");
+        }
+
+        /// <summary>
+        /// Cancels the order with the specified ID
+        /// </summary>
+        /// <param name="order">The order to cancel</param>
+        /// <returns>True if the request was submitted for cancellation, false otherwise</returns>
+        public override bool CancelOrder(Order order)
+        {
+            var submitted = false;
+
+            _messageHandler.WithLockedStream(() =>
+            {
+                submitted = ApiClient.CancelOrder(order);
+            });
+
+            return submitted;
+        }
+
+        /// <summary>
+        /// Gets the history for the requested security
+        /// </summary>
+        /// <param name="request">The historical data request</param>
+        /// <returns>An enumerable of bars covering the span specified in the request</returns>
+        public override IEnumerable<BaseData> GetHistory(Data.HistoryRequest request)
+        {
+            if (!CanSubscribe(request.Symbol))
+            {
+                if (!_unsupportedAssetHistoryLogged)
+                {
+                    _unsupportedAssetHistoryLogged = true;
+                    OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "InvalidSymbol",
+                        $"{request.Symbol} is not supported, no history returned"));
+                }
+
+                return null;
+            }
+
+            if (request.Resolution == Resolution.Tick || request.Resolution == Resolution.Second)
+            {
+                if (!_unsupportedResolutionHistoryLogged)
+                {
+                    _unsupportedResolutionHistoryLogged = true;
+                    OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "InvalidResolution",
+                        $"{request.Resolution} resolution is not supported, no history returned"));
+                }
+
+                return null;
+            }
+
+            if (request.TickType != TickType.Trade)
+            {
+                if (!_unsupportedTickTypeHistoryLogged)
+                {
+                    _unsupportedTickTypeHistoryLogged = true;
+                    OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "InvalidTickType",
+                        $"{request.TickType} tick type not supported, no history returned"));
+                }
+
+                return null;
+            }
+
+            if (request.StartTimeUtc >= request.EndTimeUtc)
+            {
+                if (!_invalidTimeRangeHistoryLogged)
+                {
+                    _invalidTimeRangeHistoryLogged = true;
+                    OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "InvalidDateRange",
+                        "The history request start date must precede the end date, no history returned"));
+                }
+                return null;
+            }
+
+            return GetHistoryImpl(request);
+        }
+
+        private IEnumerable<BaseData> GetHistoryImpl(Data.HistoryRequest request)
+        {
+            var period = request.Resolution.ToTimeSpan();
+            var restApiClient = _apiClientLazy?.IsValueCreated == true
+                ? ApiClient
+                : GetApiClient(_symbolMapper, null, null, null, null, _webApiRateLimiter);
+            foreach (var kline in restApiClient.GetHistory(request))
+            {
+                yield return new TradeBar()
+                {
+                    Time = Time.UnixMillisecondTimeStampToDateTime(kline.OpenTime),
+                    Symbol = request.Symbol,
+                    Low = kline.Low,
+                    High = kline.High,
+                    Open = kline.Open,
+                    Close = kline.Close,
+                    Volume = kline.Volume,
+                    Value = kline.Close,
+                    DataType = MarketDataType.TradeBar,
+                    Period = period
+                };
+            }
+        }
+
+        /// <summary>
+        /// Wss message handler
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
+        protected override void OnMessage(object sender, WebSocketMessage e)
+        {
+            _messageHandler.HandleNewMessage(e);
+        }
+
+        #endregion IBrokerage
+
+        #region IDataQueueHandler
+
+        /// <summary>
+        /// Sets the job we're subscribing for
+        /// </summary>
+        /// <param name="job">Job we're subscribing for</param>
+        public void SetJob(LiveNodePacket job)
+        {
+            var aggregator = Composer.Instance.GetExportedValueByTypeName<IDataAggregator>(
+                Config.Get("data-aggregator", "QuantConnect.Lean.Engine.DataFeeds.AggregationManager"), forceTypeNameOnExisting: false);
+
+            SetJobInit(job, aggregator);
+
+            if (!IsConnected)
+            {
+                Connect();
+            }
+        }
+
+        protected virtual void SetJobInit(LiveNodePacket job, IDataAggregator aggregator)
+        {
+            Initialize(
+                dataWsUrl: job.BrokerageData["binance-websocket-url"],
+                orderWsUrl: null,
+                restApiUrl: job.BrokerageData["binance-api-url"],
+                apiKey: job.BrokerageData["binance-api-key"],
+                apiSecret: job.BrokerageData["binance-api-secret"],
+                algorithm: null,
+                aggregator,
+                job,
+                Market.Binance
+            );
+        }
+
+        /// <summary>
+        /// Subscribe to the specified configuration
+        /// </summary>
+        /// <param name="dataConfig">defines the parameters to subscribe to a data feed</param>
+        /// <param name="newDataAvailableHandler">handler to be fired on new data available</param>
+        /// <returns>The new enumerator for this subscription request</returns>
+        public IEnumerator<BaseData> Subscribe(SubscriptionDataConfig dataConfig, EventHandler newDataAvailableHandler)
+        {
+            if (!CanSubscribe(dataConfig.Symbol))
+            {
+                return null;
+            }
+
+            var enumerator = _aggregator.Add(dataConfig, newDataAvailableHandler);
+            if (SubscriptionManagers.TryGetValue(dataConfig.TickType, out var subscriptionManager))
+            {
+                subscriptionManager.Subscribe(dataConfig);
+            }
+
+            return enumerator;
+        }
+
+        /// <summary>
+        /// Removes the specified configuration
+        /// </summary>
+        /// <param name="dataConfig">Subscription config to be removed</param>
+        public void Unsubscribe(SubscriptionDataConfig dataConfig)
+        {
+            if (SubscriptionManagers.TryGetValue(dataConfig.TickType, out var subscriptionManager))
+            {
+                subscriptionManager.Unsubscribe(dataConfig);
+            }
+            _aggregator.Remove(dataConfig);
+        }
+
+        /// <summary>
+        /// Checks if this brokerage supports the specified symbol
+        /// </summary>
+        /// <param name="symbol">The symbol</param>
+        /// <returns>returns true if brokerage supports the specified symbol; otherwise false</returns>
+        protected virtual bool CanSubscribe(Symbol symbol)
+        {
+            return !symbol.Value.Contains("UNIVERSE") &&
+                   symbol.SecurityType == GetSupportedSecurityType() &&
+                   symbol.ID.Market == MarketName &&
+                   _symbolMapper.IsKnownLeanSymbol(symbol);
+        }
+
+        /// <summary>
+        /// Get's the supported security type by the brokerage
+        /// </summary>
+        protected virtual SecurityType GetSupportedSecurityType()
+        {
+            return SecurityType.Crypto;
+        }
+
+        #endregion IDataQueueHandler
+
+        /// <summary>
+        /// Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged resources.
+        /// </summary>
+        public override void Dispose()
+        {
+            _keepAliveTimer.DisposeSafely();
+            _reconnectTimer.DisposeSafely();
+            if (_apiClientLazy?.IsValueCreated == true)
+            {
+                ApiClient.DisposeSafely();
+            }
+            _webSocketRateLimiter.DisposeSafely();
+            if (SubscriptionManagers != null)
+            {
+                foreach (var subscriptionManager in SubscriptionManagers.Values.Distinct())
+                {
+                    subscriptionManager.DisposeSafely();
+                }
+            }
+            _webApiRateLimiter.DisposeSafely();
+        }
+
+        /// <summary>
+        /// Not used
+        /// </summary>
+        protected override bool Subscribe(IEnumerable<Symbol> symbols)
+        {
+            // NOP
+            return true;
+        }
+
+        /// <summary>
+        /// Initialize the instance of this class
+        /// </summary>
+        /// <param name="dataWsUrl">The web socket base url</param>
+        /// <param name="orderWsUrl">The order web socket base url</param>
+        /// <param name="restApiUrl">The rest api url</param>
+        /// <param name="apiKey">api key</param>
+        /// <param name="apiSecret">api secret</param>
+        /// <param name="algorithm">the algorithm instance is required to retrieve account type</param>
+        /// <param name="aggregator">the aggregator for consolidating ticks</param>
+        /// <param name="job">The live job packet</param>
+        /// <param name="marketName">market name</param>
+        protected void Initialize(string dataWsUrl, string orderWsUrl, string restApiUrl, string apiKey, string apiSecret,
+            IAlgorithm algorithm, IDataAggregator aggregator, LiveNodePacket job, string marketName)
+        {
+            if (IsInitialized)
+            {
+                return;
+            }
+            if (marketName.Equals(Market.BinanceUS) && restApiUrl.Contains("testnet.binance.vision"))
+            {
+                throw new InvalidOperationException("Binance.US doesn't support SPOT Testnet trading.");
+            }
+
+            ValidateSubscription();
+
+            _webApiRateLimiter = GetRateLimiter(job?.DeploymentTarget ?? DeploymentTarget.LocalPlatform);
+            base.Initialize(orderWsUrl, new WebSocketClientWrapper(), httpClient: null, apiKey, apiSecret);
+            _job = job;
+            _algorithm = algorithm;
+            _aggregator = aggregator;
+            _webSocketBaseUrl = orderWsUrl;
+            _messageHandler = new BrokerageConcurrentMessageHandler<WebSocketMessage>(OnUserMessage, ConcurrencyEnabled);
+            _symbolMapper = new(marketName);
+            MarketName = marketName;
+
+            var maximumWebSocketConnections = Config.GetInt("binance-maximum-websocket-connections");
+            var symbolWeights = maximumWebSocketConnections > 0 ? FetchSymbolWeights(restApiUrl) : null;
+
+            SubscriptionManagers = CreateSubscriptionManager(
+                dataWsUrl,
+                maximumWebSocketConnections,
+                symbolWeights,
+                MaximumSymbolsPerConnection,
+                OnDataMessage);
+
+            // can be null, if BinanceBrokerage is used as DataQueueHandler only
+            if (_algorithm != null)
+            {
+                // Binance rest api endpoint is different for sport and margin trading
+                // we need to delay initialization of rest api client until Algorithm is initialized
+                // and user brokerage choise is actually applied
+                _apiClientLazy = new Lazy<BinanceBaseRestApiClient>(() =>
+                {
+                    // Determine the connection mode in lazy mode because the algorithm has been initialized, and use the correct account type from the brokerage model.
+                    _connectionMode = DetermineConnectionMode(dataWsUrl, orderWsUrl, _algorithm?.BrokerageModel.AccountType);
+                    var apiClient = GetApiClient(_symbolMapper, _algorithm?.Portfolio, restApiUrl, apiKey, apiSecret, _webApiRateLimiter);
+
+                    apiClient.OrderSubmit += (s, e) => OnOrderSubmit(e);
+                    apiClient.OrderStatusChanged += (s, e) => OnOrderEvent(e);
+                    apiClient.Message += (s, e) => OnMessage(e);
+
+                    // once we know the api endpoint we can subscribe to user data stream
+                    if (_connectionMode != BinanceConnectionMode.WsApiSignature)
+                    {
+                        if (_connectionMode == BinanceConnectionMode.CrossMarginToken)
+                        {
+                            // https://developers.binance.com/docs/margin_trading/trade-data-stream#description
+                            _keepAliveTimer.Interval = 23.5 * 60 * 60 * 1000; // Margin account listen keys are valid for 24 hours, same as spot trading
+                        }
+                        ListenKey = apiClient.CreateListenKey();
+                        _keepAliveTimer.Elapsed += (s, e) =>
+                        {
+                            apiClient.SessionKeepAlive();
+                            // Use for BinanceCrossMargin because it uses the same endpoint as spot trading but still requires a listen key for user data stream
+                            if (_connectionMode == BinanceConnectionMode.CrossMarginToken)
+                            {
+                                // SessionKeepAlive() calls CreateListenKey() which produces a fresh token stored in apiClient.SessionId.
+                                // Sync ListenKey so that any subsequent WebSocket.Open sends the current valid token.
+                                ListenKey = apiClient.SessionId;
+                                WebSocket.Send(new Messages.SubscribeListenToken(apiClient.SessionId).ToJson());
+                            }
+                        };
+                    }
+
+                    Connect(apiClient.SessionId);
+
+                    return apiClient;
+                });
+            }
+
+            // User data streams will close after 60 minutes. It's recommended to send a ping about every 30 minutes.
+            // Source: https://github.com/binance-exchange/binance-official-api-docs/blob/master/user-data-stream.md#pingkeep-alive-a-listenkey
+            _keepAliveTimer = new Timer
+            {
+                // 30 minutes
+                Interval = 30 * 60 * 1000
+            };
+
+            WebSocket.Open += (s, e) =>
+            {
+                _keepAliveTimer.Start();
+                if (_connectionMode == BinanceConnectionMode.CrossMarginToken)
+                {
+                    WebSocket.Send(new Messages.SubscribeListenToken(ListenKey).ToJson());
+                }
+                else if (_connectionMode == BinanceConnectionMode.WsApiSignature)
+                {
+                    WebSocket.Send(new Messages.SubscribeSignature(ApiKey, ApiSecret).ToJson());
+                }
+            };
+            WebSocket.Closed += (s, e) =>
+            {
+                ApiClient.StopSession();
+                _keepAliveTimer.Stop();
+            };
+
+            // A single connection to stream.binance.com is only valid for 24 hours; expect to be disconnected at the 24 hour mark
+            // Source: https://github.com/binance/binance-spot-api-docs/blob/master/web-socket-streams.md#general-wss-information
+            _reconnectTimer = new Timer
+            {
+                // 23.5 hours
+                Interval = 23.5 * 60 * 60 * 1000
+            };
+            _reconnectTimer.Elapsed += (s, e) =>
+            {
+                Log.Trace("Daily websocket restart: disconnect");
+                Disconnect();
+
+                Log.Trace("Daily websocket restart: connect");
+                Connect();
+            };
+        }
+
+        /// <summary>
+        /// Determines the WebSocket connection mode based on the provided URLs and account type.
+        /// </summary>
+        /// <param name="dataWsUrl">The WebSocket URL used for market data streaming.</param>
+        /// <param name="orderWsUrl">The WebSocket URL used for order management.</param>
+        /// <param name="accountType">The brokerage account type, or null if unavailable.</param>
+        /// <returns>The <see cref="BinanceConnectionMode"/> that matches the given configuration.</returns>
+        internal static BinanceConnectionMode DetermineConnectionMode(string dataWsUrl, string orderWsUrl, AccountType? accountType)
+        {
+            if (!string.IsNullOrEmpty(orderWsUrl) &&
+                !dataWsUrl.Equals(orderWsUrl, StringComparison.OrdinalIgnoreCase))
+            {
+                return accountType == AccountType.Margin
+                    ? BinanceConnectionMode.CrossMarginToken
+                    : BinanceConnectionMode.WsApiSignature;
+            }
+
+            return BinanceConnectionMode.StandardListenKey;
+        }
+
+        /// <summary>
+        /// Get's the appropiate API client to use
+        /// </summary>
+        protected virtual BinanceBaseRestApiClient GetApiClient(ISymbolMapper symbolMapper, ISecurityProvider securityProvider,
+            string restApiUrl, string apiKey, string apiSecret, RateGate rateGate)
+        {
+            restApiUrl ??= Config.Get("binance-api-url", "https://api.binance.com");
+            if (_connectionMode == BinanceConnectionMode.CrossMarginToken)
+            {
+                return new BinanceCrossMarginRestApiClient(symbolMapper, securityProvider, apiKey, apiSecret, restApiUrl, rateGate);
+            }
+            return MarketName == Market.BinanceUS
+                ? new BinanceSpotRestApiClient(symbolMapper, securityProvider, apiKey, apiSecret, restApiUrl, rateGate)
+                : new BinanceGlobalSpotRestApiClient(symbolMapper, securityProvider, apiKey, apiSecret, restApiUrl, rateGate);
+        }
+
+        /// <summary>
+        /// Creates the subscription manager used for market data WebSocket connections.
+        /// Override in derived brokerages to supply a specialised manager. The hook receives
+        /// every collaborator the manager may need so the base class can keep its members private.
+        /// </summary>
+        private protected virtual Dictionary<TickType, DataQueueHandlerSubscriptionManager> CreateSubscriptionManager(
+            string dataWsUrl,
+            int maximumWebSocketConnections,
+            Dictionary<Symbol, int> symbolWeights,
+            int maximumSymbolsPerConnection,
+            Action<WebSocketMessage> onDataMessage)
+        {
+            var manager = new BrokerageMultiWebSocketSubscriptionManager(
+                dataWsUrl,
+                maximumSymbolsPerConnection,
+                maximumWebSocketConnections,
+                symbolWeights,
+                () => new BinanceWebSocketWrapper(null),
+                Subscribe,
+                Unsubscribe,
+                onDataMessage,
+                new TimeSpan(23, 45, 0));
+
+            return new()
+            {
+                [TickType.Trade] = manager,
+                [TickType.Quote] = manager
+            };
+        }
+
+        /// <summary>
+        /// Subscribes to the requested symbol (using an individual streaming channel)
+        /// </summary>
+        /// <param name="webSocket">The websocket instance</param>
+        /// <param name="symbol">The symbol to subscribe</param>
+        private bool Subscribe(IWebSocket webSocket, Symbol symbol)
+        {
+            return Send(webSocket, symbol, (brokerageSymbol, requestId) => new Messages.TradeAndQuoteChannelSubscribeRequest(requestId, brokerageSymbol, TradeChannelName));
+        }
+
+        /// <summary>
+        /// Ends current subscription
+        /// </summary>
+        /// <param name="webSocket">The websocket instance</param>
+        /// <param name="symbol">The symbol to unsubscribe</param>
+        private bool Unsubscribe(IWebSocket webSocket, Symbol symbol)
+        {
+            return Send(webSocket, symbol, (brokerageSymbol, requestId) => new Messages.TradeAndQuoteChannelUnsubscribeRequest(requestId, brokerageSymbol, TradeChannelName));
+        }
+
+        /// <summary>
+        /// Returns a rate limiter configured based on the deployment target.
+        /// </summary>
+        /// <param name="deploymentTarget">The deployment target.</param>
+        /// <returns>A RateGate instance with the appropriate limits.</returns>
+        protected virtual RateGate GetRateLimiter(DeploymentTarget deploymentTarget)
+        {
+            // Lower limits for CloudPlatform since all deployments share one IP
+            var maxRequests = deploymentTarget == DeploymentTarget.CloudPlatform ? 33 : 100;
+            return new RateGate(maxRequests, TimeSpan.FromSeconds(10));
+        }
+
+        private protected bool Send(IWebSocket webSocket, Symbol symbol, Func<string, long, Messages.BaseChannelRequest> requestMsg)
+        {
+            var brokerageSymbol = _symbolMapper.GetBrokerageSymbol(symbol);
+            var json = requestMsg(brokerageSymbol, GetNextRequestId()).ToJson();
+
+            if (Log.DebuggingEnabled)
+            {
+                Log.Debug("BinanceBrokerage.Send(): " + json);
+            }
+
+            _webSocketRateLimiter.WaitToProceed();
+            webSocket.Send(json);
+            return true;
+        }
+
+        private long GetNextRequestId()
+        {
+            return Interlocked.Increment(ref _lastRequestId);
+        }
+
+        /// <summary>
+        /// Event invocator for the OrderFilled event
+        /// </summary>
+        /// <param name="e">The OrderEvent</param>
+        private void OnOrderSubmit(BinanceOrderSubmitEventArgs e)
+        {
+            var brokerId = new List<string> { e.BrokerId };
+            var order = e.Order;
+
+            OnOrderIdChangedEvent(new BrokerageOrderIdChangedEvent { BrokerId = brokerId, OrderId = order.Id });
+        }
+
+        /// <summary>
+        /// Returns the weights for each symbol (the weight value is the count of trades in the last 24 hours)
+        /// </summary>
+        private Dictionary<Symbol, int> FetchSymbolWeights(string restApiUrl)
+        {
+            try
+            {
+                var restClient = GetApiClient(_symbolMapper, null, restApiUrl, null, null, _webApiRateLimiter);
+                var symbolAndTradeCount = restClient.GetTickerPriceChangeStatistics();
+
+                var result = new Dictionary<Symbol, int>();
+                foreach (var s in symbolAndTradeCount)
+                {
+                    try
+                    {
+                        result[_symbolMapper.GetLeanSymbol(s.Symbol, GetSupportedSecurityType(), MarketName)] = s.Count;
+                    }
+                    catch
+                    {
+                        // will ignore symbols we do not support
+                    }
+                }
+
+                Log.Trace($"BinanceBrokerage.FetchSymbolWeights(): returning weights for '{result.Count}' symbols");
+                return result;
+            }
+            catch (Exception exception)
+            {
+                Log.Error(exception);
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Force reconnect websocket
+        /// </summary>
+        private void Connect(string sessionId)
+        {
+            Log.Trace("BinanceBrokerage.Connect(): Connecting...");
+
+            _reconnectTimer.Start();
+
+            var url = _connectionMode == BinanceConnectionMode.StandardListenKey
+                ? $"{_webSocketBaseUrl}/{sessionId}"
+                : _webSocketBaseUrl;
+            WebSocket.Initialize(url);
+
+            ConnectSync();
+        }
+
+        private class ModulesReadLicenseRead : Api.RestResponse
+        {
+            [JsonProperty(PropertyName = "license")]
+            public string License;
+            [JsonProperty(PropertyName = "organizationId")]
+            public string OrganizationId;
+        }
+
+        /// <summary>
+        /// Validate the user of this project has permission to be using it via our web API.
+        /// </summary>
+        private static void ValidateSubscription()
+        {
+            try
+            {
+                const int productId = 176;
+                var userId = Globals.UserId;
+                var token = Globals.UserToken;
+                var organizationId = Globals.OrganizationID;
+                // Verify we can authenticate with this user and token
+                var api = new ApiConnection(userId, token);
+                if (!api.Connected)
+                {
+                    throw new ArgumentException("Invalid api user id or token, cannot authenticate subscription.");
+                }
+                // Compile the information we want to send when validating
+                var information = new Dictionary<string, object>()
+                {
+                    {"productId", productId},
+                    {"machineName", Environment.MachineName},
+                    {"userName", Environment.UserName},
+                    {"domainName", Environment.UserDomainName},
+                    {"os", Environment.OSVersion}
+                };
+                // IP and Mac Address Information
+                try
+                {
+                    var interfaceDictionary = new List<Dictionary<string, object>>();
+                    foreach (var nic in NetworkInterface.GetAllNetworkInterfaces().Where(nic => nic.OperationalStatus == OperationalStatus.Up))
+                    {
+                        var interfaceInformation = new Dictionary<string, object>();
+                        // Get UnicastAddresses
+                        var addresses = nic.GetIPProperties().UnicastAddresses
+                            .Select(uniAddress => uniAddress.Address)
+                            .Where(address => !IPAddress.IsLoopback(address)).Select(x => x.ToString());
+                        // If this interface has non-loopback addresses, we will include it
+                        if (!addresses.IsNullOrEmpty())
+                        {
+                            interfaceInformation.Add("unicastAddresses", addresses);
+                            // Get MAC address
+                            interfaceInformation.Add("MAC", nic.GetPhysicalAddress().ToString());
+                            // Add Interface name
+                            interfaceInformation.Add("name", nic.Name);
+                            // Add these to our dictionary
+                            interfaceDictionary.Add(interfaceInformation);
+                        }
+                    }
+                    information.Add("networkInterfaces", interfaceDictionary);
+                }
+                catch (Exception)
+                {
+                    // NOP, not necessary to crash if fails to extract and add this information
+                }
+                // Include our OrganizationId is specified
+                if (!string.IsNullOrEmpty(organizationId))
+                {
+                    information.Add("organizationId", organizationId);
+                }
+                var request = new RestRequest("modules/license/read", Method.POST) { RequestFormat = DataFormat.Json };
+                request.AddParameter("application/json", JsonConvert.SerializeObject(information), ParameterType.RequestBody);
+                api.TryRequest(request, out ModulesReadLicenseRead result);
+                if (!result.Success)
+                {
+                    throw new InvalidOperationException($"Request for subscriptions from web failed, Response Errors : {string.Join(',', result.Errors)}");
+                }
+
+                var encryptedData = result.License;
+                // Decrypt the data we received
+                DateTime? expirationDate = null;
+                long? stamp = null;
+                bool? isValid = null;
+                if (encryptedData != null)
+                {
+                    // Fetch the org id from the response if we are null, we need it to generate our validation key
+                    if (string.IsNullOrEmpty(organizationId))
+                    {
+                        organizationId = result.OrganizationId;
+                    }
+                    // Create our combination key
+                    var password = $"{token}-{organizationId}";
+                    var key = SHA256.HashData(Encoding.UTF8.GetBytes(password));
+                    // Split the data
+                    var info = encryptedData.Split("::");
+                    var buffer = Convert.FromBase64String(info[0]);
+                    var iv = Convert.FromBase64String(info[1]);
+                    // Decrypt our information
+                    using var aes = new AesManaged();
+                    var decryptor = aes.CreateDecryptor(key, iv);
+                    using var memoryStream = new MemoryStream(buffer);
+                    using var cryptoStream = new CryptoStream(memoryStream, decryptor, CryptoStreamMode.Read);
+                    using var streamReader = new StreamReader(cryptoStream);
+                    var decryptedData = streamReader.ReadToEnd();
+                    if (!decryptedData.IsNullOrEmpty())
+                    {
+                        var jsonInfo = JsonConvert.DeserializeObject<JObject>(decryptedData);
+                        expirationDate = jsonInfo["expiration"]?.Value<DateTime>();
+                        isValid = jsonInfo["isValid"]?.Value<bool>();
+                        stamp = jsonInfo["stamped"]?.Value<int>();
+                    }
+                }
+                // Validate our conditions
+                if (!expirationDate.HasValue || !isValid.HasValue || !stamp.HasValue)
+                {
+                    throw new InvalidOperationException("Failed to validate subscription.");
+                }
+
+                var nowUtc = DateTime.UtcNow;
+                var timeSpan = nowUtc - Time.UnixTimeStampToDateTime(stamp.Value);
+                if (timeSpan > TimeSpan.FromHours(12))
+                {
+                    throw new InvalidOperationException("Invalid API response.");
+                }
+                if (!isValid.Value)
+                {
+                    throw new ArgumentException($"Your subscription is not valid, please check your product subscriptions on our website.");
+                }
+                if (expirationDate < nowUtc)
+                {
+                    throw new ArgumentException($"Your subscription expired {expirationDate}, please renew in order to use this product.");
+                }
+            }
+            catch (Exception e)
+            {
+                Log.Error($"ValidateSubscription(): Failed during validation, shutting down. Error : {e.Message}");
+                Environment.Exit(1);
+            }
+        }
+    }
+}

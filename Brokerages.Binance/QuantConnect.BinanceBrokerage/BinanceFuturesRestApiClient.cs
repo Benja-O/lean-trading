@@ -1,0 +1,217 @@
+﻿/*
+ * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
+ * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+*/
+
+using Newtonsoft.Json;
+using QuantConnect.Securities;
+using QuantConnect.Brokerages.Binance.Converters;
+using System.Collections.Generic;
+using QuantConnect.Brokerages.Binance.Messages;
+using RestSharp;
+using System.Net;
+using System;
+using System.Linq;
+using QuantConnect.Util;
+using QuantConnect.Orders;
+using QuantConnect.Brokerages.Binance.Extensions;
+using QuantConnect.Brokerages.Binance.Constants;
+
+namespace QuantConnect.Brokerages.Binance
+{
+    /// <summary>
+    /// Binance USDT Futures REST API implementation
+    /// </summary>
+    public class BinanceFuturesRestApiClient : BinanceBaseRestApiClient
+    {
+        /// <summary>
+        /// The API endpoint prefix for Binance Futures API version 1.
+        /// </summary>
+        private const string _prefix = "/fapi/v1";
+
+        /// <summary>
+        /// The API endpoint prefix for Binance Futures API version 2.
+        /// </summary>
+        private const string _prefixV2 = "/fapi/v2";
+
+        /// <summary>
+        /// Order types that require algorithmic order handling.
+        /// </summary>
+        private static readonly HashSet<OrderType> _algoOrderTypes =
+        [
+            OrderType.StopLimit,
+            OrderType.StopMarket
+        ];
+
+        protected override JsonConverter CreateAccountConverter() => new FuturesAccountConverter();
+
+        /// <summary>
+        /// The Api prefix
+        /// </summary>
+        /// <remarks>Depends on SPOT,MARGIN, Futures trading</remarks>
+        protected override string ApiPrefix => _prefix;
+
+        /// <summary>
+        /// The websocket prefix
+        /// </summary>
+        /// <remarks>Depends on SPOT,MARGIN, Futures trading</remarks>
+        protected override string WsPrefix => _prefix;
+
+        /// <summary>
+        /// The user data stream endpoint
+        /// </summary>
+        protected override string UserDataStreamEndpoint => $"{WsPrefix}/listenKey";
+
+        protected override string GetBaseDataEndpoint() => ApiPrefix;
+
+        /// <summary>
+        /// Create a new instance
+        /// </summary>
+        public BinanceFuturesRestApiClient(
+            ISymbolMapper symbolMapper,
+            ISecurityProvider securityProvider,
+            string apiKey,
+            string apiSecret,
+            string restApiUrl,
+            RateGate restRateLimiter
+            )
+            : base(symbolMapper, securityProvider, apiKey, apiSecret, restApiUrl, restRateLimiter)
+        {
+        }
+
+        /// <summary>
+        /// Gets all open positions
+        /// </summary>
+        /// <returns>The list of all account holdings</returns>
+        public override List<Holding> GetAccountHoldings()
+        {
+            return GetAccountHoldings(_prefixV2);
+        }
+
+        public override BalanceEntry[] GetCashBalance()
+        {
+            return GetCashBalance(_prefixV2) ?? [];
+        }
+
+        /// <summary>
+        /// Gets all orders not yet closed
+        /// </summary>
+        /// <returns>All open orders</returns>
+        public override IEnumerable<Messages.OpenOrder> GetOpenOrders()
+        {
+            return base.GetOpenOrders().Concat(GetOpenOrders(AlgoOrderEndpoints.OpenOrders));
+        }
+
+        /// <summary>
+        /// Retrieves the current account holdings for a specified API prefix from the Binance brokerage.
+        /// </summary>
+        /// <param name="apiPrefix">
+        /// The API endpoint prefix to be used for the request, typically including the base URL and version.
+        /// </param>
+        /// <returns>
+        /// A list of <see cref="Holding"/> objects representing the current positions with non-zero amounts.
+        /// </returns>
+        protected List<Holding> GetAccountHoldings(string apiPrefix)
+        {
+            var request = new RestRequest($"{apiPrefix}/account", Method.GET);
+
+            var response = ExecuteRestRequestWithSignature(request);
+            if (response.StatusCode != HttpStatusCode.OK)
+            {
+                throw new Exception($"BinanceBrokerage.GetCashBalance: request failed: [{(int)response.StatusCode}] {response.StatusDescription}, Content: {response.Content}, ErrorMessage: {response.ErrorMessage}");
+            }
+
+            return JsonConvert
+                .DeserializeObject<FuturesAccountInformation>(response.Content)
+                .Positions
+                .Where(p => p.PositionAmt != 0)
+                .Select(x => new Holding
+                {
+                    Symbol = SymbolMapper.GetLeanSymbol(x.Symbol, SecurityType.CryptoFuture, Market.Binance),
+                    AveragePrice = x.EntryPrice,
+                    Quantity = x.PositionAmt,
+                })
+                .ToList();
+        }
+
+        /// <summary>
+        /// Resolves the REST endpoint used to place an order, selecting
+        /// the algorithmic order endpoint when required.
+        /// </summary>
+        /// <param name="orderType">The type of order being placed.</param>
+        /// <returns>
+        /// The endpoint path used for placing the order.
+        /// </returns>
+        protected override string ResolveOrderEndpoint(OrderType orderType)
+        {
+            return IsAlgoOrder(orderType)
+                ? AlgoOrderEndpoints.Trade
+                : base.ResolveOrderEndpoint(orderType);
+        }
+
+        /// <summary>
+        /// Create account new order body payload
+        /// </summary>
+        /// <param name="order">Lean order</param>
+        protected override IDictionary<string, object> CreateOrderBody(Orders.Order order)
+        {
+            var body = base.CreateOrderBody(order);
+
+            if (IsAlgoOrder(order.Type))
+            {
+                body.RenameKey("stopPrice", "triggerPrice");
+                body["algoType"] = "CONDITIONAL";
+                return body;
+            }
+
+            return body;
+        }
+
+        /// <summary>
+        /// Create account cancel order body payload
+        /// </summary>
+        /// <param name="order">Lean order</param>
+        protected override IEnumerable<IDictionary<string, object>> CreateCancelOrderBody(Orders.Order order)
+        {
+            if (IsAlgoOrder(order.Type))
+            {
+                return CreateAlgoCancelOrderBody(order.BrokerId);
+            }
+
+            return base.CreateCancelOrderBody(order);
+        }
+
+        /// <summary>
+        /// Creates cancel request payloads for orders.
+        /// </summary>
+        /// <param name="brokerageIds">The brokerage order identifiers.</param>
+        private static IEnumerable<IDictionary<string, object>> CreateAlgoCancelOrderBody(List<string> brokerageIds)
+        {
+            foreach (var id in brokerageIds)
+            {
+                yield return new Dictionary<string, object>
+                {
+                    ["algoId"] = id
+                };
+            }
+        }
+
+        /// <summary>
+        /// Determines whether the specified order type is algorithmic.
+        /// </summary>
+        private static bool IsAlgoOrder(OrderType type)
+        {
+            return _algoOrderTypes.Contains(type);
+        }
+    }
+}
