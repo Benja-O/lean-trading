@@ -10,6 +10,181 @@
 
 ---
 
+## ADR-030 — Bypass de ValidateSubscription en el plugin de Binance para operación en live local sin suscripción QuantConnect
+**Fecha:** 2026-05-29
+**Estado:** Aceptada
+**ADRs relacionados:** ADR-029 (lección de verificación de binario), ADR-021 (monitoreo básico para paper trading)
+
+### Contexto
+
+El arranque de Hito C requería que el sistema corriera en `LiveMode == true`
+con Paper Brokerage de Lean + data feed real de Binance Futures USDM. Al
+lanzar paper trading el sistema falló durante la inicialización del
+brokerage:
+
+```
+ValidateSubscription(): Failed during validation, shutting down.
+Error : Invalid api user id or token, cannot authenticate subscription.
+```
+
+Verificación posterior en el portal de QuantConnect confirmó: "To request an
+access token, you must belong to a paid organization." La cuenta gratuita
+no genera token válido. Tarifas externas estiman el plan más barato que
+habilita live trading entre USD 20-60/mes (no confirmado en pricing
+logueado).
+
+**Ubicación real de la validación (verificada en código).** La rutina
+`ValidateSubscription()` NO vive en el motor de Lean. Vive dentro del
+plugin de Binance, en
+`Brokerages.Binance/QuantConnect.BinanceBrokerage/BinanceBrokerage.cs:909`,
+y es invocada desde `Initialize(...)` del propio brokerage. La función
+arma un `ApiConnection` con credenciales de `Globals`, hace POST a
+`modules/license/read` en los servidores de QC, decripta la respuesta con
+AES, valida que la licencia no esté expirada, y ante cualquier error llama
+`Environment.Exit(1)`.
+
+Esto importa para entender el alcance del fork: el motor de Lean (Engine,
+Common, Algorithm, etc.) permanece sin modificaciones y puede actualizarse
+libremente. El gate de suscripción está focalizado en los plugins
+oficiales de brokerages. Patrón "open core" acotado a los conectores
+comerciales, no al motor — legal con Apache 2.0, éticamente ambiguo
+porque el material de marketing presenta a LEAN como "open source" sin
+distinguir entre motor (genuinamente abierto) y plugins oficiales (con
+gating).
+
+### Decisión
+
+Parchar `ValidateSubscription` en la copia vendored del plugin de Binance
+para que retorne inmediatamente, sin contactar a los servidores de QC.
+Implementación con retorno temprano más una cadena `static readonly`
+(`_adr030BinaryMarker`) que persiste como `ADR-030-BYPASS-VALIDATE-SUBSCRIPTION`
+en el binario, permitiendo verificación física por búsqueda UTF-16 LE
+sobre el `.dll` desplegado (lección ADR-029).
+
+Razón principal: el sistema está en validación pre-rentabilidad. Un costo
+recurrente de USD 240-720/año por una capacidad que solo se usa mientras
+el sistema aún no demostró generar ingresos no es defendible
+financieramente con el contexto actual del operador. La decisión es
+revisable cuando ese contexto cambie (ver Trigger de revisión).
+
+### Alternativas consideradas
+
+**A: Pagar el plan más barato de QuantConnect.** Comodidad máxima:
+mantenimiento delegado del plugin de Binance, soporte oficial, posibilidad
+de usar features pagas adicionales (cloud deployment, datasets premium).
+Descartada por costo recurrente sin retorno demostrado y por crear
+dependencia comercial con QC que persiste mientras el sistema opere en
+live, paper o real. Re-evaluable cuando el sistema cruce los triggers de
+revisión.
+
+**B: Binance Testnet completo.** Sin costo. Evita pasar por el gate de
+QC porque conecta directamente al testnet del exchange. Descartada porque
+degrada el valor de la validación de Hito C: el feed del testnet es
+sintético, con liquidez y microestructura que no replican fielmente al
+mercado real. El Hito C valida infraestructura del sistema bajo
+wall-clock real; un feed sintético introduce variables que confunden esa
+validación. Sigue siendo opción válida para validaciones futuras donde el
+feed sintético no sea limitante.
+
+**C (elegida): Parche local en el plugin de Binance.** Sin costo, feed
+real de producción, fills ficticios vía PaperBrokerage. Preserva la
+calidad del feed que el Hito C requiere. El precio es asumir
+mantenimiento manual del fork del plugin (no del motor).
+
+**B' (variante mixta descartada):** modificar el plugin para apuntar el
+feed a producción de Binance y las órdenes al testnet. Técnicamente
+posible pero requiere intervención más invasiva al plugin (desacoplar
+URLs de feed y de transactions, que hoy están controladas por un único
+flag). Complejidad innecesaria para Hito C; archivable si en el futuro
+se necesita un setup más fino que combine ambos mundos.
+
+### Consecuencias
+
+**Positivas:**
+- Hito C desbloqueado. El sistema arrancó en live-paper el 2026-05-29 a
+  las 16:51 sin errores de autenticación. Validación funcional descrita
+  abajo.
+- Costo recurrente cero. La decisión preserva el principio operativo del
+  operador de no asumir gastos fijos antes de demostrar rentabilidad.
+- Motor de Lean intacto y libremente actualizable.
+
+**Neutras / aceptadas:**
+- Mantenimiento delegado a uno mismo, **acotado al plugin de Binance**.
+  Cada actualización del plugin va a requerir re-aplicar el parche. El
+  motor de Lean y los demás componentes no cargan ese trabajo.
+- Aislamiento del ecosistema comercial QC: sin soporte oficial, sin foro
+  para mostrar código modificado en caso de bug.
+- Si en el futuro se agregan otros plugins oficiales (Coinbase, IB, etc.),
+  cada uno traerá su propia `ValidateSubscription` y será una decisión
+  separada si parchar también esos plugins. La presente decisión NO se
+  extiende implícitamente.
+
+**Negativas:**
+- Zona gris ética (no legal). Apache 2.0 permite la modificación pero el
+  parche elude el modelo de negocio del vendor. Esto se acepta como
+  trade-off consciente, no se minimiza.
+- Riesgo de drift: QC puede endurecer la validación en versiones futuras
+  del plugin (más sitios de validación, validación cruzada, ofuscación
+  del check). El parche actual podría dejar de ser suficiente. El trigger
+  "actualización del plugin falla" en sección de revisión cubre este
+  escenario.
+
+### Validación funcional
+
+El sistema arrancó en `live-paper` el 2026-05-29 a las 16:51 (wall-clock).
+El log de arranque NO contiene la línea de error
+`Invalid api user id or token`. WebSocket de Binance Futures producción
+(`wss://fstream.binance.com/...`) conectó correctamente. Warmup completó
+con los tres símbolos suscriptos (BTCUSDT, ETHUSDT, TRBUSDT). Heartbeat
+flush timer arrancó. Pings a Healthchecks.io confirmados por integración
+de Telegram (notificaciones UP/DOWN recibidas durante el ciclo
+arranque → hibernación accidental → reanudación). El parche cumple su
+propósito.
+
+### Trigger de revisión
+
+Esta decisión se revisa cuando se cumpla CUALQUIERA de:
+
+- **Primer trade rentable real** (no paper, no testnet) operado por el
+  sistema.
+- **6 meses corridos** de sistema operando estable en VPS sin caídas
+  significativas.
+- **Una actualización del plugin de Binance falla** porque el parche no
+  se puede re-aplicar limpio sobre la versión nueva.
+
+En la revisión, re-evaluar los tres caminos con el contexto financiero y
+operativo de ese momento.
+
+### Reversibilidad
+
+Alta. Quitar el `return` temprano, la línea `_ = _adr030BinaryMarker;` y
+eliminar el campo estático `_adr030BinaryMarker` restaura el
+comportamiento original. Sin efectos colaterales sobre backtest, sobre la
+estrategia, ni sobre el motor de Lean (que nunca fue tocado).
+
+### Implementación
+
+Commit `bb4ae62` — `fix(engine): bypass ValidateSubscription for local live mode (ADR-030)`.
+
+Cambio puntual en
+`Brokerages.Binance/QuantConnect.BinanceBrokerage/BinanceBrokerage.cs:909`:
+retorno temprano + campo estático con la cadena de trazabilidad.
+
+Verificación física: cadena `ADR-030-BYPASS-VALIDATE-SUBSCRIPTION`
+encontrada en `QuantConnect.Brokerages.Binance.dll` por búsqueda UTF-16 LE
+en offset 67586.
+
+Suite completa de tests: 211/211 verdes. El parche no rompe ningún test
+existente.
+
+### Pendiente operativo
+
+ADR-029 quedó pendiente de redacción en el momento en que se cerró (no
+está ni en DECISIONS.md ni como archivo suelto). Esta omisión debería
+remediarse en algún momento del cierre del Hito C, reconstruyendo el ADR
+desde los commits y conversación de la sesión correspondiente. No es
+urgente pero la deuda crece con el tiempo.
+
 ## ADR-028 — Validación multi-símbolo + fix estructural OPS-2
 **Fecha:** 2026-05-26 / 2026-05-27
 **Estado:** Aceptada
