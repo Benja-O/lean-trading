@@ -1,0 +1,86 @@
+{
+  // ===================================================================
+  // TEMPLATE DE CONFIGURACIÓN PARA VPS — live-paper
+  // Uso: copiar este archivo al directorio de publish en el VPS,
+  // renombrarlo a config.json, y completar los campos marcados con
+  // PLACEHOLDER_*. Restringir permisos del archivo resultante al
+  // usuario del servicio NSSM únicamente.
+  // NUNCA commitear este archivo con secretos reales.
+  // ===================================================================
+
+  "environment": "live-paper",
+
+  "algorithm-type-name": "Trading.Strategies.TradingAlgorithmHost",
+  "algorithm-language": "CSharp",
+  "algorithm-location": "Trading.Strategies.dll",
+
+  // data-folder: crear directorio vacío ./data/ en el VPS.
+  // En live-paper el feed viene de Binance (BrokerageHistoryProvider);
+  // la carpeta se necesita para que LocalDiskMapFileProvider no falle.
+  // Para crypto futures los map/factor files no existen → errores no fatales.
+  "data-folder": "./data/",
+  "results-destination-folder": "",
+  "trade-list-destination": "",
+  "transaction-log": "",
+  "cache-location": "cache",
+
+  "log-handler": "QuantConnect.Logging.CompositeLogHandler",
+  "messaging-handler": "QuantConnect.Messaging.Messaging",
+  "job-queue-handler": "QuantConnect.Queues.JobQueue",
+  "api-handler": "QuantConnect.Api.Api",
+  "map-file-provider": "QuantConnect.Data.Auxiliary.LocalDiskMapFileProvider",
+  "factor-file-provider": "QuantConnect.Data.Auxiliary.LocalDiskFactorFileProvider",
+  "data-provider": "QuantConnect.Lean.Engine.DataFeeds.DefaultDataProvider",
+  "data-channel-provider": "DataChannelProvider",
+  "object-store": "QuantConnect.Lean.Engine.Storage.LocalObjectStore",
+  "data-aggregator": "QuantConnect.Lean.Engine.DataFeeds.AggregationManager",
+
+  "job-user-id": "0",
+  "api-access-token": "",
+  "job-organization-id": "",
+
+  "show-missing-data-logs": false,
+  "maximum-warmup-history-days-look-back": 5,
+  "force-exchange-always-open": false,
+  "debugging": false,
+
+  // ===================================================================
+  // CREDENCIALES DE BINANCE — COMPLETAR EN EL VPS
+  // Generar API key en Binance con permisos de solo lectura (Futures).
+  // SIN permisos de trading ni de retiro.
+  // ===================================================================
+  "binance-api-key": "PLACEHOLDER_BINANCE_API_KEY",
+  "binance-api-secret": "PLACEHOLDER_BINANCE_API_SECRET",
+  "binance-fapi-url": "https://fapi.binance.com",
+  "binance-fwebsocket-url": "wss://fstream.binance.com/ws",
+
+  "live-cash-balance": "",
+  "live-holdings": "[]",
+
+  "environments": {
+
+    // ----- paper trading: datos REALES de Binance, fills FICTICIOS -----
+    "live-paper": {
+      "live-mode": true,
+      "live-mode-brokerage": "PaperBrokerage",
+      "data-queue-handler": [ "BinanceFuturesBrokerage" ],
+      "setup-handler": "QuantConnect.Lean.Engine.Setup.BrokerageSetupHandler",
+      "result-handler": "QuantConnect.Lean.Engine.Results.LiveTradingResultHandler",
+      "data-feed-handler": "QuantConnect.Lean.Engine.DataFeeds.LiveTradingDataFeed",
+      "real-time-handler": "QuantConnect.Lean.Engine.RealTime.LiveTradingRealTimeHandler",
+      "transaction-handler": "QuantConnect.Lean.Engine.TransactionHandlers.BacktestingTransactionHandler",
+      "history-provider": [ "BrokerageHistoryProvider", "SubscriptionDataReaderHistoryProvider" ]
+    },
+
+    // ----- backtest (referencia / regression test) -----
+    "backtesting": {
+      "live-mode": false,
+      "setup-handler": "QuantConnect.Lean.Engine.Setup.BacktestingSetupHandler",
+      "result-handler": "QuantConnect.Lean.Engine.Results.BacktestingResultHandler",
+      "data-feed-handler": "QuantConnect.Lean.Engine.DataFeeds.FileSystemDataFeed",
+      "real-time-handler": "QuantConnect.Lean.Engine.RealTime.BacktestingRealTimeHandler",
+      "history-provider": [ "QuantConnect.Lean.Engine.HistoricalData.SubscriptionDataReaderHistoryProvider" ],
+      "transaction-handler": "QuantConnect.Lean.Engine.TransactionHandlers.BacktestingTransactionHandler"
+    }
+  }
+}
