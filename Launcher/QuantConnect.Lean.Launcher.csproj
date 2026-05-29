@@ -60,6 +60,7 @@
     <ProjectReference Include="..\Queues\QuantConnect.Queues.csproj" />
     <ProjectReference Include="..\ToolBox\QuantConnect.ToolBox.csproj" />
     <ProjectReference Include="..\Brokerages.Binance\QuantConnect.BinanceBrokerage\QuantConnect.BinanceBrokerage.csproj" />
+    <ProjectReference Include="..\Trading.Strategies\Trading.Strategies.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\LICENSE">

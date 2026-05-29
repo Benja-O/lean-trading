@@ -52,6 +52,7 @@
   <ItemGroup>
     <Content Include="strategies.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
     <!-- Modelos HMM versionados en el repo (Hito B, Paso 3). MSBuild los copia a
          {OutputPath}/models/regime/ en cada build para que el host los encuentre
@@ -59,6 +60,7 @@
     <Content Include="..\models\regime\*.hmm.json">
       <Link>models\regime\%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
   </ItemGroup>
 </Project>
