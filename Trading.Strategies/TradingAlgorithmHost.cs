@@ -46,9 +46,10 @@ namespace Trading.Strategies
 
         // Umbral de staleness para el dead-man's switch. Si no se procesa ninguna barra
         // dentro de esta ventana (wall-clock), el ping se suprime y Healthchecks.io cae a DOWN.
-        // BTCUSDT perpetual es 24/7 con barras de 1 min; 10 min = 10 barras perdidas = freeze claro.
-        // Si se agregan instrumentos con gaps de mercado cerrado, ajustar este valor.
-        private static readonly TimeSpan BarStalenessThreshold = TimeSpan.FromMinutes(10);
+        // 90 min: mayor que la barra procesable más amplia activa (hoy 15m; cubre hasta 30m/1h
+        // con jitter de feed) sin tener que recalibrar cuando strategies.json cambia.
+        // Detecta de sobra el freeze real que motivó Brief B (~24 h de inactividad).
+        private static readonly TimeSpan BarStalenessThreshold = TimeSpan.FromMinutes(90);
 
         private readonly StrategyConfigLoader _strategyConfigurationLoader = new();
         private readonly List<StrategyExecutor> _strategyExecutors = new();
