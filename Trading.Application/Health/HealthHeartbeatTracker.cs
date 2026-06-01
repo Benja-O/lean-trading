@@ -21,6 +21,7 @@ namespace Trading.Application.Health
         private DateTime? _lastRiskBreachUtc;
         private string? _lastRiskBreachReason;
         private bool _killSwitchActive;
+        private string? _sinkLastWriteFailureMessage;
 
         public HealthHeartbeatTracker(IDomainEventBus eventBus, IClock clock, ITradingLogger logger)
         {
@@ -31,6 +32,19 @@ namespace Trading.Application.Health
             eventBus.Subscribe<OrderSubmittedEvent>(OnOrderSubmitted);
             eventBus.Subscribe<OrderFilledEvent>(OnOrderFilled);
             eventBus.Subscribe<RiskLimitBreachedEvent>(OnRiskLimitBreached);
+        }
+
+        /// <summary>
+        /// Registra el último fallo de IO del sink JSONL. Llamado periódicamente por el host
+        /// cuando JsonlFileLogSink.LastWriteFailure es no nulo. El mensaje se incluye en el
+        /// próximo snapshot para que aparezca en heartbeat.json.
+        /// </summary>
+        public void RecordSinkWriteFailure(string? message)
+        {
+            lock (_lock)
+            {
+                _sinkLastWriteFailureMessage = message;
+            }
         }
 
         public HealthSnapshot Snapshot()
@@ -50,7 +64,8 @@ namespace Trading.Application.Health
                     KillSwitchActive: _killSwitchActive,
                     BarStalenessSeconds: _lastBarProcessedUtc.HasValue
                         ? (now - _lastBarProcessedUtc.Value).TotalSeconds
-                        : (double?)null);
+                        : (double?)null,
+                    SinkLastWriteFailureMessage: _sinkLastWriteFailureMessage);
             }
         }
 

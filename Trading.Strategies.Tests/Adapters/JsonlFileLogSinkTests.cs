@@ -197,5 +197,35 @@ namespace Trading.Strategies.Tests.Adapters
 
             File.Exists(unparseable).Should().BeTrue();
         }
+
+        [Fact]
+        public void LastWriteFailure_IsNullInitially()
+        {
+            var clock = ClockAt(SimulatedDay(2025, 6, 1));
+            using var sink = new JsonlFileLogSink(clock, _testDir);
+
+            sink.LastWriteFailure.Should().BeNull();
+        }
+
+        [Fact]
+        public void LastWriteFailure_IsPopulatedAfterIoFailure()
+        {
+            var clock = ClockAt(SimulatedDay(2025, 6, 1));
+            JsonlFileLogSink? sink = null;
+            try
+            {
+                sink = new JsonlFileLogSink(clock, _testDir);
+                sink.Dispose(); // cierra el StreamWriter interno
+                // Escribir después de dispose provoca ObjectDisposedException / NullReferenceException
+                sink.Write(LogLevel.Info, "after dispose", Props(), null);
+
+                sink.LastWriteFailure.Should().NotBeNull(
+                    "la excepción de IO debe quedar capturada en LastWriteFailure");
+            }
+            finally
+            {
+                sink?.Dispose();
+            }
+        }
     }
 }

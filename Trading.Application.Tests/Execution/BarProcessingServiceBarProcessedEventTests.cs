@@ -17,8 +17,9 @@ using Xunit;
 namespace Trading.Application.Tests.Execution
 {
     /// <summary>
-    /// Verifica que BarProcessingService emite BarProcessedEvent solo en el camino exitoso
-    /// (orden enviada), y NO en los caminos de early-return (régimen incompatible, sizing fallido).
+    /// Verifica que BarProcessingService emite BarProcessedEvent UNA VEZ por llamada a ProcessBar,
+    /// independientemente del resultado (señal flat, régimen incompatible, sizing fallido, etc.).
+    /// Esto garantiza que LastBarProcessedUtc se actualice cada barra para el watchdog de staleness.
     /// </summary>
     public class BarProcessingServiceBarProcessedEventTests
     {
@@ -95,7 +96,7 @@ namespace Trading.Application.Tests.Execution
         }
 
         [Fact]
-        public void Process_WhenSkippedByRegimeFilter_DoesNotPublishBarProcessedEvent()
+        public void Process_WhenSkippedByRegimeFilter_StillPublishesBarProcessedEvent()
         {
             // Classifier devuelve HighVolatility; estrategia solo acepta [Trend]
             var portfolio = new FakePortfolioState { TotalPortfolioValue = 100_000m };
@@ -114,11 +115,13 @@ namespace Trading.Application.Tests.Execution
 
             service.ProcessBar(BuildBar(), new[] { executor });
 
-            capturer.CapturedEvents.Should().BeEmpty();
+            capturer.CapturedEvents.Should().ContainSingle(e =>
+                e.InstrumentId == Btc &&
+                e.BarTimestampUtc == SampleTime);
         }
 
         [Fact]
-        public void Process_WhenSizingFails_DoesNotPublishBarProcessedEvent()
+        public void Process_WhenSizingFails_StillPublishesBarProcessedEvent()
         {
             // TotalPortfolioValue = 0 → quantity = 0 → QuantityRoundsToZero
             var portfolio = new FakePortfolioState { TotalPortfolioValue = 0m };
@@ -127,11 +130,13 @@ namespace Trading.Application.Tests.Execution
 
             service.ProcessBar(BuildBar(), new[] { executor });
 
-            capturer.CapturedEvents.Should().BeEmpty();
+            capturer.CapturedEvents.Should().ContainSingle(e =>
+                e.InstrumentId == Btc &&
+                e.BarTimestampUtc == SampleTime);
         }
 
         [Fact]
-        public void Process_StrategyExcluidaPorHealthMonitor_NoGeneraSignal_NiEmiteBarProcessedEvent()
+        public void Process_StrategyExcluidaPorHealthMonitor_NoGeneraOrden_PeroSiEmiteBarProcessedEvent()
         {
             var portfolio = new FakePortfolioState { TotalPortfolioValue = 100_000m };
             var healthMonitor = new FakeStrategyHealthMonitor();
@@ -142,7 +147,9 @@ namespace Trading.Application.Tests.Execution
 
             service.ProcessBar(BuildBar(), new[] { executor });
 
-            capturer.CapturedEvents.Should().BeEmpty();
+            capturer.CapturedEvents.Should().ContainSingle(e =>
+                e.InstrumentId == Btc &&
+                e.BarTimestampUtc == SampleTime);
             _orderRouter.SubmittedOrders.Should().BeEmpty();
         }
 

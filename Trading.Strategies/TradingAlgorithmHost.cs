@@ -311,6 +311,11 @@ namespace Trading.Strategies
                     {
                         try
                         {
+                            // Self-check del sink JSONL: escalar fallo a stderr → heartbeat.
+                            var sinkFailure = _structuredLogSink.LastWriteFailure;
+                            if (sinkFailure != null)
+                                _healthHeartbeatTracker.RecordSinkWriteFailure(sinkFailure.Message);
+
                             _heartbeatFileWriter.Flush();
                             // Gatear el ping según frescura de barras: solo pingear mientras el
                             // algoritmo procesa barras activamente. Sin ping → Healthchecks.io DOWN.

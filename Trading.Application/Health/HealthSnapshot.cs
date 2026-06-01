@@ -19,5 +19,8 @@ namespace Trading.Application.Health
         bool KillSwitchActive,
         // Segundos transcurridos desde la última barra procesada (null = aún en warmup).
         // Expuesto en heartbeat.json para revisión diaria del operador (POLICY 2.4).
-        double? BarStalenessSeconds);
+        double? BarStalenessSeconds,
+        // Mensaje del último fallo de IO del sink JSONL (null = sin fallos conocidos).
+        // Se propaga desde JsonlFileLogSink.LastWriteFailure vía el host cada 60s.
+        string? SinkLastWriteFailureMessage);
 }

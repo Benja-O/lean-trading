@@ -24,6 +24,15 @@ namespace Trading.Strategies.Adapters
         private DateTime _currentFileDate;
         private Exception? _lastWriteFailure;
 
+        /// <summary>
+        /// Último fallo de IO capturado. Nunca lanzado al caller, pero expuesto aquí
+        /// para que el host pueda escalarlo al heartbeat y a stderr periódicamente.
+        /// </summary>
+        public Exception? LastWriteFailure
+        {
+            get { lock (_lock) return _lastWriteFailure; }
+        }
+
         public JsonlFileLogSink(
             IClock clock,
             string baseDirectoryPath,
@@ -82,6 +91,10 @@ namespace Trading.Strategies.Adapters
                 catch (Exception ex)
                 {
                     _lastWriteFailure = ex;
+                    // Escribir a stderr inmediatamente: la única salida disponible cuando el sink falla.
+                    // No usar _logger (circular) ni lanzar (rompe el flujo de trading).
+                    Console.Error.WriteLine(
+                        $"[JsonlFileLogSink] IO failure at {DateTime.UtcNow:yyyy-MM-ddTHH:mm:ssZ}: {ex.GetType().Name}: {ex.Message}");
                 }
             }
         }

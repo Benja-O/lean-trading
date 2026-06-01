@@ -56,6 +56,12 @@ namespace Trading.Application.Execution
 
         public void ProcessBar(MarketBar marketBar, IReadOnlyList<StrategyExecutor> strategyExecutors)
         {
+            // Emitir una vez por barra, independientemente de si se genera señal.
+            // Garantiza que LastBarProcessedUtc se actualice en el heartbeat cada minuto
+            // (no solo en submit-order), lo que el watchdog de barras stale necesita.
+            _eventBus.Publish(new BarProcessedEvent(_clock.UtcNow, marketBar.TimestampUtc, marketBar.InstrumentId));
+            _logger.Debug("ProcessBar: {InstrumentId} barra {BarTimestamp}.", marketBar.InstrumentId, marketBar.TimestampUtc);
+
             foreach (var strategyExecutor in strategyExecutors)
             {
                 var instrumentId = strategyExecutor.InstrumentId;
@@ -81,9 +87,6 @@ namespace Trading.Application.Execution
                             LimitPrice: null,
                             StopPrice: null,
                             ClientTag: string.Empty));
-
-                        _eventBus.Publish(new BarProcessedEvent(
-                            _clock.UtcNow, marketBar.TimestampUtc, instrumentId));
 
                         continue;
                     }
@@ -157,9 +160,6 @@ namespace Trading.Application.Execution
                     LimitPrice: null,
                     StopPrice: null,
                     ClientTag: string.Empty));
-
-                _eventBus.Publish(new BarProcessedEvent(
-                    _clock.UtcNow, marketBar.TimestampUtc, instrumentId));
             }
         }
     }
