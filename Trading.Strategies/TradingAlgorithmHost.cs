@@ -141,7 +141,7 @@ namespace Trading.Strategies
             foreach (var symbolTicker in symbolsToLoad)
             {
                 var cryptoAsset = AddCryptoFuture(symbolTicker, Resolution.Minute, Market.Binance);
-                cryptoAsset.SetFeeModel(new ConstantFeeModel(0.001m));
+                cryptoAsset.SetFeeModel(new ConstantFeeModel(0.001m, "USDT"));
                 cryptoAsset.SetSlippageModel(new ConstantSlippageModel(0.001m));
                 _instrumentResolver.Register(cryptoAsset.Symbol);
             }
