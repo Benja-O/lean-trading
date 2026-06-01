@@ -44,6 +44,12 @@ namespace Trading.Strategies
     {
         private const decimal InitialAccountCashUsdt = 100_000m;
 
+        // Umbral de staleness para el dead-man's switch. Si no se procesa ninguna barra
+        // dentro de esta ventana (wall-clock), el ping se suprime y Healthchecks.io cae a DOWN.
+        // BTCUSDT perpetual es 24/7 con barras de 1 min; 10 min = 10 barras perdidas = freeze claro.
+        // Si se agregan instrumentos con gaps de mercado cerrado, ajustar este valor.
+        private static readonly TimeSpan BarStalenessThreshold = TimeSpan.FromMinutes(10);
+
         private readonly StrategyConfigLoader _strategyConfigurationLoader = new();
         private readonly List<StrategyExecutor> _strategyExecutors = new();
 
@@ -63,6 +69,7 @@ namespace Trading.Strategies
         private System.Threading.Timer _heartbeatFlushTimer;
         private HttpClient _httpClient;
         private HealthchecksIoPinger _healthchecksPinger;
+        private BarStalenessGate _barStalenessGate;
 
         // Servicios de Application
         private OrderRegistry _orderRegistry;
@@ -95,6 +102,7 @@ namespace Trading.Strategies
             var pingUrl = Environment.GetEnvironmentVariable("HEALTHCHECKS_PING_URL");
             _httpClient = new HttpClient();
             _healthchecksPinger = new HealthchecksIoPinger(pingUrl, _httpClient, _clock, _logger);
+            _barStalenessGate = new BarStalenessGate(_healthHeartbeatTracker, BarStalenessThreshold);
 
             // ===== Carga y validación de configuración =====
             string strategiesFilePath = System.IO.Path.Combine(System.AppContext.BaseDirectory, "strategies.json");
@@ -304,9 +312,11 @@ namespace Trading.Strategies
                         try
                         {
                             _heartbeatFileWriter.Flush();
-                            // fire-and-forget deliberado: el callback del Timer es síncrono;
-                            // el pinger garantiza no propagar excepciones.
-                            _ = _healthchecksPinger.PingAsync(System.Threading.CancellationToken.None);
+                            // Gatear el ping según frescura de barras: solo pingear mientras el
+                            // algoritmo procesa barras activamente. Sin ping → Healthchecks.io DOWN.
+                            // DateTime.UtcNow (wall clock real) per ADR-021: no IClock simulado.
+                            if (_barStalenessGate.IsFresh(DateTime.UtcNow))
+                                _ = _healthchecksPinger.PingAsync(System.Threading.CancellationToken.None);
                         }
                         catch (System.Exception ex)
                         {

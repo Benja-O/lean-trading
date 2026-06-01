@@ -16,5 +16,8 @@ namespace Trading.Application.Health
         DateTime? LastOrderFilledUtc,
         DateTime? LastRiskBreachUtc,
         string? LastRiskBreachReason,
-        bool KillSwitchActive);
+        bool KillSwitchActive,
+        // Segundos transcurridos desde la última barra procesada (null = aún en warmup).
+        // Expuesto en heartbeat.json para revisión diaria del operador (POLICY 2.4).
+        double? BarStalenessSeconds);
 }

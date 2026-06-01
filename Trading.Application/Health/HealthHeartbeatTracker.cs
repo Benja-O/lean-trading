@@ -37,8 +37,9 @@ namespace Trading.Application.Health
         {
             lock (_lock)
             {
+                var now = _clock.UtcNow;
                 return new HealthSnapshot(
-                    CurrentUtc: _clock.UtcNow,
+                    CurrentUtc: now,
                     ProcessStartedUtc: _processStartedUtc,
                     LastBarProcessedUtc: _lastBarProcessedUtc,
                     LastBarTimestampUtc: _lastBarTimestampUtc,
@@ -46,7 +47,10 @@ namespace Trading.Application.Health
                     LastOrderFilledUtc: _lastOrderFilledUtc,
                     LastRiskBreachUtc: _lastRiskBreachUtc,
                     LastRiskBreachReason: _lastRiskBreachReason,
-                    KillSwitchActive: _killSwitchActive);
+                    KillSwitchActive: _killSwitchActive,
+                    BarStalenessSeconds: _lastBarProcessedUtc.HasValue
+                        ? (now - _lastBarProcessedUtc.Value).TotalSeconds
+                        : (double?)null);
             }
         }
 
