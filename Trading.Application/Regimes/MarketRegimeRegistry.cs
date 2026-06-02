@@ -69,9 +69,6 @@ namespace Trading.Application.Regimes
 
             var classification = classifier.Classify(bar);
             _lastClassifications[bar.InstrumentId] = classification;
-            _logger.Debug(
-                "MarketRegimeRegistry: {InstrumentId} → régimen {Regime}.",
-                bar.InstrumentId, classification.Label);
             return classification;
         }
 

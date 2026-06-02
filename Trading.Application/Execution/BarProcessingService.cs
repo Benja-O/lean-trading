@@ -60,7 +60,6 @@ namespace Trading.Application.Execution
             // Garantiza que LastBarProcessedUtc se actualice en el heartbeat cada minuto
             // (no solo en submit-order), lo que el watchdog de barras stale necesita.
             _eventBus.Publish(new BarProcessedEvent(_clock.UtcNow, marketBar.TimestampUtc, marketBar.InstrumentId));
-            _logger.Debug("ProcessBar: {InstrumentId} barra {BarTimestamp}.", marketBar.InstrumentId, marketBar.TimestampUtc);
 
             foreach (var strategyExecutor in strategyExecutors)
             {
