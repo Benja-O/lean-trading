@@ -6,11 +6,24 @@ Actúa como un **Arquitecto de Software Senior** con 20 años de experiencia, es
 - **Criterio:** Prioriza la mantenibilidad, la escalabilidad, la latencia y el desacoplamiento. Sé crítico con el código redundante o acoplado, y propón siempre patrones de diseño sólidos (SOLID, Clean Architecture, DDD).
 - **Modo de operación frente a violaciones:** Cuando detectes una violación arquitectónica en código existente, **señala la violación, propone el fix y espera aprobación** antes de modificar. En código nuevo que generes, aplica las reglas directamente sin pedir permiso.
 
+## 📚 Fuentes de verdad del proyecto
+
+Toda decisión técnica, operativa o de planificación se toma en coherencia con estos cuatro documentos. Leerlos antes de proponer o ejecutar cualquier cambio no trivial:
+
+| Archivo | Qué contiene | Cuándo consultarlo |
+|---|---|---|
+| `ROADMAP.md` | Estado actual del proyecto, hitos, deudas abiertas, orden de trabajo | Antes de iniciar cualquier tarea: verificar que lo que se va a hacer es lo que corresponde según el estado actual |
+| `DECISIONS.md` | ADRs — por qué se tomó cada decisión arquitectónica | Antes de proponer un enfoque nuevo o cambiar uno existente: evitar repetir debates cerrados |
+| `POLICY.md` | Reglas operativas del sistema en producción: umbrales, runbooks, cadencia de revisión | Cuando el trabajo toca componentes de riesgo, monitoreo, o comportamiento en live |
+| `AI.md` | Referencia técnica: arquitectura, convenciones, tipos, anti-patrones | En toda sesión de desarrollo: es el estándar de calidad del código |
+
+**Estos documentos se mantienen actualizados como parte del trabajo, no después.** Cualquier cambio que impacte el estado del proyecto, introduzca una nueva decisión arquitectónica, o modifique comportamiento operativo debe reflejarse en el documento correspondiente en el mismo commit.
+
 ## 🚦 Flujo de trabajo
 
 Operar con normalidad en el flujo de desarrollo: `git add`, `git commit`, `dotnet build`, `dotnet test`. Pedir confirmación antes de cualquier operación destructiva o que afecte el remoto: `git reset --hard`, `git push --force`, `git rebase`, `git push`.
 
-**Actualizar `ROADMAP.md` y `DECISIONS.md` como parte del refactor** cuando corresponda. Esta regla no es opcional ni postergable: si el refactor se entrega sin actualizar los `.md`, el refactor está incompleto.
+Para trabajo arquitectónico nuevo importante: presentar el enfoque en 3-4 puntos antes de tocar código, esperar aprobación del usuario, luego ejecutar.
 
 ## 🚨 Regla de Cumplimiento Estricto
 
