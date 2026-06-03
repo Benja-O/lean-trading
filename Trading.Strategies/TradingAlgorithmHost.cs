@@ -323,6 +323,26 @@ namespace Trading.Strategies
                             // DateTime.UtcNow (wall clock real) per ADR-021: no IClock simulado.
                             if (_barStalenessGate.IsFresh(DateTime.UtcNow))
                                 _ = _healthchecksPinger.PingAsync(System.Threading.CancellationToken.None);
+
+                            // Auto-restart ante stall persistente del feed WebSocket: si no llega
+                            // ninguna barra en >20 min (supera el período 15m de BTCUSDT, barra más
+                            // frecuente), la re-suscripción post-reconexión falló silenciosamente.
+                            // Exit(1) + NSSM → arranque limpio con socket nuevo.
+                            // null = aún en warm-up; no se toca.
+                            const double feedStallAutoRestartSeconds = 20 * 60;
+                            var feedSnapshot = _healthHeartbeatTracker.Snapshot();
+                            if (feedSnapshot.LastBarProcessedUtc.HasValue)
+                            {
+                                var staleness = (DateTime.UtcNow - feedSnapshot.LastBarProcessedUtc.Value).TotalSeconds;
+                                if (staleness > feedStallAutoRestartSeconds)
+                                {
+                                    _logger.Warning(
+                                        "Auto-restart: feed congelado {StalenessSeconds}s sin barra " +
+                                        "(umbral {ThresholdSeconds}s). Terminando proceso — NSSM reconecta con socket limpio.",
+                                        (int)staleness, (int)feedStallAutoRestartSeconds);
+                                    Environment.Exit(1);
+                                }
+                            }
                         }
                         catch (System.Exception ex)
                         {
