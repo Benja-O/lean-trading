@@ -272,15 +272,15 @@ Para que una estrategia entre al sistema (paper o live):
 
 Esta sección se actualiza con frecuencia operativa. Es la única sección que cambia sin requerir ADR.
 
-### 7.1 EmaCrossStrategy / BTCUSDT / 1h
+### 7.1 EmaCrossStrategy / BTCUSDT / 15m
 
 **Naturaleza de esta estrategia.** La `EmaCrossStrategy` se construyó como **estrategia de desarrollo**: su propósito original fue ejercitar la infraestructura del sistema (sizing, eventos, HMM, monitoring) en un backtest no trivial. No pasó por proceso de validación cuantitativa institucional (sin walk-forward analysis, sin purged k-fold cross-validation, sin Monte Carlo sobre la curva de equity). Ver ADR-022 (D2) para el racional de por qué los umbrales U1-U4 no se derivaron de su backtest.
 
 **Decisión de no promoción a live (2026-05-23).** Esta estrategia **nunca opera capital real**, aun si en algún momento pasara por Hito G y mostrara métricas favorables. Razón: arrancar live con una estrategia explícitamente construida como andamio de desarrollo manda mala señal cultural al proyecto y abre la puerta a racionalizar "es chico, no importa" — exactamente lo que P4 busca prevenir. Si en el futuro hay interés genuino en una estrategia de tipo EMA cross, se implementa como entrada nueva en `strategies.json` con nombre distinto, sus propios tests, su propio walk-forward, y su propia entrada en esta sección 7.
 
 ```
-Estado: pre-paper (no iniciada)
-Fecha inicio paper: <pendiente, ver Hito C del ROADMAP>
+Estado: paper (activa desde 2026-06-03)
+Fecha inicio paper: 2026-06-03
 Fecha inicio live: nunca (estrategia de desarrollo, no será promovida a live
                           aunque pase Hito G — ver bloque explicativo arriba)
 Trades acumulados en vivo: 0
@@ -325,6 +325,54 @@ Filtro de régimen: opera solo cuando AccordHmmClassifier clasifica el régimen 
                    de BTCUSDT como Trend (ver Hito B - Paso 3, ADR-017, ADR-019).
 
 Riesgo por trade: 2.0% (campo RiskPerTradePercentage en strategies.json, ADR-002).
+```
+
+---
+
+### 7.2 EmaCrossStrategy / ETHUSDT / 1h
+
+**Naturaleza de esta estrategia.** Misma naturaleza que 7.1: estrategia de desarrollo
+sin walk-forward. Construida para ejercitar el sistema con un segundo activo y segundo
+timeframe simultáneo (validación multi-símbolo, ADR-028). No será promovida a live.
+
+**Decisión de no promoción a live:** ídem 7.1.
+
+```
+Estado: paper (activa desde 2026-06-03)
+Fecha inicio paper: 2026-06-03
+Fecha inicio live: nunca (estrategia de desarrollo — ídem 7.1)
+Trades acumulados en vivo: 0
+
+Umbrales de apagado automático: ídem 7.1 (U1-U4, mismos valores).
+
+Filtro de régimen: opera solo cuando AccordHmmClassifier clasifica el régimen 4h
+                   de ETHUSDT como Trend.
+
+Riesgo por trade: 2.0% (campo RiskPerTradePercentage en strategies.json).
+```
+
+---
+
+### 7.3 EmaCrossStrategy / TRBUSDT / 4h
+
+**Naturaleza de esta estrategia.** Misma naturaleza que 7.1: estrategia de desarrollo
+sin walk-forward. Activo de baja capitalización relativa; el timeframe 4h reduce
+la frecuencia de señales. No será promovida a live.
+
+**Decisión de no promoción a live:** ídem 7.1.
+
+```
+Estado: paper (activa desde 2026-06-03)
+Fecha inicio paper: 2026-06-03
+Fecha inicio live: nunca (estrategia de desarrollo — ídem 7.1)
+Trades acumulados en vivo: 0
+
+Umbrales de apagado automático: ídem 7.1 (U1-U4, mismos valores).
+
+Filtro de régimen: opera solo cuando AccordHmmClassifier clasifica el régimen 4h
+                   de TRBUSDT como Trend.
+
+Riesgo por trade: 2.0% (campo RiskPerTradePercentage en strategies.json).
 ```
 
 ---
