@@ -19,6 +19,24 @@ Toda decisión técnica, operativa o de planificación se toma en coherencia con
 
 **Estos documentos se mantienen actualizados como parte del trabajo, no después.** Cualquier cambio que impacte el estado del proyecto, introduzca una nueva decisión arquitectónica, o modifique comportamiento operativo debe reflejarse en el documento correspondiente en el mismo commit.
 
+## 🤖 Cuándo usar Opus vs Sonnet
+
+El flujo normal es Sonnet (este modelo). Opus está justificado únicamente cuando la tarea es **diseño con alta complejidad metodológica y consecuencias difíciles de revertir** — no para implementación, aunque sea grande.
+
+| Hito | Fase | Modelo | Razón |
+|---|---|---|---|
+| Hito C — cierre | Operativo | Sonnet | Patrones definidos, trabajo acotado |
+| Hito E — Mean Reversion | **Diseño** de estrategia (indicadores, lógica de señal, parámetros) | **Opus** | Decisión de research sin plantilla previa; una dirección equivocada se descubre tarde |
+| Hito E — Mean Reversion | Implementación (IStrategy, tests, wiring) | Sonnet | Patrones ya establecidos por EmaCrossStrategy |
+| Hito F — Scaffolder | Diseño + implementación | Sonnet | La generalización surge de dos estrategias ya construidas |
+| **Hito G — Walk-Forward + Monte Carlo** | **Diseño del pipeline estadístico** | **Opus** | Hito metodológicamente más complejo del proyecto: purged k-fold, leakage temporal, estratificación por régimen. Un error acá invalida silenciosamente toda la validación posterior |
+| Hito G | Implementación del pipeline | Sonnet | Una vez el diseño está cerrado |
+| **Hito H — Optimización de hiperparámetros** | **Diseño del framework** (criterio anti-sobreajuste, búsqueda bayesiana, integración con Hito G) | **Opus** | Decisiones metodológicas complejas con riesgo de sobreajuste silencioso |
+| Hito H | Implementación | Sonnet | |
+| Hito D-prev / D / Bloque 4 | Todo | Sonnet | Operativo o refactors con patrones claros |
+
+**Regla práctica:** si la pregunta es "¿cómo implemento esto?" → Sonnet. Si la pregunta es "¿cuál es la arquitectura correcta para no arruinar la validación estadística?" → Opus.
+
 ## 🚦 Flujo de trabajo
 
 Operar con normalidad en el flujo de desarrollo: `git add`, `git commit`, `dotnet build`, `dotnet test`. Pedir confirmación antes de cualquier operación destructiva o que afecte el remoto: `git reset --hard`, `git push --force`, `git rebase`, `git push`.
