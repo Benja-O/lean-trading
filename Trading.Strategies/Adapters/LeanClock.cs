@@ -20,6 +20,18 @@ namespace Trading.Strategies.Adapters
             _algorithm = algorithm;
         }
 
-        public DateTime UtcNow => _algorithm.UtcTime;
+        // _algorithm.UtcTime vale el epoch de QC (1997-12-31T19:00:00) durante Initialize(),
+        // antes de que el motor inicialice su reloj interno. Fallback a DateTime.UtcNow
+        // para que ProcessStartedUtc y los primeros logs del JSONL tengan timestamp real.
+        private static readonly DateTime _qcEpochThreshold = new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        public DateTime UtcNow
+        {
+            get
+            {
+                var t = _algorithm.UtcTime;
+                return t >= _qcEpochThreshold ? t : DateTime.UtcNow;
+            }
+        }
     }
 }
