@@ -58,7 +58,7 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ HITO C: Paper trading                                       │
+│ 🔄 HITO C: Paper trading — EN CURSO desde 2026-06-03        │
 │ Propósito: VALIDACIÓN OPERATIVA del sistema, no de la       │
 │ estrategia. La EmaCrossStrategy es estrategia de            │
 │ desarrollo (sin walk-forward, sin edge validado); que       │
@@ -67,7 +67,9 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 │ Lo que se valida: heartbeat real cada 60s, pings a          │
 │ Healthchecks.io, alerta Telegram, cadencia humana real      │
 │ (POLICY 4), kill switch real, comportamiento de U1-U4       │
-│ con equity en movimiento, doble Initialize() en live.       │
+│ con equity en movimiento.                                   │
+│ ✅ Infraestructura verificada (feed, heartbeat, pings)      │
+│ ⬜ Trades reales (necesario para validar U1-U4 y kill sw.)  │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐

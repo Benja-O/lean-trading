@@ -10,6 +10,65 @@
 
 ---
 
+## ADR-031 — Hito C: infraestructura de feed verificada; deuda de race condition en plugin de Binance
+**Fecha:** 2026-06-03
+**Estado:** Aceptada
+**ADRs relacionados:** ADR-021 (INFRA-2 monitoreo), ADR-030 (bypass ValidateSubscription)
+
+### Contexto
+
+Al arrancar Hito C (paper trading en VPS Windows con NSSM) surgieron tres problemas encadenados que impidieron la validación operativa plena:
+
+**Problema 1 — Race condition en `BrokerageMultiWebSocketSubscriptionManager.OnOpen()`.**
+El plugin de Binance tiene un bug en el vendored code: `OnOpen` re-suscribe en el callback de reconexión WebSocket pero no espera a que los streams previos se cierren antes de suscribirse de nuevo. Bajo ciertas condiciones de red, el feed queda en estado stall permanente: el WebSocket reporta `Connected` pero no entrega barras. El proceso puede mantenerse en ese estado indefinidamente sin señal de error observable.
+
+**Problema 2 — Watchdog disparando cada ~15 min con `staleness=14400s`.**
+El watchdog implementado en `TradingAlgorithmHost` comparaba `DateTime.UtcNow` (UTC real) contra `LastBarProcessedUtc` que provenía de `BarProcessingService` vía `_clock.UtcNow`. El bug: `LeanClock.UtcNow` retornaba `_algorithm.Time` en lugar de `_algorithm.UtcTime`. En operación live de junio (EDT=UTC-4), `_algorithm.Time` devuelve hora local del algoritmo (11:01 EDT cuando el wall clock era 15:01 UTC). Diferencia = 4h = 14400 segundos >> umbral de 1200s → el watchdog disparaba restart inmediatamente después del primer bar consolidado.
+
+**Problema 3 — Timestamps `1997-12-31T19:00:00` durante `Initialize()` (DEUDA-3).**
+`_algorithm.UtcTime` durante la fase `Initialize()` retorna el epoch de QC (`1997-12-31T19:00:00 UTC`) antes de que el motor inicialice su reloj interno. Los primeros eventos JSONL y `ProcessStartedUtc` quedaban con ese timestamp inútil.
+
+### Decisiones
+
+**D1 — Patch operativo para el race condition (stall del feed): auto-restart vía `Environment.Exit(1)`.**
+El watchdog en `TradingAlgorithmHost` llama `Environment.Exit(1)` cuando `BarStalenessSeconds > 1200s`. NSSM está configurado con `AppExit Default Restart` y re-levanta el proceso automáticamente. Solución operacional robusta mientras el bug vendored no se resuelve. Umbral: 20 minutos de silencio de barras antes de restart (umbral conservador para absorber períodos normales de baja actividad de mercado, incluyendo fines de semana). Commit `ee76d65`.
+
+**D2 — Fix de `LeanClock`: `_algorithm.Time` → `_algorithm.UtcTime`.**
+La causa raíz de los falsos positivos del watchdog. `_algorithm.UtcTime` siempre devuelve UTC real (tiempo simulado en backtest, tiempo UTC del exchange en live). `_algorithm.Time` devuelve hora en el timezone del algoritmo (que en este deployment es EDT=UTC-4), rompiendo cualquier comparación contra `DateTime.UtcNow`. Commit `8789061`. Regla permanente documentada en AI.md.
+
+**D3 — Fix de época QC en `LeanClock` (DEUDA-3): fallback a `DateTime.UtcNow` cuando `UtcTime < año 2000`.**
+Si `_algorithm.UtcTime` es anterior al año 2000, `LeanClock.UtcNow` retorna `DateTime.UtcNow` (wall clock real). Esto garantiza que `ProcessStartedUtc` y los primeros eventos JSONL de `Initialize()` tengan timestamps reales. Umbral elegido como `new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc)`. Commit `2671694`.
+
+### Alternativas consideradas
+
+**D1 alternativas:**
+- **A: Fix directo del race condition en el plugin vendored.** Deseable como solución permanente, pero requiere debugging profundo de código vendored de Lean y re-testing de integración. Postergado como DEUDA técnica activa (ver consecuencias).
+- **B: Timeout de watchdog más corto.** Descartado: umbral < 20 min genera falsos positivos en períodos legítimos de baja actividad (fine de semana, gaps nocturnos).
+- **C (elegida): Auto-restart.** Operacionalmente probado durante Hito C. El proceso se levanta en segundos, warmup completa rápido (~30s), sin intervención humana.
+
+**D2 alternativas:**
+- **A: Usar `DateTime.UtcNow` directamente en `BarProcessingService`** para el evento. Descartado: viola el criterio `IClock` del dominio y hace el código no determinista en backtest.
+- **B (elegida): Corregir `LeanClock`.** El contrato de `IClock.UtcNow` es "UTC real"; `LeanClock` no lo cumplía. La corrección es en la fuente.
+
+### Consecuencias
+
+**Positivas:**
+- Sistema corriendo estable en VPS desde 2026-06-03. Verificado >2h continuas con pings cada 5 min a Healthchecks.io, heartbeat actualizado correctamente, `BarStalenessSeconds` en rango normal (300-600s en mercado activo).
+- `LeanClock.UtcNow` cumple su contrato en todos los contextos: backtest (UtcTime simulado), live (UtcTime UTC real), Initialize (fallback a wall clock real).
+- DEUDA-3 cerrada: logs del JSONL tienen timestamps reales desde el arranque.
+
+**Deuda técnica abierta:**
+- Race condition en `BrokerageMultiWebSocketSubscriptionManager.OnOpen()` (plugin vendored de Lean). El auto-restart es parche operativo; la cura requiere sincronización de re-suscripción. Postergado a Bloque 4 o como mejora al plugin. Mientras el parche sea efectivo, la prioridad es baja.
+
+**Modelo de deployment VPS documentado en AI.md:**
+- Servicio NSSM `LeanPaper` en Windows Server.
+- Binario en `C:\Lean\Paper\`.
+- Variable de entorno `HEALTHCHECKS_PING_URL` inyectada via NSSM `AppEnvironmentExtra`.
+
+**Hito C pendiente de cierre pleno:** la infraestructura operativa está verificada. El cierre definitivo del Hito C requiere al menos un trade real (live con paper brokerage) para validar el ciclo completo U1-U4, el kill switch con equity en movimiento, y el comportamiento del JSONL bajo órdenes reales.
+
+---
+
 ## ADR-030 — Bypass de ValidateSubscription en el plugin de Binance para operación en live local sin suscripción QuantConnect
 **Fecha:** 2026-05-29
 **Estado:** Aceptada

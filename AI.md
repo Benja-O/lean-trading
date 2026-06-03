@@ -194,6 +194,11 @@ El proyecto separa **reglas técnicas** (cómo se construye el sistema: arquitec
 1. **Acceso al tiempo:** exclusivamente vía `IClock.UtcNow`. `SystemClock` vive en `Trading.Strategies`. `FakeClock` vive en `Trading.TestSupport`.
 2. **Zonas horarias:** el dominio trabaja siempre en UTC (`DateTimeOffset` con offset cero o `DateTime` con `Kind=Utc`). La traducción a horario de mercado vive en el Host.
 3. **Timers y schedulers:** se inyectan vía abstracción (`ITimer`, `IScheduler`). Nada de `Task.Delay` directo en Application.
+4. **`LeanClock` — regla crítica: usar `_algorithm.UtcTime`, nunca `_algorithm.Time`.**
+   - `_algorithm.Time` devuelve la hora en el timezone del algoritmo (en este deployment, EDT=UTC-4 en horario de verano). Comparado contra `DateTime.UtcNow` produce un offset de 4h que rompe cualquier cálculo de staleness o lag temporal.
+   - `_algorithm.UtcTime` siempre devuelve UTC real: tiempo simulado UTC en backtest, tiempo UTC del exchange en live.
+   - `LeanClock.UtcNow` además incluye fallback a `DateTime.UtcNow` cuando `_algorithm.UtcTime < año 2000` (epoch de QC durante `Initialize()` antes de que el motor inicialice su reloj).
+   - Esta regla se aprendió en Hito C (2026-06-03): el bug causó loops de restart cada ~15 min con `staleness=14400s`. Ver ADR-031.
 
 ## ⚠️ Errores y Resultados
 
@@ -253,6 +258,16 @@ Configuración operativa que NO se commitea al repositorio. Lectura vía `Enviro
 - Si una variable es obligatoria y no está definida, el componente debe fallar fast con excepción descriptiva al boot. Hoy no hay variables obligatorias.
 - Cuando se introduzca una variable nueva, agregar fila a la tabla arriba en el mismo refactor que la introduce.
 
+**Modelo de deployment VPS (desde Hito C, 2026-06-03):**
+
+- **OS:** Windows Server.
+- **Gestor de servicio:** NSSM (`nssm.exe`). Servicio llamado `LeanPaper`.
+- **Directorio del binario:** `C:\Lean\Paper\`. El ejecutable principal es `QuantConnect.Lean.Launcher.exe`.
+- **Variables de entorno del proceso:** inyectadas via NSSM `AppEnvironmentExtra` (no via `%SystemRoot%\system32\cmd.exe /c set ...`). Formato en la configuración NSSM: `HEALTHCHECKS_PING_URL=https://hc-ping.com/{UUID}`.
+- **Restart automático:** `AppExit Default Restart`. El watchdog en `TradingAlgorithmHost` llama `Environment.Exit(1)` ante stall de feed > 1200s; NSSM re-levanta el proceso automáticamente.
+- **DLL propia a desplegar:** `Trading.Strategies.dll` (y sus dependencias transitivas `Trading.Application.dll`, `Trading.Domain.dll`, etc.) desde `Trading.Strategies/bin/Debug/net10.0/`. Patrón de deploy: stop servicio → backup DLL anterior → copiar DLL nueva → start servicio.
+- **Logs del servicio NSSM:** en `C:\Lean\Paper\service-out-{timestamp}.log` (stdout) y `service-err-{timestamp}.log` (stderr). Útiles para diagnosticar fallos de arranque antes de que el JSONL propio esté disponible.
+
 ## 🧪 Testing
 
 1. **Framework:** xUnit + FluentAssertions. Prohibido `Assert.Equal` pelado cuando hay un assert fluido más expresivo.
@@ -294,6 +309,7 @@ Listado explícito de cosas que **nunca** deben aparecer en código de este proy
 - `using QuantConnect;` fuera de `Trading.Strategies`.
 - `Symbol`, `OrderTicket`, `Slice`, `Securities` u otros tipos de QC fuera de `Trading.Strategies`.
 - `DateTime.Now`, `DateTime.UtcNow`, `DateTimeOffset.Now` fuera de adaptadores en `Trading.Strategies`.
+- `_algorithm.Time` en `LeanClock` o en cualquier adaptador de QCAlgorithm (devuelve timezone local del algoritmo, no UTC). Siempre `_algorithm.UtcTime`.
 - `double` o `float` para precios, cantidades o dinero.
 - Conversión implícita `double` → `decimal`.
 - `decimal` "pelado" donde corresponde un Value Object (`Money`, `Price`, `Quantity`).
