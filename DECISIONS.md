@@ -7,6 +7,41 @@
 > - Cada entrada tiene fecha, contexto, decisión, alternativas, consecuencias.
 > - Las decisiones que se revierten NO se borran: se marcan como "Revertida en ADR-NNN" y se mantienen para historia.
 > - Identificador correlativo `ADR-NNN`.
+> - Al agregar un ADR nuevo, actualizar también la tabla de índice abajo.
+
+## Índice
+
+| ADR | Título corto | Área |
+|---|---|---|
+| ADR-031 | Hito C: feed verificado, race condition Binance, LeanClock UTC fix | Operaciones |
+| ADR-030 | Bypass ValidateSubscription plugin Binance para live local | Infraestructura |
+| ADR-028 | Validación multi-símbolo + fix estructural OPS-2 | Validación |
+| ADR-027 | Re-entrenamiento BTC con trainer multi-seed | HMM / Regímenes |
+| ADR-026 | Validación multi-timeframe del subsistema de ejecución | Validación |
+| ADR-025 | LiquidateInstrument explícito y base de equity correcta en StrategyHealthMonitor | Riesgo / Health |
+| ADR-024 | SemanticStateMapper adaptativo a K + multi-seed Baum-Welch | HMM / Regímenes |
+| ADR-023 | StrategyHealthMonitor: componente autónomo fuera de IRiskMonitor | Riesgo / Health |
+| ADR-022 | POLICY.md: dos niveles de semáforo, calibración absoluta, liquidación inmediata | Operaciones |
+| ADR-021 | Monitoreo básico: JSONL local + heartbeat + Healthchecks.io | Operaciones |
+| ADR-020 | Test AccordHmmClassifierReferenceTests skipeado — convergencia degenerada | Testing |
+| ADR-019 | Implementación HMM con Accord.NET — Paso 3 Hito B | HMM / Regímenes |
+| ADR-018 | Adelantamiento INFRA-1: path absoluto strategies.json eliminado | Infraestructura |
+| ADR-017 | Hito B completo: abstracción de regímenes, guard pre-orden, HMM real | HMM / Regímenes |
+| ADR-016 | Trading Policy escrita + monitor runtime de degradación | Riesgo / Health |
+| ADR-015 | Separación IRiskMonitor de IRiskAction | Arquitectura |
+| ADR-014 | Reversión SignalAuditor: validación por tests unitarios estáticos | Testing |
+| ADR-012 | Auditor de señales: tolerancia relativa, no absoluta | Testing |
+| ADR-011 | Auditor de señales: warm-up por símbolo en lugar de buffer infinito | Testing |
+| ADR-010 | Auditor de señales en C# dentro del mismo backtest | Testing |
+| ADR-009 | Bus de eventos de dominio síncrono in-memory | Arquitectura |
+| ADR-008 | Postergar refactors no críticos hasta después de cada hito | Arquitectura |
+| ADR-007 | `ITradingLogger` se mantiene como abstracción del dominio | Arquitectura |
+| ADR-006 | `Long`/`Short` en estrategias usando enum simple | Dominio |
+| ADR-005 | Cleanup automático del `OrderRegistry` tras eventos terminales | Dominio |
+| ADR-004 | Tags opacos formato `ord_xxxxxxxx` (GUID corto) | Dominio |
+| ADR-003 | `OrderRegistry` vive en `Trading.Application` | Arquitectura |
+| ADR-002 | `RiskPerTradePercentage` falla loud si no está en `strategies.json` | Dominio |
+| ADR-001 | Desacople quirúrgico de QuantConnect: dominio Lean-free | Arquitectura |
 
 ---
 

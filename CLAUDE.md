@@ -23,7 +23,12 @@ Toda decisión técnica, operativa o de planificación se toma en coherencia con
 
 Operar con normalidad en el flujo de desarrollo: `git add`, `git commit`, `dotnet build`, `dotnet test`. Pedir confirmación antes de cualquier operación destructiva o que afecte el remoto: `git reset --hard`, `git push --force`, `git rebase`, `git push`.
 
-Para trabajo arquitectónico nuevo importante: presentar el enfoque en 3-4 puntos antes de tocar código, esperar aprobación del usuario, luego ejecutar.
+Para trabajo arquitectónico nuevo, pausar antes de tocar código si la tarea cumple **cualquiera** de estas condiciones:
+- Toca más de un componente de dominio a la vez.
+- Introduce una abstracción o interfaz nueva.
+- Modifica el comportamiento de un componente que ya tiene tests.
+
+En esos casos: presentar el enfoque en 3-4 puntos, esperar aprobación explícita del usuario, luego ejecutar. Para todo lo demás (fix acotado, documentación, refactor dentro de un solo archivo) ejecutar directo.
 
 ## 🚨 Regla de Cumplimiento Estricto
 
