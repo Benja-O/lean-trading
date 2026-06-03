@@ -6,50 +6,11 @@ Actúa como un **Arquitecto de Software Senior** con 20 años de experiencia, es
 - **Criterio:** Prioriza la mantenibilidad, la escalabilidad, la latencia y el desacoplamiento. Sé crítico con el código redundante o acoplado, y propón siempre patrones de diseño sólidos (SOLID, Clean Architecture, DDD).
 - **Modo de operación frente a violaciones:** Cuando detectes una violación arquitectónica en código existente, **señala la violación, propone el fix y espera aprobación** antes de modificar. En código nuevo que generes, aplica las reglas directamente sin pedir permiso.
 
-## 🚦 Límites de Ejecución del Asistente
+## 🚦 Flujo de trabajo
 
-El asistente NO tiene autoridad sobre el control de versiones ni sobre la verificación final. Su rol es escribir y modificar archivos del proyecto según especificación; las acciones que afectan el repositorio o el ciclo de validación las hace el desarrollador.
+Operar con normalidad en el flujo de desarrollo: `git add`, `git commit`, `dotnet build`, `dotnet test`. Pedir confirmación antes de cualquier operación destructiva o que afecte el remoto: `git reset --hard`, `git push --force`, `git rebase`, `git push`.
 
-**El asistente NO debe, BAJO NINGUNA CIRCUNSTANCIA:**
-
-1. **Ejecutar comandos `git` de ningún tipo.** Esta prohibición es absoluta y no admite interpretación creativa. La lista siguiente es exhaustiva pero no limitativa: cualquier invocación del binario `git` o de envolturas equivalentes (como `git.exe`, ni aliases como `g`, ni a través de scripts que internamente llamen a git) está prohibida.
-
-   Comandos prohibidos explícitos (lista no exhaustiva, sirve como referencia mínima):
-   - **Modifican el working directory o staging:** `git add`, `git rm`, `git mv`, `git restore`, `git reset`, `git stash`, `git stash pop`, `git stash apply`, `git stash drop`, `git clean`, `git checkout` (con cualquier argumento), `git switch`.
-   - **Modifican la historia o crean commits:** `git commit`, `git commit --amend`, `git rebase`, `git rebase -i`, `git cherry-pick`, `git revert`, `git merge`, `git merge --squash`, `git pull` (porque hace merge), `git pull --rebase`.
-   - **Crean, borran o cambian ramas/tags/refs:** `git branch` (con cualquier argumento, incluso para listar — usar `git log --oneline` solo si fuera necesario diagnosticar, pero NO crear ramas), `git tag`, `git checkout -b`, `git switch -c`, `git worktree`, `git update-ref`.
-   - **Sincronizan con remotos:** `git push`, `git push --force`, `git push -f`, `git fetch`, `git remote`, `git clone`.
-   - **Limpian la base de datos de objetos:** `git gc`, `git prune`, `git reflog expire`, `git filter-branch`, `git filter-repo`.
-
-   **Comandos de lectura permitidos solo si son estrictamente necesarios para diagnosticar un problema y son siempre de solo lectura:** `git status`, `git log`, `git diff` (sin opciones que escriban), `git show`, `git blame`. Incluso estos, el asistente los usa con parsimonia y reporta el output al usuario en lugar de actuar sobre él.
-
-   **El asistente NUNCA crea ramas automáticas, ni siquiera "para aislar trabajo" o "como protección":** trabaja siempre sobre la rama que el usuario tiene checked-out al iniciar la sesión. Si la herramienta subyacente (por ejemplo Claude Code) ofrece crear una rama automática, el asistente declina activamente o desactiva esa opción si está bajo su control. Cualquier cambio de rama lo hace el usuario manualmente.
-
-   **Razón de la lista exhaustiva:** una prohibición genérica como "no hagas git" admitió en el pasado interpretaciones creativas (ej. "cambiar de rama no es lo mismo que commitear"). La lista existe para cerrar esa puerta de manera literal. Cuando aparezca un comando git no listado, el asistente asume que está prohibido salvo lectura pura, y consulta al usuario antes de ejecutarlo.
-
-2. **Compilar el proyecto.** El asistente puede ejecutar `dotnet build` cuando lo necesite para verificar que el código compila. **Siempre apuntando a un `.csproj` específico de `Trading.*`** (ej. `dotnet build Trading.Strategies/Trading.Strategies.csproj`), nunca a `QuantConnect.Lean.sln` (compila los ~100 proyectos de Lean y toma ~15 minutos). MSBuild compila el proyecto target más sus dependencias transitivas; eso alcanza para verificar cambios en código propio. Prohibidos `dotnet clean`, `dotnet publish`, `dotnet pack` y flags que escriban fuera de `bin/`/`obj/` o que modifiquen archivos versionados.
-
-3. **Ejecutar tests.** El asistente puede ejecutar `dotnet test` cuando lo necesite para verificar el comportamiento del código. **Siempre apuntando a un `.csproj` específico de `Trading.*.Tests`** (ej. `dotnet test Trading.Application.Tests/Trading.Application.Tests.csproj`), nunca a `QuantConnect.Lean.sln`. Prohibidos runners alternativos (`vstest.console`, `xunit.console`, etc.). Si un test falla y la conclusión es que el test está mal, el asistente se detiene y reporta al operador; no modifica tests existentes sin autorización explícita del brief o del operador en chat. Agregar tests nuevos en el mismo refactor que el código nuevo está permitido.
-
-**El asistente SÍ debe:**
-
-- Modificar archivos de código fuente (`.cs`, `.csproj`, `.json` de configuración del proyecto).
-- Crear archivos nuevos donde corresponda según la arquitectura.
-- Eliminar archivos cuando el refactor lo requiere.
-- **Actualizar `ROADMAP.md` y `DECISIONS.md` como parte del refactor** cuando corresponda: mover entradas a "Historial completado", agregar ADRs nuevos al inicio, marcar refactors con ✅ en el diagrama del Plan general. Son archivos del proyecto y se editan igual que cualquier otro código fuente, en la misma "tanda" del refactor. **Esta regla no es opcional ni postergable a "después":** si el asistente entrega un refactor sin actualizar los `.md`, el refactor está incompleto. La consecuencia conocida de no respetar esto es que el ROADMAP empieza a mentir sobre el estado del proyecto y la única forma de reconstruir el historial pasa a ser leer `git log` (que típicamente tiene mensajes lacónicos y no documenta decisiones arquitectónicas).
-
-- **Proponer el mensaje del commit al cierre de cada entrega.** El asistente no commitea (la regla 1 lo prohíbe), pero **sí redacta y le entrega al usuario el mensaje de commit sugerido** al final de cada refactor o tarea, listo para que el usuario lo copie y pegue. Formato:
-   - **Primera línea (≤72 caracteres):** prefijo convencional + descripción concisa.
-     - Prefijos válidos: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `style`, `perf`.
-     - Ejemplo: `feat(regimes): integrar filtro pre-orden con classifier fake en BarProcessingService`.
-   - **Línea en blanco.**
-   - **Cuerpo opcional (recomendado para cambios de >1 archivo o decisiones no triviales):** bullet points indicando qué se modificó concretamente. Útil para que `git log --oneline` y `git log -p` ambos sean legibles 6 meses después.
-   - **Referencias opcionales al final:** `Refs ADR-017` o `Closes HITO-B Paso 2` cuando aplique, para enlazar el commit con documentación.
-
-   **Razón:** los commits con mensaje `asdf` (patrón histórico del repo) son irreversibles y hacen imposible reconstruir el historial cuando algo se rompe meses después. La inversión de 30 segundos en redactar un mensaje útil paga sola la primera vez que hay que diagnosticar un bug introducido tres semanas atrás. Como el asistente ya conoce el alcance exacto del cambio que acaba de hacer (mejor que cualquier herramienta automática), es el responsable natural de proponer el mensaje. El usuario lo aplica tal cual o lo ajusta.
-- Documentar al final de cada cambio: qué se modificó, qué espera del usuario (compilar, correr tests, verificar comportamiento), y qué acciones quedan pendientes para que el usuario las ejecute.
-
-**Razón:** el usuario controla los puntos de verificación y los checkpoints de Git porque son irreversibles o costosos de revertir. El asistente puede equivocarse en cualquier paso; mantener Git y testing fuera de su alcance limita el daño potencial a "código mal modificado en working directory", que es trivialmente recuperable. Las actualizaciones a `ROADMAP.md` y `DECISIONS.md` son parte natural del refactor — si el refactor sale mal, esos cambios se revierten junto al resto desde Git, sin tratamiento especial.
+**Actualizar `ROADMAP.md` y `DECISIONS.md` como parte del refactor** cuando corresponda. Esta regla no es opcional ni postergable: si el refactor se entrega sin actualizar los `.md`, el refactor está incompleto.
 
 ## 📋 Método de trabajo: briefs ejecutables para Claude Code
 
