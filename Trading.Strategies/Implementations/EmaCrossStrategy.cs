@@ -21,6 +21,9 @@ namespace Trading.Strategies.Implementations
 
         private readonly Dictionary<string, SymbolState> _stateBySymbol = new();
 
+        // EMA lenta: 60 períodos. Es el indicador más lento de esta estrategia.
+        public int WarmUpBars => 60;
+
         public SignalDirection EvaluateSignal(MarketBar marketBar)
         {
             string ticker = marketBar.InstrumentId.Ticker;

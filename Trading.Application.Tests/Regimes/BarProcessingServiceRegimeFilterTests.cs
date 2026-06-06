@@ -207,6 +207,7 @@ namespace Trading.Application.Tests.Regimes
             _signal = signal;
         }
 
+        public int WarmUpBars => 0;
         public SignalDirection EvaluateSignal(MarketBar marketBar) => _signal;
     }
 }

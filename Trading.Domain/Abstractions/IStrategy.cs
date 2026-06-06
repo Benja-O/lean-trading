@@ -9,6 +9,14 @@ namespace Trading.Domain.Abstractions
     /// </summary>
     public interface IStrategy
     {
+        /// <summary>
+        /// Cantidad de barras necesarias para que los indicadores internos estén calentados.
+        /// El host usa este valor (multiplicado por el timeframe) para calcular el SetWarmUp
+        /// del algoritmo, garantizando que EvaluateSignal reciba historia suficiente desde
+        /// el primer bar real.
+        /// </summary>
+        int WarmUpBars { get; }
+
         SignalDirection EvaluateSignal(MarketBar marketBar);
     }
 }

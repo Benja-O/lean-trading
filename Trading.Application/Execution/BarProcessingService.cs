@@ -54,12 +54,24 @@ namespace Trading.Application.Execution
             _strategyHealthMonitor = strategyHealthMonitor ?? throw new ArgumentNullException(nameof(strategyHealthMonitor));
         }
 
-        public void ProcessBar(MarketBar marketBar, IReadOnlyList<StrategyExecutor> strategyExecutors)
+        public void ProcessBar(
+            MarketBar marketBar,
+            IReadOnlyList<StrategyExecutor> strategyExecutors,
+            bool isWarmingUp = false)
         {
-            // Emitir una vez por barra, independientemente de si se genera señal.
+            // Emitir una vez por barra, independientemente de si se genera señal o si es warm-up.
             // Garantiza que LastBarProcessedUtc se actualice en el heartbeat cada minuto
             // (no solo en submit-order), lo que el watchdog de barras stale necesita.
             _eventBus.Publish(new BarProcessedEvent(_clock.UtcNow, marketBar.TimestampUtc, marketBar.InstrumentId));
+
+            if (isWarmingUp)
+            {
+                // Durante warm-up: alimentar los indicadores internos de cada estrategia
+                // para que estén calentados al inicio del trading real, sin emitir órdenes.
+                foreach (var strategyExecutor in strategyExecutors)
+                    strategyExecutor.Strategy.EvaluateSignal(marketBar);
+                return;
+            }
 
             foreach (var strategyExecutor in strategyExecutors)
             {

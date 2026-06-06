@@ -167,12 +167,67 @@ namespace Trading.Application.Tests.Execution
             capturer.CapturedEvents.Should().ContainSingle();
             _orderRouter.SubmittedOrders.Should().ContainSingle();
         }
+
+        [Fact]
+        public void Process_DuranteWarmUp_LlamaEvaluateSignalPeroNoEmiteOrdenes()
+        {
+            var portfolio = new FakePortfolioState { TotalPortfolioValue = 100_000m };
+            var trackingStrategy = new TrackingSignalStrategy(SignalDirection.Long);
+            var executor = BuildExecutor(trackingStrategy);
+
+            var (service, _) = BuildService(portfolio);
+
+            service.ProcessBar(BuildBar(), new[] { executor }, isWarmingUp: true);
+
+            trackingStrategy.CallCount.Should().Be(1);
+            _orderRouter.SubmittedOrders.Should().BeEmpty();
+        }
+
+        [Fact]
+        public void Process_DuranteWarmUp_AunPublicaBarProcessedEvent()
+        {
+            var portfolio = new FakePortfolioState { TotalPortfolioValue = 100_000m };
+            var executor = BuildExecutor(new ConfigurableSignalStrategy(SignalDirection.Long));
+
+            var (service, capturer) = BuildService(portfolio);
+
+            service.ProcessBar(BuildBar(), new[] { executor }, isWarmingUp: true);
+
+            capturer.CapturedEvents.Should().ContainSingle(e => e.InstrumentId == Btc);
+        }
+
+        [Fact]
+        public void Process_PostWarmUp_EmiteOrdenesNormalmente()
+        {
+            var portfolio = new FakePortfolioState { TotalPortfolioValue = 100_000m };
+            var executor = BuildExecutor(new ConfigurableSignalStrategy(SignalDirection.Long));
+
+            var (service, _) = BuildService(portfolio);
+
+            service.ProcessBar(BuildBar(), new[] { executor }, isWarmingUp: false);
+
+            _orderRouter.SubmittedOrders.Should().ContainSingle();
+        }
+    }
+
+    internal sealed class TrackingSignalStrategy : IStrategy
+    {
+        private readonly SignalDirection _signal;
+        public int CallCount { get; private set; }
+        public TrackingSignalStrategy(SignalDirection signal) => _signal = signal;
+        public int WarmUpBars => 0;
+        public SignalDirection EvaluateSignal(MarketBar marketBar)
+        {
+            CallCount++;
+            return _signal;
+        }
     }
 
     internal sealed class ConfigurableSignalStrategy : IStrategy
     {
         private readonly SignalDirection _signal;
         public ConfigurableSignalStrategy(SignalDirection signal) => _signal = signal;
+        public int WarmUpBars => 0;
         public SignalDirection EvaluateSignal(MarketBar marketBar) => _signal;
     }
 }

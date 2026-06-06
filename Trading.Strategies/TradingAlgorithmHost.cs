@@ -237,10 +237,9 @@ namespace Trading.Strategies
 
                     tradeBarConsolidator.DataConsolidated += (sender, tradeBarData) =>
                     {
-                        if (IsWarmingUp) return;
                         var marketBar = MarketBarMapper.ToMarketBar(
                             (TradeBar)tradeBarData, _instrumentResolver);
-                        _barProcessingService.ProcessBar(marketBar, localStrategyExecutors);
+                        _barProcessingService.ProcessBar(marketBar, localStrategyExecutors, IsWarmingUp);
                     };
 
                     SubscriptionManager.AddConsolidator(symbol, tradeBarConsolidator);
@@ -367,9 +366,19 @@ namespace Trading.Strategies
                     "El archivo heartbeat.json refleja el estado al boot.");
             }
 
-            // 20 días de calendario cubren las 100 barras 4h de warm-up del HMM con margen
-            // (17 días serían el mínimo estricto: 100 · 4h = 16.67 días).
-            SetWarmUp(TimeSpan.FromDays(20));
+            // Warm-up dinámico: el mayor entre el mínimo del HMM (100 barras × 4h ≈ 17 días)
+            // y el requerimiento de cada estrategia (WarmUpBars × timeframe). Así cualquier
+            // estrategia nueva con indicadores largos nunca arranca con historia parcial.
+            const double hmmMinHours = 100.0 * 4.0; // 100 barras × 4h
+            var warmUpSpan = TimeSpan.FromHours(hmmMinHours);
+            foreach (var executor in _strategyExecutors)
+            {
+                var tfSpan = TimeframeHelper.GetTimeSpan(executor.Timeframe);
+                var strategyWarmUp = TimeSpan.FromTicks(tfSpan.Ticks * executor.Strategy.WarmUpBars);
+                if (strategyWarmUp > warmUpSpan)
+                    warmUpSpan = strategyWarmUp;
+            }
+            SetWarmUp(warmUpSpan);
         }
 
         public override void OnData(Slice data)
