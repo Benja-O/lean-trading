@@ -39,7 +39,7 @@ El flujo normal es Sonnet (este modelo). Opus está justificado únicamente cuan
 
 ## 🚦 Flujo de trabajo
 
-Operar con normalidad en el flujo de desarrollo: `git add`, `git commit`, `dotnet build`, `dotnet test`. Pedir confirmación antes de cualquier operación destructiva o que afecte el remoto: `git reset --hard`, `git push --force`, `git rebase`, `git push`.
+Operar con normalidad en el flujo de desarrollo: `git add`, `git commit`, `git push`, `dotnet build`, `dotnet test`. Después de cada commit, hacer `git push` automáticamente sin pedir confirmación — el repo remoto en GitHub es la fuente de verdad y debe estar siempre sincronizado. Pedir confirmación solo antes de operaciones destructivas: `git reset --hard`, `git push --force`, `git rebase`.
 
 Para trabajo arquitectónico nuevo, pausar antes de tocar código si la tarea cumple **cualquiera** de estas condiciones:
 - Toca más de un componente de dominio a la vez.
