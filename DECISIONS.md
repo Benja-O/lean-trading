@@ -13,6 +13,7 @@
 
 | ADR | Título corto | Área |
 |---|---|---|
+| ADR-032 | WarmUpBars en IStrategy: warm-up dinámico de indicadores internos | Arquitectura |
 | ADR-031 | Hito C: feed verificado, race condition Binance, LeanClock UTC fix | Operaciones |
 | ADR-030 | Bypass ValidateSubscription plugin Binance para live local | Infraestructura |
 | ADR-028 | Validación multi-símbolo + fix estructural OPS-2 | Validación |
@@ -42,6 +43,50 @@
 | ADR-003 | `OrderRegistry` vive en `Trading.Application` | Arquitectura |
 | ADR-002 | `RiskPerTradePercentage` falla loud si no está en `strategies.json` | Dominio |
 | ADR-001 | Desacople quirúrgico de QuantConnect: dominio Lean-free | Arquitectura |
+
+---
+
+## ADR-032 — WarmUpBars en IStrategy: warm-up dinámico de indicadores internos de estrategia
+**Fecha:** 2026-06-07
+**Estado:** Aceptada
+**ADRs relacionados:** ADR-031 (Hito C, operaciones VPS)
+
+### Contexto
+
+Durante el Hito C se detectó que las estrategias arrancaban con sus indicadores internos en frío, incluso después de que Lean completaba el warm-up. La causa: el consolidador de estrategias tenía un `if (IsWarmingUp) return` que impedía que `BarProcessingService` recibiera barras históricas. El warm-up de Lean (20 días fijos, dimensionado para el HMM) calentaba el clasificador de régimen correctamente —que tiene su propio consolidador sin esa guarda— pero no llegaba a las EMAs internas de `EmaCrossStrategy`.
+
+Consecuencia práctica: en la corrida del VPS activa desde 2026-06-03, `EmaCrossStrategy` necesitó tiempo adicional en live para calentar sus propias EMAs (EMA 30 y EMA 60), equivalente a 60 barras × el timeframe de cada instancia. Para TRBUSDT 4h eso era 10 días adicionales en vivo sin posibilidad de señal.
+
+El problema también era estructural: el valor `SetWarmUp(TimeSpan.FromDays(20))` era una constante hardcodeada sin relación con los requerimientos reales de las estrategias. Al agregar una estrategia con indicadores de período largo (ej. EMA 200 en 4h = 33 días), el warm-up sería insuficiente sin que hubiera ningún error visible.
+
+### Decisión
+
+**Tres cambios coordinados:**
+
+**D1 — `int WarmUpBars` en `IStrategy`.** Cada estrategia declara la cantidad de barras necesarias para calentar su indicador más lento. `EmaCrossStrategy` retorna 60 (período de la EMA lenta). El contrato garantiza que cuando `EvaluateSignal` reciba el primer bar real, los indicadores internos ya tienen historia suficiente.
+
+**D2 — `isWarmingUp` en `BarProcessingService.ProcessBar`.** Se elimina la guarda `if (IsWarmingUp) return` del consolidador y se pasa el flag de Lean al service. Durante warm-up: se llama `EvaluateSignal` en cada estrategia (calienta indicadores) pero se retorna antes de toda la lógica de órdenes. `BarProcessedEvent` se publica siempre —warm-up y live— para que `LastBarProcessedUtc` refleje actividad real durante el warm-up.
+
+**D3 — Cálculo dinámico de `SetWarmUp`.** El host calcula el warm-up como `max(100 barras × 4h, max(executor.Strategy.WarmUpBars × timeframeSpan))` iterando todos los executors construidos. El mínimo garantiza que el HMM siempre tenga los 100 períodos 4h que necesita; el máximo sobre estrategias garantiza que ningún indicador arranque en frío.
+
+### Alternativas consideradas
+
+- **A: Warm-up fijo con documentación manual.** Requerir que cada autor de estrategia recuerde ajustar la constante de 20 días. Descartado: frágil, no escala, el error es silencioso.
+- **B: Consolidador dedicado de warm-up por estrategia.** Un segundo consolidador (separado del de señales) que solo alimenta los indicadores durante warm-up. Descartado: duplicación de lógica de consolidación, frágil al agregar timeframes o estrategias nuevas.
+- **C (elegida): `WarmUpBars` en la interfaz + flag `isWarmingUp`.** El contrato queda en la abstracción correcta: la estrategia sabe qué necesita, el host respeta ese requerimiento automáticamente. Sin duplicación.
+
+### Consecuencias
+
+**Positivas:**
+- Cualquier estrategia nueva que declare `WarmUpBars` correctamente tiene sus indicadores calentados al inicio del trading real, sin configuración adicional.
+- El warm-up del VPS que antes tardaba 10 días en live (TRBUSDT 4h) ahora se resuelve en el replay histórico (~8 minutos de wall clock en el VPS).
+- `LastBarProcessedUtc` se actualiza durante el warm-up, mejorando la observabilidad del arranque en el heartbeat.
+
+**Restricción activa:**
+- `WarmUpBars` debe reflejar el período del indicador más lento de la estrategia. Si una estrategia subestima este valor, arranca con historia parcial sin error visible. Es responsabilidad del autor de cada `IStrategy`.
+
+**Deuda futura:**
+- Para estrategias con indicadores de período muy largo (ej. EMA 200 en 4h = 33 días), el warm-up dinámico puede superar los 20 días actuales, aumentando el tiempo de arranque del proceso. Aceptable por ahora; si se vuelve un problema operativo, considerar precalentar desde una snapshot de estado persistida.
 
 ---
 
