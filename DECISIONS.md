@@ -46,124 +46,28 @@
 | ADR-002 | `RiskPerTradePercentage` falla loud si no está en `strategies.json` | Dominio |
 | ADR-001 | Desacople quirúrgico de QuantConnect: dominio Lean-free | Arquitectura |
 
-## ADR-034 — IntradayMomentumStrategy: segunda estrategia manual (Hito E, candidata 2)
+## ADR-034 — M4 obligatorio antes de IStrategy + patrón de estrategia tiempo-dependiente
 **Fecha:** 2026-06-08
-**Estado:** ~~Retirada por Fase 0~~ — M1 y M2 fallidos en backtest OOS 2025-2026
-**ADRs relacionados:** ADR-033 (candidata 1 retirada), ADR-032 (WarmUpBars)
-
-### Contexto
-
-DonchianBreakoutStrategy (ADR-033) fue retirada por Fase 0: Sharpe -2.623 y win rate 13% en backtest, fallando M1 y M2. El análisis post-mortem confirmó que el mecanismo no tenía edge en ninguna dirección (el M4 del fade tampoco pasó: Sharpe negativo en los 27 casos). Se necesita una candidata con mecanismo independiente y con M4 validado antes de implementar.
+**Estado:** Vigente
+**ADRs relacionados:** ADR-032 (WarmUpBars)
 
 ### Decisión
 
-**IntradayMomentumStrategy**: la primera barra de 30 minutos del día UTC predice la dirección de la última barra del mismo día. Señal: Long si close > open en la barra de 00:00-00:30 UTC; Short si close < open. FLAT para todas las demás barras.
+**M4 obligatorio:** antes de implementar cualquier `IStrategy`, ejecutar M4 — señal pura (tamaño fijo, sin SL/TP ni vol-scaling) sobre ≥ 3 activos. Umbral: Sharpe ≥ 0.5 en ≥ 2/3 activos. Si no pasa, descartar la hipótesis sin escribir código.
 
-**Proceso Fase 0:**
+**Razón:** las candidatas a Hito E mostraron que el código puede ser correcto y el edge no existir. El M4 detecta esto antes de invertir tiempo en implementación.
 
-1. **Gate 1 — Hipótesis económica:** El posicionamiento de los participantes en las primeras barras del día refleja el estado del mercado para toda la sesión. En ETH y BNB — activos con mayor proporción de actividad retail y DeFi versus BTC — la información temprana se incorpora gradualmente generando autocorrelación intradiaria. BTC excluido: la entrada institucional masiva post-2021 (ETFs spot, treasuries corporativas) arbitró el efecto.
+**Patrón para estrategias tiempo-dependientes** (derivado de IntradayMomentumStrategy): diseño en dos pasos — barra de referencia registra estado sin emitir señal; barra de entrada emite la señal si el estado es del mismo período. Validar con fecha para evitar contaminación cross-day. MaxBars alineado al holding period que validó el M4, no al intervalo entre referencia y entrada.
 
-2. **Gate 2 — Pre-registro:** ETHUSDT y BNBUSDT, 30m, sin filtro de régimen, SL 2%, TP 4%, MaxBars 1 (hold 1 barra = 30 min), RiskPerTrade 2%.
-
-3. **Gate 3 — Death criteria:** M1: expectancy negativa sostenida 12 meses OOS; M2: Sharpe < 0.5 en 2 años OOS; M3: max-DD/Sharpe > 3x; M4: ✅ pasado; M5: > 70% P&L en 3 meses extremos.
-
-4. **M4 ejecutado (2026-06-08):** Script Python sobre datos Binance 4h 2020-2025. ETH Sharpe +0.645, BNB Sharpe +0.691, BTC Sharpe -0.204. 2/3 activos pasan → hipótesis confirmada. El M4 del fade Donchian rechazado en paralelo (-0.767 a -1.683 en todos los casos) confirmando que el edge no era de dirección sino de la señal intradiaria.
-
-**Decisiones técnicas:**
-- **Diseño en dos pasos:** Bar_0 (00:00 UTC) registra la dirección y retorna Flat. Bar_47 (23:30 UTC) emite la dirección registrada si es del mismo día. Todas las demás barras: Flat.
-- **Estado por símbolo:** `Dictionary<string, SymbolState>` con `Bar0Direction` y `Bar0Date`. La validación `Bar0Date == ts.Date` evita que señales de días anteriores contaminen el día siguiente.
-- **MaxBars 1 (30 minutos):** El M4 valida el retorno de bar_47 específicamente; sostener la posición por 23 horas (V1, MaxBars 46) expone a SL frecuentes que destruyen el edge. La entrada correcta es en bar_47, no en bar_0.
-- `WarmUpBars: 1` — no requiere rolling window.
-- Sin `CompatibleRegimes`: el M4 no mostró mejora con filtro de volumen (high-volume top 50%). Decisión revisable post-backtest.
-- BTC explícitamente excluido por hipótesis económica (no por resultado del test solo).
-
-**Regla de proceso establecida en esta sesión:** M4 es obligatorio antes de cualquier implementación futura de IStrategy. Umbral: Sharpe ≥ 0.5 en al menos 2 de 3 activos. Registrado en memory del proyecto.
-
-### Alternativas consideradas
-
-- **DonchianFadeStrategy:** M4 rechazado (Sharpe -0.767 a -1.683 en BTC/ETH/BNB, 27 combinaciones). El 87% de "reversiones" del backtest era artefacto del SL/TP asimétrico, no una señal real.
-- **Sin filtro HMM:** el mecanismo de Shen et al. no depende de clasificación de régimen explícita; el filtro de volumen del paper es natural (el M4 mostró que el top-50% de volumen no mejora el Sharpe). Se puede agregar post-backtest si el análisis por régimen muestra concentración del P&L.
-
-### Consecuencias
-
-**Backtest ejecutado 2026-06-08 — ETHUSDT, 2025-01-01 → 2026-04-27:**
-- Sharpe: **-3.28** (M2 FAIL; necesitaba ≥ 0.5)
-- Expectancy: **-0.304** (M1 FAIL; necesitaba > 0)
-- Win Rate: 36% / Loss Rate: 64% — señal aparentemente invertida en el período OOS
-- Net Profit: -6.28%, Drawdown: 6.3%, Total Trades: 236
-- OPS-2 se disparó correctamente a 2025-04-27 (PF rolling < 0.50)
-
-**Post-mortem:** El M4 validó el efecto sobre datos 2020-2024. En 2025 la adopción institucional de ETH se aceleró (ETF spot, DeFi institucional), arbitrando el efecto intradiario de origen retail que Shen et al. documentaron. El Sharpe -3.28 (no solo marginalmente negativo) indica erosión real del edge, no noise estadístico. Candidata descartada.
+Ver resultados de experimentos: [`research/strategy_experiments.md`](research/strategy_experiments.md).
 
 ---
 
-## ADR-033 — DonchianBreakoutStrategy: segunda estrategia manual (Hito E)
+## ADR-033 — DonchianBreakoutStrategy (Hito E, candidata 1)
 **Fecha:** 2026-06-08
-**Estado:** ~~Retirada por Fase 0~~ — candidata descartada tras dos backtests (lookback 20 y 126)
-**ADRs relacionados:** ADR-017 (HMM / regímenes), ADR-032 (WarmUpBars)
+**Estado:** ~~Retirada~~ — descartada por Fase 0. Ver [`research/strategy_experiments.md`](research/strategy_experiments.md).
 
-### Contexto
-
-El Hito E requiere construir una segunda estrategia manual —sin scaffolder automático— para validar que el sistema soporta múltiples estrategias coexistiendo y para identificar qué partes del flujo son repetitivas antes de generalizar en Hito F. El usuario descartó Time-Series Momentum mensual (MOP 2012) como candidata por incompatibilidad de escala con la infraestructura (3-6 trades/año, U3/U4 inoperables, mismatch con la resolución intradía del sistema).
-
-### Decisión
-
-**DonchianBreakoutStrategy**: breakout de canal de 20 períodos en barras de 4h sobre BTCUSDT, con filtro de régimen HMM `CompatibleRegimes: ["Trend"]`.
-
-**Proceso de selección (Fase 0 completada antes de implementar):**
-
-1. **Gate 1 — Hipótesis económica:** Precio rompiendo el rango de consolidación señala inicio de tendencia. Mecanismo: liquidez acumulada en los extremos del rango, ruptura genera momentum por cierre de posiciones contrarias. Documentado en Li et al. (arXiv 2512.02227, 2025) con 4 estados de régimen donde el edge se condiciona explícitamente.
-
-2. **Gate 2 — Pre-registro:** Long cuando close > max(High de 20 barras anteriores); Short cuando close < min(Low de 20 barras anteriores). Solo en la barra de ruptura. BTCUSDT, 4h, CompatibleRegimes: Trend. SL: 2%, TP: 4%, RiskPerTrade: 2%, MaxBars: 30.
-
-3. **Gate 3 — Criterios de muerte pre-definidos:**
-   - M1: win rate rolling < 52% sostenido 12 meses OOS
-   - M2: Sharpe < 0.5 en ventana de 2 años OOS
-   - M3: ratio max-DD/Sharpe > 3x en backtest
-   - M4: Sharpe con señal pura (sin vol-scaling, tamaño fijo) < 0.3
-   - M5: > 70% del P&L generado en los 3 meses más extremos del período
-
-4. **Test M4 ejecutado antes de implementar:** Python script sobre datos Binance OHLCV mensual (2020-2026, 71 obs). Resultado: Sharpe señal pura = +0.705 en lookback 12m (pasa umbral 0.5). La señal tiene vida propia independiente del sizer.
-
-**Decisiones técnicas:**
-- Sin dependencia de indicadores QuantConnect: lógica sobre `Queue<(decimal High, decimal Low)>` con OHLCV puro.
-- Diseño lookahead-free: canal calculado sobre las N barras ya cerradas; la barra actual entra a la ventana **después** de evaluar.
-- Multi-símbolo con estado independiente por ticker (mismo patrón que EmaCrossStrategy).
-- `WarmUpBars: 20` — la ventana más corta del sistema, el warm-up dinámico (ADR-032) lo maneja.
-- `CompatibleRegimes: ["Trend"]` — el HMM ya tiene el modelo BTCUSDT entrenado (ADR-019); no se necesita cambio al host.
-
-### Alternativas consideradas
-
-- **Time-Series Momentum 12m (MOP 2012):** Descartado. Genera 3-6 trades/año, haciendo U3/U4 inoperables (requieren 50 trades). El edge documentado es de cartera diversificada de 58 activos; en activo único la diversification benefit desaparece. No compatible con la escala del sistema.
-- **Intraday Momentum BTC (Shen et al. 2022):** Primera media hora predice última media hora. Edge verificado (t-stat 4.38, peer-reviewed). Descartado por timeframe: opera en barras de 30 minutos, no 4h. La adaptación a 4h requeriría validación adicional del mecanismo.
-- **Trend-following con clasificador threshold (Bui & Nguyen 2026):** Todos los números de Sharpe fueron refutados 0-3 en verificación adversarial de 3 agentes. Descartado.
-
-### Consecuencias
-
-**Positivas:**
-- Sistema validado con dos estrategias coexistiendo: EmaCrossStrategy (15m BTC, 1h ETH, 4h TRB) + DonchianBreakoutStrategy (4h BTC).
-- Patrón `StrategyFactory` confirmado como el único punto de registro; agregar estrategias no requiere tocar el host.
-- BTCUSDT ahora tiene dos executors: EmaCross en 15m (estrategia de desarrollo) y Donchian en 4h (primera candidata a walk-forward en Hito G).
-
-**Restricciones:**
-- Los parámetros SL 2% / TP 4% / MaxBars 30 son valores iniciales para backtest; la calibración real se hace en Hito G (walk-forward). No operar live sin ese paso.
-- El modelo HMM de BTCUSDT fue entrenado en datos 2020-2024. Si el régimen del mercado cambia estructuralmente, el clasificador puede degradarse silenciosamente. Ver criterio de retiro de POLICY.md.
-
-### Resultado del backtest y cierre de Fase 0
-
-**Backtest 1 — lookback 20 barras (2025-01-01 → 2026-03-31):**
-Win rate 24%, Sharpe -1.742, Net Profit -13.3%. Falla M1 y M2.
-Diagnóstico: 3.3 días de lookback en BTC 4h genera falsas rupturas de forma sistemática.
-
-**Ajuste aprobado — lookback 126 barras (≈ 21 días):**
-Motivación: el test M4 (Sharpe +0.705) validó la señal a horizonte 12 meses; el lookback original de 20 barras (3.3 días) generó una desconexión de escala entre la señal validada y la implementada. Se amplió a 126 barras (21 días) con SL 3%, TP 6%, MaxBars 60.
-
-**Backtest 2 — lookback 126 barras (2025-01-01 → 2026-03-31):**
-Win rate 13%, Sharpe -2.623, Net Profit -19.6%, 46 trades. Falla M1 y M2.
-Average Win 3.15% / Average Loss -2.13% (ratio 1.48). El ratio P/L es razonable; el fallo es en win rate.
-Kill switch por 8 pérdidas consecutivas (mayo 2025), OPS-2 por DD rolling 17.7% (noviembre 2025).
-
-**Veredicto:** El mecanismo de breakout de canal de Donchian en BTC 4h no genera edge estadístico positivo en el período 2025-2026, independientemente del lookback elegido. El alargamiento del lookback no solo no corrigió el problema — lo agravó (win rate 24% → 13%). La estrategia se retira por las death criteria M1 y M2 de Fase 0. El código permanece en el repo como referencia del patrón `IStrategy` implementado; `strategies.json` debe restaurarse para el paper trading de Hito C.
+**Hallazgo arquitectónico:** `StrategyFactory` confirmado como único punto de registro. Agregar una `IStrategy` no requiere modificar el host — solo la clase + entrada en `strategies.json`. Patrón válido para todas las estrategias futuras.
 
 ---
 
