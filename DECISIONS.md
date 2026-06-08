@@ -13,6 +13,7 @@
 
 | ADR | Título corto | Área |
 |---|---|---|
+| ADR-033 | DonchianBreakoutStrategy: segunda estrategia manual (Hito E) | Estrategias |
 | ADR-032 | WarmUpBars en IStrategy: warm-up dinámico de indicadores internos | Arquitectura |
 | ADR-031 | Hito C: feed verificado, race condition Binance, LeanClock UTC fix | Operaciones |
 | ADR-030 | Bypass ValidateSubscription plugin Binance para live local | Infraestructura |
@@ -43,6 +44,58 @@
 | ADR-003 | `OrderRegistry` vive en `Trading.Application` | Arquitectura |
 | ADR-002 | `RiskPerTradePercentage` falla loud si no está en `strategies.json` | Dominio |
 | ADR-001 | Desacople quirúrgico de QuantConnect: dominio Lean-free | Arquitectura |
+
+## ADR-033 — DonchianBreakoutStrategy: segunda estrategia manual (Hito E)
+**Fecha:** 2026-06-08
+**Estado:** Aceptada
+**ADRs relacionados:** ADR-017 (HMM / regímenes), ADR-032 (WarmUpBars)
+
+### Contexto
+
+El Hito E requiere construir una segunda estrategia manual —sin scaffolder automático— para validar que el sistema soporta múltiples estrategias coexistiendo y para identificar qué partes del flujo son repetitivas antes de generalizar en Hito F. El usuario descartó Time-Series Momentum mensual (MOP 2012) como candidata por incompatibilidad de escala con la infraestructura (3-6 trades/año, U3/U4 inoperables, mismatch con la resolución intradía del sistema).
+
+### Decisión
+
+**DonchianBreakoutStrategy**: breakout de canal de 20 períodos en barras de 4h sobre BTCUSDT, con filtro de régimen HMM `CompatibleRegimes: ["Trend"]`.
+
+**Proceso de selección (Fase 0 completada antes de implementar):**
+
+1. **Gate 1 — Hipótesis económica:** Precio rompiendo el rango de consolidación señala inicio de tendencia. Mecanismo: liquidez acumulada en los extremos del rango, ruptura genera momentum por cierre de posiciones contrarias. Documentado en Li et al. (arXiv 2512.02227, 2025) con 4 estados de régimen donde el edge se condiciona explícitamente.
+
+2. **Gate 2 — Pre-registro:** Long cuando close > max(High de 20 barras anteriores); Short cuando close < min(Low de 20 barras anteriores). Solo en la barra de ruptura. BTCUSDT, 4h, CompatibleRegimes: Trend. SL: 2%, TP: 4%, RiskPerTrade: 2%, MaxBars: 30.
+
+3. **Gate 3 — Criterios de muerte pre-definidos:**
+   - M1: win rate rolling < 52% sostenido 12 meses OOS
+   - M2: Sharpe < 0.5 en ventana de 2 años OOS
+   - M3: ratio max-DD/Sharpe > 3x en backtest
+   - M4: Sharpe con señal pura (sin vol-scaling, tamaño fijo) < 0.3
+   - M5: > 70% del P&L generado en los 3 meses más extremos del período
+
+4. **Test M4 ejecutado antes de implementar:** Python script sobre datos Binance OHLCV mensual (2020-2026, 71 obs). Resultado: Sharpe señal pura = +0.705 en lookback 12m (pasa umbral 0.5). La señal tiene vida propia independiente del sizer.
+
+**Decisiones técnicas:**
+- Sin dependencia de indicadores QuantConnect: lógica sobre `Queue<(decimal High, decimal Low)>` con OHLCV puro.
+- Diseño lookahead-free: canal calculado sobre las N barras ya cerradas; la barra actual entra a la ventana **después** de evaluar.
+- Multi-símbolo con estado independiente por ticker (mismo patrón que EmaCrossStrategy).
+- `WarmUpBars: 20` — la ventana más corta del sistema, el warm-up dinámico (ADR-032) lo maneja.
+- `CompatibleRegimes: ["Trend"]` — el HMM ya tiene el modelo BTCUSDT entrenado (ADR-019); no se necesita cambio al host.
+
+### Alternativas consideradas
+
+- **Time-Series Momentum 12m (MOP 2012):** Descartado. Genera 3-6 trades/año, haciendo U3/U4 inoperables (requieren 50 trades). El edge documentado es de cartera diversificada de 58 activos; en activo único la diversification benefit desaparece. No compatible con la escala del sistema.
+- **Intraday Momentum BTC (Shen et al. 2022):** Primera media hora predice última media hora. Edge verificado (t-stat 4.38, peer-reviewed). Descartado por timeframe: opera en barras de 30 minutos, no 4h. La adaptación a 4h requeriría validación adicional del mecanismo.
+- **Trend-following con clasificador threshold (Bui & Nguyen 2026):** Todos los números de Sharpe fueron refutados 0-3 en verificación adversarial de 3 agentes. Descartado.
+
+### Consecuencias
+
+**Positivas:**
+- Sistema validado con dos estrategias coexistiendo: EmaCrossStrategy (15m BTC, 1h ETH, 4h TRB) + DonchianBreakoutStrategy (4h BTC).
+- Patrón `StrategyFactory` confirmado como el único punto de registro; agregar estrategias no requiere tocar el host.
+- BTCUSDT ahora tiene dos executors: EmaCross en 15m (estrategia de desarrollo) y Donchian en 4h (primera candidata a walk-forward en Hito G).
+
+**Restricciones:**
+- Los parámetros SL 2% / TP 4% / MaxBars 30 son valores iniciales para backtest; la calibración real se hace en Hito G (walk-forward). No operar live sin ese paso.
+- El modelo HMM de BTCUSDT fue entrenado en datos 2020-2024. Si el régimen del mercado cambia estructuralmente, el clasificador puede degradarse silenciosamente. Ver criterio de retiro de POLICY.md.
 
 ---
 

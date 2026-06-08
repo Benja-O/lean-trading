@@ -73,11 +73,11 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ HITO E: Segunda estrategia manual (ej. Mean Reversion)      │
-│ Construida SIN automatización todavía. Sirve para:          │
-│ - Validar que el sistema soporta múltiples estrategias.     │
-│ - Aprender qué partes del flujo son repetitivas.            │
-│ - Tener una segunda referencia antes de generalizar.        │
+│ 🔄 HITO E: Segunda estrategia manual — EN CURSO 2026-06-08  │
+│ Estrategia elegida: DonchianBreakoutStrategy (4h, BTCUSDT)  │
+│ Fase 0 completada (hipótesis, pre-registro, criterios M1-M5,│
+│ test M4 Sharpe +0.705 pasa). Implementación commiteada.     │
+│ Pendiente: backtest de validación, comparar vs EmaCross.    │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -236,7 +236,7 @@ dado que la estrategia se ha validado en 15m, 1h y 4h.
 | Estado | ID | Hito | Pre-requisito | Comentario |
 |---|---|---|---|---|
 | ⬜ | HITO-C | Paper trading (validación operativa del sistema) | Bloque 3 ✅ | Propósito explícito: validar el sistema bajo wall-clock real, **no** validar la EmaCrossStrategy (que es estrategia de desarrollo sin walk-forward). Validaciones específicas: ver checklist heredado de ADR-021 (heartbeat, pings, Telegram, DEUDA-2 en live) y validaciones nuevas de POLICY 4 (cadencia diaria/semanal real, comportamiento de U1/U2 con equity en movimiento, flujo de kill switch real). Que la estrategia pierda equity virtual durante el paper es irrelevante; incluso útil para ejercitar U1-U4 sin riesgo real. |
-| ⬜ | HITO-E | Segunda estrategia manual (ej. Mean Reversion) | Hito C | Construir SIN automatización. Sirve para validar que el sistema soporta múltiples estrategias coexistiendo y para identificar qué partes del flujo son repetitivas antes de automatizar. |
+| 🔄 | HITO-E | Segunda estrategia manual — DonchianBreakoutStrategy (4h BTCUSDT) | Hito C | Fase 0 completada. Implementación commiteada 2026-06-08. Pendiente: backtest de validación y comparación vs EmaCross. Ver ADR-033. |
 | ⬜ | HITO-F | Strategy Scaffolder | Hito E | Comando/script que genera esqueleto de estrategia nueva: clase `IStrategy` + entrada JSON + tests de referencia + tests de comportamiento. Solo después de haber hecho dos estrategias manuales. |
 | ⬜ | HITO-G | Walk-Forward Analysis + Monte Carlo + Métricas | Hito F | Pipeline reproducible de validación: walk-forward, Monte Carlo de curva de equity, métricas estándar institucionales (Sharpe, Sortino, Calmar, MAR, profit factor, expectancy, recovery factor), estratificadas por régimen. **Puerta de validación**: ninguna estrategia entra a Hito D sin walk-forward aprobado acá. |
 | ⬜ | HITO-H | Optimización de Hiperparámetros | Hito G | Grid search / bayesiana con purged k-fold cross-validation (López de Prado) para evitar leakage temporal. El rango de búsqueda y el criterio los define el operador. |
