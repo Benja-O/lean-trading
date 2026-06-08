@@ -47,7 +47,7 @@
 
 ## ADR-033 — DonchianBreakoutStrategy: segunda estrategia manual (Hito E)
 **Fecha:** 2026-06-08
-**Estado:** Aceptada
+**Estado:** ~~Retirada por Fase 0~~ — candidata descartada tras dos backtests (lookback 20 y 126)
 **ADRs relacionados:** ADR-017 (HMM / regímenes), ADR-032 (WarmUpBars)
 
 ### Contexto
@@ -96,6 +96,22 @@ El Hito E requiere construir una segunda estrategia manual —sin scaffolder aut
 **Restricciones:**
 - Los parámetros SL 2% / TP 4% / MaxBars 30 son valores iniciales para backtest; la calibración real se hace en Hito G (walk-forward). No operar live sin ese paso.
 - El modelo HMM de BTCUSDT fue entrenado en datos 2020-2024. Si el régimen del mercado cambia estructuralmente, el clasificador puede degradarse silenciosamente. Ver criterio de retiro de POLICY.md.
+
+### Resultado del backtest y cierre de Fase 0
+
+**Backtest 1 — lookback 20 barras (2025-01-01 → 2026-03-31):**
+Win rate 24%, Sharpe -1.742, Net Profit -13.3%. Falla M1 y M2.
+Diagnóstico: 3.3 días de lookback en BTC 4h genera falsas rupturas de forma sistemática.
+
+**Ajuste aprobado — lookback 126 barras (≈ 21 días):**
+Motivación: el test M4 (Sharpe +0.705) validó la señal a horizonte 12 meses; el lookback original de 20 barras (3.3 días) generó una desconexión de escala entre la señal validada y la implementada. Se amplió a 126 barras (21 días) con SL 3%, TP 6%, MaxBars 60.
+
+**Backtest 2 — lookback 126 barras (2025-01-01 → 2026-03-31):**
+Win rate 13%, Sharpe -2.623, Net Profit -19.6%, 46 trades. Falla M1 y M2.
+Average Win 3.15% / Average Loss -2.13% (ratio 1.48). El ratio P/L es razonable; el fallo es en win rate.
+Kill switch por 8 pérdidas consecutivas (mayo 2025), OPS-2 por DD rolling 17.7% (noviembre 2025).
+
+**Veredicto:** El mecanismo de breakout de canal de Donchian en BTC 4h no genera edge estadístico positivo en el período 2025-2026, independientemente del lookback elegido. El alargamiento del lookback no solo no corrigió el problema — lo agravó (win rate 24% → 13%). La estrategia se retira por las death criteria M1 y M2 de Fase 0. El código permanece en el repo como referencia del patrón `IStrategy` implementado; `strategies.json` debe restaurarse para el paper trading de Hito C.
 
 ---
 

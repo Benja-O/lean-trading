@@ -1,42 +1,62 @@
 {
   "Timeframes": {
-    "1m": {
-      "Strategies": []
-    },
-    "5m": {
-      "Strategies": []
-    },
+    "1m":  { "Strategies": [] },
+    "5m":  { "Strategies": [] },
     "15m": {
-      "Strategies": []
-    },
-    "30m": {
-      "Strategies": []
-    },
-    "1h": {
-      "Strategies": []
-    },
-    "4h": {
       "Strategies": [
         {
-          "StrategyName": "DonchianBreakoutStrategy",
+          "StrategyName": "EmaCrossStrategy",
           "FileModelName": "",
           "Symbol": "BTCUSDT",
-          "CompatibleRegimes": [
-            "Trend"
-          ],
+          "CompatibleRegimes": [ "Trend" ],
           "StopTakeMode": "Percentage",
-          "StopLossPercentage": 3.0,
-          "TakeProfitPercentage": 6.0,
+          "StopLossPercentage": 1.0,
+          "TakeProfitPercentage": 2.0,
           "StopLossAtrMultiplier": 0,
           "TakeProfitAtrMultiplier": 0,
           "RiskPerTradePercentage": 2.0,
-          "MaxBars": 60,
+          "MaxBars": 20,
           "CombineWithTimeExit": true
         }
       ]
     },
-    "1d": {
-      "Strategies": []
-    }
+    "30m": { "Strategies": [] },
+    "1h": {
+      "Strategies": [
+        {
+          "StrategyName": "EmaCrossStrategy",
+          "FileModelName": "",
+          "Symbol": "ETHUSDT",
+          "CompatibleRegimes": [ "Trend" ],
+          "StopTakeMode": "Percentage",
+          "StopLossPercentage": 1.2,
+          "TakeProfitPercentage": 2.4,
+          "StopLossAtrMultiplier": 0,
+          "TakeProfitAtrMultiplier": 0,
+          "RiskPerTradePercentage": 2.0,
+          "MaxBars": 20,
+          "CombineWithTimeExit": true
+        }
+      ]
+    },
+    "4h": {
+      "Strategies": [
+        {
+          "StrategyName": "EmaCrossStrategy",
+          "FileModelName": "",
+          "Symbol": "TRBUSDT",
+          "CompatibleRegimes": [ "Trend" ],
+          "StopTakeMode": "Percentage",
+          "StopLossPercentage": 4.0,
+          "TakeProfitPercentage": 8.0,
+          "StopLossAtrMultiplier": 0,
+          "TakeProfitAtrMultiplier": 0,
+          "RiskPerTradePercentage": 2.0,
+          "MaxBars": 20,
+          "CombineWithTimeExit": true
+        }
+      ]
+    },
+    "1d":  { "Strategies": [] }
   }
 }
