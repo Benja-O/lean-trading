@@ -10,11 +10,14 @@ namespace Trading.Application.Tests.Strategies
     /// <summary>
     /// Tests de comportamiento de DonchianBreakoutStrategy con datos sintéticos.
     ///
+    /// Los loops de warmup usan strategy.WarmUpBars para ser agnósticos al lookback
+    /// configurado en la estrategia — los tests pasan sin cambios cuando cambia LookbackPeriods.
+    ///
     /// Cobertura:
-    /// - Antes de IsReady (&lt;20 barras): siempre Flat.
-    /// - Breakout alcista: Long en la barra que supera el máximo de las 20 anteriores.
+    /// - Antes de IsReady (&lt;WarmUpBars barras): siempre Flat.
+    /// - Breakout alcista: Long en la barra que supera el máximo de las N anteriores.
     /// - Sin entrada repetida: segunda barra sobre canal → Flat.
-    /// - Breakout bajista: Short en la barra que cae bajo el mínimo de las 20 anteriores.
+    /// - Breakout bajista: Short en la barra que cae bajo el mínimo de las N anteriores.
     /// - Transición directa Long→Short.
     /// - Multi-símbolo: estado independiente por ticker.
     /// </summary>
@@ -35,7 +38,7 @@ namespace Trading.Application.Tests.Strategies
         {
             var strategy = new DonchianBreakoutStrategy();
 
-            for (int i = 0; i < 19; i++)
+            for (int i = 0; i < strategy.WarmUpBars - 1; i++)
             {
                 var signal = strategy.EvaluateSignal(FlatBar(i));
                 signal.Should().Be(SignalDirection.Flat,
@@ -47,33 +50,33 @@ namespace Trading.Application.Tests.Strategies
         public void EvaluateSignal_BreakoutAboveChannel_ReturnsLong()
         {
             var strategy = new DonchianBreakoutStrategy();
+            int n = strategy.WarmUpBars;
 
-            // 20 barras laterales: canal [98, 102]
-            for (int i = 0; i < 20; i++)
+            for (int i = 0; i < n; i++)
                 strategy.EvaluateSignal(FlatBar(i));
 
-            // Barra 21: cierre 103 > máximo del canal (102) → Long
-            var breakoutBar = Bar(BtcUsdt, close: 103m, high: 104m, low: 101m, index: 20);
+            // Barra N+1: cierre 103 > máximo del canal (102) → Long
+            var breakoutBar = Bar(BtcUsdt, close: 103m, high: 104m, low: 101m, index: n);
             var signal = strategy.EvaluateSignal(breakoutBar);
 
             signal.Should().Be(SignalDirection.Long,
-                because: "El cierre supera el máximo de las 20 barras anteriores.");
+                because: "El cierre supera el máximo de las N barras anteriores.");
         }
 
         [Fact]
         public void EvaluateSignal_SecondBarAboveChannel_ReturnsFlat()
         {
             var strategy = new DonchianBreakoutStrategy();
+            int n = strategy.WarmUpBars;
 
-            for (int i = 0; i < 20; i++)
+            for (int i = 0; i < n; i++)
                 strategy.EvaluateSignal(FlatBar(i));
 
-            // Barra 21: breakout → Long
-            strategy.EvaluateSignal(Bar(BtcUsdt, close: 103m, high: 110m, low: 101m, index: 20));
+            // Primera barra de breakout: estado pasa a Long
+            strategy.EvaluateSignal(Bar(BtcUsdt, close: 103m, high: 110m, low: 101m, index: n));
 
-            // Barra 22: sigue sobre el canal ajustado (que ahora incluye high=110) → cierre 107 < 110 → Flat
-            // Pero si el cierre también supera el nuevo canal, igual no debe emitir porque estamos en estado Long
-            var nextBar = Bar(BtcUsdt, close: 112m, high: 113m, low: 109m, index: 21);
+            // Segunda barra: sigue en estado Long → no re-emite
+            var nextBar = Bar(BtcUsdt, close: 112m, high: 113m, low: 109m, index: n + 1);
             var signal = strategy.EvaluateSignal(nextBar);
 
             signal.Should().Be(SignalDirection.Flat,
@@ -84,33 +87,35 @@ namespace Trading.Application.Tests.Strategies
         public void EvaluateSignal_BreakoutBelowChannel_ReturnsShort()
         {
             var strategy = new DonchianBreakoutStrategy();
+            int n = strategy.WarmUpBars;
 
-            for (int i = 0; i < 20; i++)
+            for (int i = 0; i < n; i++)
                 strategy.EvaluateSignal(FlatBar(i));
 
-            // Barra 21: cierre 97 < mínimo del canal (98) → Short
-            var breakoutBar = Bar(BtcUsdt, close: 97m, high: 99m, low: 96m, index: 20);
+            // Barra N+1: cierre 97 < mínimo del canal (98) → Short
+            var breakoutBar = Bar(BtcUsdt, close: 97m, high: 99m, low: 96m, index: n);
             var signal = strategy.EvaluateSignal(breakoutBar);
 
             signal.Should().Be(SignalDirection.Short,
-                because: "El cierre cae por debajo del mínimo de las 20 barras anteriores.");
+                because: "El cierre cae por debajo del mínimo de las N barras anteriores.");
         }
 
         [Fact]
         public void EvaluateSignal_DirectLongToShort_EmitsShort()
         {
             var strategy = new DonchianBreakoutStrategy();
+            int n = strategy.WarmUpBars;
 
-            for (int i = 0; i < 20; i++)
+            for (int i = 0; i < n; i++)
                 strategy.EvaluateSignal(FlatBar(i));
 
-            // Barra 21: breakout alcista
-            strategy.EvaluateSignal(Bar(BtcUsdt, close: 103m, high: 104m, low: 101m, index: 20));
+            // Barra N+1: breakout alcista → estado Long
+            // Canal tras esta barra: max = 104 (su high), min = 98 (flat bars)
+            strategy.EvaluateSignal(Bar(BtcUsdt, close: 103m, high: 104m, low: 101m, index: n));
 
-            // Barra 22: el canal se ajusta, pero simulamos caída extrema por debajo del canal ajustado
-            // Canal tras barra 21: max(barras 2-21) = 104, min(barras 2-21) = 98
-            // Barra 22 close = 97 < 98 → transición Long→Short
-            var collapseBar = Bar(BtcUsdt, close: 97m, high: 103m, low: 96m, index: 21);
+            // Barra N+2: colapso directo por debajo del mínimo del canal ajustado
+            // Canal = max(barras 2..N+1): max = 104, min = 98 → close=97 < 98 → Short
+            var collapseBar = Bar(BtcUsdt, close: 97m, high: 103m, low: 96m, index: n + 1);
             var signal = strategy.EvaluateSignal(collapseBar);
 
             signal.Should().Be(SignalDirection.Short,
@@ -121,20 +126,20 @@ namespace Trading.Application.Tests.Strategies
         public void EvaluateSignal_MultipleSymbols_MaintainIndependentState()
         {
             var strategy = new DonchianBreakoutStrategy();
+            int n = strategy.WarmUpBars;
 
-            // BTC y ETH en paralelo, ambos laterales
-            for (int i = 0; i < 20; i++)
+            for (int i = 0; i < n; i++)
             {
                 strategy.EvaluateSignal(FlatBar(i, price: 100m));
                 strategy.EvaluateSignal(Bar(EthUsdt, 3000m, 3020m, 2980m, i));
             }
 
             // BTC rompe hacia arriba
-            var btcBreakout = Bar(BtcUsdt, close: 105m, high: 106m, low: 103m, index: 20);
+            var btcBreakout = Bar(BtcUsdt, close: 105m, high: 106m, low: 103m, index: n);
             var btcSignal = strategy.EvaluateSignal(btcBreakout);
 
-            // ETH sigue lateral (no rompe nada)
-            var ethFlat = Bar(EthUsdt, close: 3010m, high: 3025m, low: 2995m, index: 20);
+            // ETH sigue lateral
+            var ethFlat = Bar(EthUsdt, close: 3010m, high: 3025m, low: 2995m, index: n);
             var ethSignal = strategy.EvaluateSignal(ethFlat);
 
             btcSignal.Should().Be(SignalDirection.Long,

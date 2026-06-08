@@ -6,21 +6,25 @@ using Trading.Domain.ValueObjects;
 namespace Trading.Strategies.Implementations
 {
     /// <summary>
-    /// Breakout de canal de Donchian (20 períodos).
+    /// Breakout de canal de Donchian (126 períodos ≈ 21 días en 4h).
     ///
-    /// Señal: Long cuando el cierre supera el máximo de las 20 barras anteriores;
+    /// Señal: Long cuando el cierre supera el máximo de las 126 barras anteriores;
     /// Short cuando cae por debajo del mínimo. Se emite únicamente en la barra de
     /// ruptura — las barras subsiguientes dentro del mismo estado no generan nueva señal.
+    ///
+    /// Lookback de 126 barras alineado con el horizonte de 21 días validado en el
+    /// test M4 de atribución de señal (Sharpe +0.705 en señal pura, datos mensuales
+    /// 2020-2026). El lookback de 20 barras (3.3 días) generó 76% de tasa de pérdida
+    /// por falsas rupturas en el backtest 2025-2026 (ADR-033).
     ///
     /// Diseño lookahead-free: el canal se calcula sobre las N barras YA cerradas
     /// antes de la barra actual (la barra actual entra a la ventana DESPUÉS de evaluar).
     ///
-    /// Referencia: Li et al. (arXiv 2512.02227, 2025) — breakout de rango con
-    /// señales condicionadas por régimen. Usar con CompatibleRegimes: ["Trend"].
+    /// Referencia: Li et al. (arXiv 2512.02227, 2025). Usar con CompatibleRegimes: ["Trend"].
     /// </summary>
     public sealed class DonchianBreakoutStrategy : IStrategy
     {
-        private const int LookbackPeriods = 20;
+        private const int LookbackPeriods = 126;
 
         private sealed class SymbolState
         {
