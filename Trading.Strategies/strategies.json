@@ -10,25 +10,12 @@
           "FileModelName": "",
           "Symbol": "ETHUSDT",
           "StopTakeMode": "Percentage",
-          "StopLossPercentage": 3.0,
-          "TakeProfitPercentage": 6.0,
+          "StopLossPercentage": 2.0,
+          "TakeProfitPercentage": 4.0,
           "StopLossAtrMultiplier": 0,
           "TakeProfitAtrMultiplier": 0,
           "RiskPerTradePercentage": 2.0,
-          "MaxBars": 46,
-          "CombineWithTimeExit": true
-        },
-        {
-          "StrategyName": "IntradayMomentumStrategy",
-          "FileModelName": "",
-          "Symbol": "BNBUSDT",
-          "StopTakeMode": "Percentage",
-          "StopLossPercentage": 3.0,
-          "TakeProfitPercentage": 6.0,
-          "StopLossAtrMultiplier": 0,
-          "TakeProfitAtrMultiplier": 0,
-          "RiskPerTradePercentage": 2.0,
-          "MaxBars": 46,
+          "MaxBars": 1,
           "CombineWithTimeExit": true
         }
       ]

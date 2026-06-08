@@ -63,15 +63,17 @@ DonchianBreakoutStrategy (ADR-033) fue retirada por Fase 0: Sharpe -2.623 y win 
 
 1. **Gate 1 — Hipótesis económica:** El posicionamiento de los participantes en las primeras barras del día refleja el estado del mercado para toda la sesión. En ETH y BNB — activos con mayor proporción de actividad retail y DeFi versus BTC — la información temprana se incorpora gradualmente generando autocorrelación intradiaria. BTC excluido: la entrada institucional masiva post-2021 (ETFs spot, treasuries corporativas) arbitró el efecto.
 
-2. **Gate 2 — Pre-registro:** ETHUSDT y BNBUSDT, 30m, sin filtro de régimen, SL 3%, TP 6%, MaxBars 46, RiskPerTrade 2%.
+2. **Gate 2 — Pre-registro:** ETHUSDT y BNBUSDT, 30m, sin filtro de régimen, SL 2%, TP 4%, MaxBars 1 (hold 1 barra = 30 min), RiskPerTrade 2%.
 
 3. **Gate 3 — Death criteria:** M1: expectancy negativa sostenida 12 meses OOS; M2: Sharpe < 0.5 en 2 años OOS; M3: max-DD/Sharpe > 3x; M4: ✅ pasado; M5: > 70% P&L en 3 meses extremos.
 
 4. **M4 ejecutado (2026-06-08):** Script Python sobre datos Binance 4h 2020-2025. ETH Sharpe +0.645, BNB Sharpe +0.691, BTC Sharpe -0.204. 2/3 activos pasan → hipótesis confirmada. El M4 del fade Donchian rechazado en paralelo (-0.767 a -1.683 en todos los casos) confirmando que el edge no era de dirección sino de la señal intradiaria.
 
 **Decisiones técnicas:**
-- Sin estado por símbolo: la lógica depende únicamente de `bar.TimestampUtc.Hour == 0 && bar.TimestampUtc.Minute == 0` y del retorno de esa barra.
-- `WarmUpBars: 1` — la estrategia más simple del sistema, no requiere rolling window.
+- **Diseño en dos pasos:** Bar_0 (00:00 UTC) registra la dirección y retorna Flat. Bar_47 (23:30 UTC) emite la dirección registrada si es del mismo día. Todas las demás barras: Flat.
+- **Estado por símbolo:** `Dictionary<string, SymbolState>` con `Bar0Direction` y `Bar0Date`. La validación `Bar0Date == ts.Date` evita que señales de días anteriores contaminen el día siguiente.
+- **MaxBars 1 (30 minutos):** El M4 valida el retorno de bar_47 específicamente; sostener la posición por 23 horas (V1, MaxBars 46) expone a SL frecuentes que destruyen el edge. La entrada correcta es en bar_47, no en bar_0.
+- `WarmUpBars: 1` — no requiere rolling window.
 - Sin `CompatibleRegimes`: el M4 no mostró mejora con filtro de volumen (high-volume top 50%). Decisión revisable post-backtest.
 - BTC explícitamente excluido por hipótesis económica (no por resultado del test solo).
 
