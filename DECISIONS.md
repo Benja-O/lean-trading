@@ -13,6 +13,7 @@
 
 | ADR | Título corto | Área |
 |---|---|---|
+| ADR-034 | IntradayMomentumStrategy: segunda estrategia manual (Hito E, candidata 2) | Estrategias |
 | ADR-033 | DonchianBreakoutStrategy: segunda estrategia manual (Hito E) | Estrategias |
 | ADR-032 | WarmUpBars en IStrategy: warm-up dinámico de indicadores internos | Arquitectura |
 | ADR-031 | Hito C: feed verificado, race condition Binance, LeanClock UTC fix | Operaciones |
@@ -44,6 +45,48 @@
 | ADR-003 | `OrderRegistry` vive en `Trading.Application` | Arquitectura |
 | ADR-002 | `RiskPerTradePercentage` falla loud si no está en `strategies.json` | Dominio |
 | ADR-001 | Desacople quirúrgico de QuantConnect: dominio Lean-free | Arquitectura |
+
+## ADR-034 — IntradayMomentumStrategy: segunda estrategia manual (Hito E, candidata 2)
+**Fecha:** 2026-06-08
+**Estado:** En evaluación — backtest pendiente
+**ADRs relacionados:** ADR-033 (candidata 1 retirada), ADR-032 (WarmUpBars)
+
+### Contexto
+
+DonchianBreakoutStrategy (ADR-033) fue retirada por Fase 0: Sharpe -2.623 y win rate 13% en backtest, fallando M1 y M2. El análisis post-mortem confirmó que el mecanismo no tenía edge en ninguna dirección (el M4 del fade tampoco pasó: Sharpe negativo en los 27 casos). Se necesita una candidata con mecanismo independiente y con M4 validado antes de implementar.
+
+### Decisión
+
+**IntradayMomentumStrategy**: la primera barra de 30 minutos del día UTC predice la dirección de la última barra del mismo día. Señal: Long si close > open en la barra de 00:00-00:30 UTC; Short si close < open. FLAT para todas las demás barras.
+
+**Proceso Fase 0:**
+
+1. **Gate 1 — Hipótesis económica:** El posicionamiento de los participantes en las primeras barras del día refleja el estado del mercado para toda la sesión. En ETH y BNB — activos con mayor proporción de actividad retail y DeFi versus BTC — la información temprana se incorpora gradualmente generando autocorrelación intradiaria. BTC excluido: la entrada institucional masiva post-2021 (ETFs spot, treasuries corporativas) arbitró el efecto.
+
+2. **Gate 2 — Pre-registro:** ETHUSDT y BNBUSDT, 30m, sin filtro de régimen, SL 3%, TP 6%, MaxBars 46, RiskPerTrade 2%.
+
+3. **Gate 3 — Death criteria:** M1: expectancy negativa sostenida 12 meses OOS; M2: Sharpe < 0.5 en 2 años OOS; M3: max-DD/Sharpe > 3x; M4: ✅ pasado; M5: > 70% P&L en 3 meses extremos.
+
+4. **M4 ejecutado (2026-06-08):** Script Python sobre datos Binance 4h 2020-2025. ETH Sharpe +0.645, BNB Sharpe +0.691, BTC Sharpe -0.204. 2/3 activos pasan → hipótesis confirmada. El M4 del fade Donchian rechazado en paralelo (-0.767 a -1.683 en todos los casos) confirmando que el edge no era de dirección sino de la señal intradiaria.
+
+**Decisiones técnicas:**
+- Sin estado por símbolo: la lógica depende únicamente de `bar.TimestampUtc.Hour == 0 && bar.TimestampUtc.Minute == 0` y del retorno de esa barra.
+- `WarmUpBars: 1` — la estrategia más simple del sistema, no requiere rolling window.
+- Sin `CompatibleRegimes`: el M4 no mostró mejora con filtro de volumen (high-volume top 50%). Decisión revisable post-backtest.
+- BTC explícitamente excluido por hipótesis económica (no por resultado del test solo).
+
+**Regla de proceso establecida en esta sesión:** M4 es obligatorio antes de cualquier implementación futura de IStrategy. Umbral: Sharpe ≥ 0.5 en al menos 2 de 3 activos. Registrado en memory del proyecto.
+
+### Alternativas consideradas
+
+- **DonchianFadeStrategy:** M4 rechazado (Sharpe -0.767 a -1.683 en BTC/ETH/BNB, 27 combinaciones). El 87% de "reversiones" del backtest era artefacto del SL/TP asimétrico, no una señal real.
+- **Sin filtro HMM:** el mecanismo de Shen et al. no depende de clasificación de régimen explícita; el filtro de volumen del paper es natural (el M4 mostró que el top-50% de volumen no mejora el Sharpe). Se puede agregar post-backtest si el análisis por régimen muestra concentración del P&L.
+
+### Consecuencias
+
+**Pendiente:** backtest 2025-01-01 → 2026-03-31 en ETHUSDT y BNBUSDT aislados. Evaluación de M1-M5 post-backtest.
+
+---
 
 ## ADR-033 — DonchianBreakoutStrategy: segunda estrategia manual (Hito E)
 **Fecha:** 2026-06-08

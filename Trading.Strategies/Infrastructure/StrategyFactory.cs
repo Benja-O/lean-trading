@@ -12,6 +12,7 @@ namespace Trading.Strategies.Infrastructure
             {
                 "emacrossstrategy" or "emacross" => new EmaCrossStrategy(),
                 "donchianbreakoutstrategy" or "donchianbreakout" => new DonchianBreakoutStrategy(),
+                "intradaymomentumstrategy" or "intradaymomentum" => new IntradayMomentumStrategy(),
 
                 null or "" => throw new ArgumentNullException(nameof(strategyName),
                     "El nombre de la estrategia no puede ser nulo o vacío."),
