@@ -48,7 +48,7 @@
 
 ## ADR-034 — IntradayMomentumStrategy: segunda estrategia manual (Hito E, candidata 2)
 **Fecha:** 2026-06-08
-**Estado:** En evaluación — backtest pendiente
+**Estado:** ~~Retirada por Fase 0~~ — M1 y M2 fallidos en backtest OOS 2025-2026
 **ADRs relacionados:** ADR-033 (candidata 1 retirada), ADR-032 (WarmUpBars)
 
 ### Contexto
@@ -86,7 +86,14 @@ DonchianBreakoutStrategy (ADR-033) fue retirada por Fase 0: Sharpe -2.623 y win 
 
 ### Consecuencias
 
-**Pendiente:** backtest 2025-01-01 → 2026-03-31 en ETHUSDT y BNBUSDT aislados. Evaluación de M1-M5 post-backtest.
+**Backtest ejecutado 2026-06-08 — ETHUSDT, 2025-01-01 → 2026-04-27:**
+- Sharpe: **-3.28** (M2 FAIL; necesitaba ≥ 0.5)
+- Expectancy: **-0.304** (M1 FAIL; necesitaba > 0)
+- Win Rate: 36% / Loss Rate: 64% — señal aparentemente invertida en el período OOS
+- Net Profit: -6.28%, Drawdown: 6.3%, Total Trades: 236
+- OPS-2 se disparó correctamente a 2025-04-27 (PF rolling < 0.50)
+
+**Post-mortem:** El M4 validó el efecto sobre datos 2020-2024. En 2025 la adopción institucional de ETH se aceleró (ETF spot, DeFi institucional), arbitrando el efecto intradiario de origen retail que Shen et al. documentaron. El Sharpe -3.28 (no solo marginalmente negativo) indica erosión real del edge, no noise estadístico. Candidata descartada.
 
 ---
 

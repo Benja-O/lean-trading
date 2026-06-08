@@ -76,9 +76,9 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 │ 🔄 HITO E: Segunda estrategia manual — EN CURSO              │
 │ Candidata 1: DonchianBreakoutStrategy (4h, BTCUSDT) ❌      │
 │   Retirada por Fase 0: Sharpe -2.623, win 13%. ADR-033.     │
-│ Candidata 2: IntradayMomentumStrategy (30m, ETH+BNB) 🔄     │
-│   M4 pasado: ETH +0.645, BNB +0.691. Backtest pendiente.    │
-│   Ref: Shen, Urquhart & Wang (Financial Review 2022).        │
+│ Candidata 2: IntradayMomentumStrategy (30m, ETH) ❌          │
+│   M4 OK pero OOS falla: Sharpe -3.28, Win 36%. ADR-034.     │
+│ Candidata 3: pendiente — buscando próxima hipótesis          │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -238,7 +238,7 @@ dado que la estrategia se ha validado en 15m, 1h y 4h.
 |---|---|---|---|---|
 | ⬜ | HITO-C | Paper trading (validación operativa del sistema) | Bloque 3 ✅ | Propósito explícito: validar el sistema bajo wall-clock real, **no** validar la EmaCrossStrategy (que es estrategia de desarrollo sin walk-forward). Validaciones específicas: ver checklist heredado de ADR-021 (heartbeat, pings, Telegram, DEUDA-2 en live) y validaciones nuevas de POLICY 4 (cadencia diaria/semanal real, comportamiento de U1/U2 con equity en movimiento, flujo de kill switch real). Que la estrategia pierda equity virtual durante el paper es irrelevante; incluso útil para ejercitar U1-U4 sin riesgo real. |
 | ❌ | HITO-E candidata 1 | DonchianBreakoutStrategy (4h BTCUSDT) — descartada por Fase 0 | — | Backtest con lookback 20: Sharpe -1.742, win 24%. Backtest con lookback 126: Sharpe -2.623, win 13%. Falla M1 y M2 en ambas configuraciones. Ver ADR-033. |
-| 🔄 | HITO-E | IntradayMomentumStrategy (30m, ETH+BNB) — backtest pendiente | Hito C | M4 pasado: ETH +0.645, BNB +0.691. Implementación commiteada 2026-06-08. Ver ADR-034. |
+| ❌ | HITO-E candidata 2 | IntradayMomentumStrategy (30m, ETH) — descartada por Fase 0 | — | M4 pasado (ETH +0.645, BNB +0.691) pero backtest OOS 2025-2026 falla M1 y M2: Sharpe -3.28, Win 36%, Expectancy -0.304. Edge arbitrado por institucionales en 2025. Ver ADR-034. |
 | ⬜ | HITO-F | Strategy Scaffolder | Hito E | Comando/script que genera esqueleto de estrategia nueva: clase `IStrategy` + entrada JSON + tests de referencia + tests de comportamiento. Solo después de haber hecho dos estrategias manuales. |
 | ⬜ | HITO-G | Walk-Forward Analysis + Monte Carlo + Métricas | Hito F | Pipeline reproducible de validación: walk-forward, Monte Carlo de curva de equity, métricas estándar institucionales (Sharpe, Sortino, Calmar, MAR, profit factor, expectancy, recovery factor), estratificadas por régimen. **Puerta de validación**: ninguna estrategia entra a Hito D sin walk-forward aprobado acá. |
 | ⬜ | HITO-H | Optimización de Hiperparámetros | Hito G | Grid search / bayesiana con purged k-fold cross-validation (López de Prado) para evitar leakage temporal. El rango de búsqueda y el criterio los define el operador. |
