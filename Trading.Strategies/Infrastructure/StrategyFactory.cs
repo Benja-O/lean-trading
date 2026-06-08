@@ -11,9 +11,7 @@ namespace Trading.Strategies.Infrastructure
             return strategyName?.ToLower() switch
             {
                 "emacrossstrategy" or "emacross" => new EmaCrossStrategy(),
-
-                // Agregá nuevas estrategias aquí:
-                // "rsistrategy" or "rsi" => new RsiStrategy(),
+                "donchianbreakoutstrategy" or "donchianbreakout" => new DonchianBreakoutStrategy(),
 
                 null or "" => throw new ArgumentNullException(nameof(strategyName),
                     "El nombre de la estrategia no puede ser nulo o vacío."),
