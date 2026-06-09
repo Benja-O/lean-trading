@@ -80,8 +80,9 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 │   M4 OK pero OOS falla: Sharpe -3.28, Win 36%. ADR-034.     │
 │ Candidata 3: BollingerBandsStrategy (4h, multi-activo) ❌     │
 │   M4 rechazado: 5/9 configs pasan (55.6%). ETH sin edge.      │
-│ Candidata 4: próxima — opciones: RSI mean-reversion,          │
-│   ATR squeeze, BTC→ETH lead-lag                               │
+│ Candidata 4: H3 Lead-lag BTC→ETH/BNB (1h) ❌                  │
+│   M4 rechazado: 0/6 configs, win rate ~47%, lag ya arbitrado. │
+│ Candidata 5: próxima — H1 RSI Mean Reversion condicionado HMM │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
