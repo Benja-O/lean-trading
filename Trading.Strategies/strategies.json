@@ -19,6 +19,32 @@
           "RiskPerTradePercentage": 2.0,
           "MaxBars": 3,
           "CombineWithTimeExit": true
+        },
+        {
+          "StrategyName": "AtrCompressionBreakoutStrategy",
+          "FileModelName": "",
+          "Symbol": "ETHUSDT",
+          "StopTakeMode": "Percentage",
+          "StopLossPercentage": 2.0,
+          "TakeProfitPercentage": 4.0,
+          "StopLossAtrMultiplier": 0,
+          "TakeProfitAtrMultiplier": 0,
+          "RiskPerTradePercentage": 2.0,
+          "MaxBars": 3,
+          "CombineWithTimeExit": true
+        },
+        {
+          "StrategyName": "AtrCompressionBreakoutStrategy",
+          "FileModelName": "",
+          "Symbol": "BNBUSDT",
+          "StopTakeMode": "Percentage",
+          "StopLossPercentage": 2.0,
+          "TakeProfitPercentage": 4.0,
+          "StopLossAtrMultiplier": 0,
+          "TakeProfitAtrMultiplier": 0,
+          "RiskPerTradePercentage": 2.0,
+          "MaxBars": 3,
+          "CombineWithTimeExit": true
         }
       ]
     },
