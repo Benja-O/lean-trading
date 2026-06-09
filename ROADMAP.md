@@ -79,7 +79,12 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 │   M4 rechazado: 0/18 configs. Win rate OK (55-69%) pero Sharpe│
 │   negativo — magnitud de pérdidas supera ganancias. Señal muy  │
 │   infrecuente (3 trades/año en RSI<25+Squeeze).                │
-│ Candidata 6: próxima — H2 ATR Squeeze (última opción)          │
+│ Candidata 6: FRP — Funding Rate Positioning (diario) ❌        │
+│   M4 rechazado: ETH 0/54 configs. Mecanismo intraday, no diario│
+│ Candidata 7: H2 ATR Compression Breakout (4h) ✅ M4 PASADO    │
+│   BTC 6/9, ETH 5/9, BNB 7/9. hold=3 barras (12h) cross-asset.│
+│   Implementado: AtrCompressionBreakoutStrategy.cs. Pendiente:  │
+│   backtest completo con SL/TP en QC.                           │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -240,6 +245,7 @@ dado que la estrategia se ha validado en 15m, 1h y 4h.
 | ✅ | HITO-C | Paper trading (validación operativa del sistema) | Bloque 3 ✅ | **Completado 2026-06-09.** Primer trade 2026-06-09T00:30 UTC (BTCUSDT 15m), posición cerrada 04:36 UTC. Ciclo completo U1→U4 validado. Ver historial completado. |
 | ❌ | HITO-E candidata 1 | DonchianBreakoutStrategy (4h BTCUSDT) — descartada por Fase 0 | — | Backtest con lookback 20: Sharpe -1.742, win 24%. Backtest con lookback 126: Sharpe -2.623, win 13%. Falla M1 y M2 en ambas configuraciones. Ver ADR-033. |
 | ❌ | HITO-E candidata 2 | IntradayMomentumStrategy (30m, ETH) — descartada por Fase 0 | — | M4 pasado (ETH +0.645, BNB +0.691) pero backtest OOS 2025-2026 falla M1 y M2: Sharpe -3.28, Win 36%, Expectancy -0.304. Edge arbitrado por institucionales en 2025. Ver ADR-034. |
+| 🔄 | HITO-E candidata 7 | AtrCompressionBreakoutStrategy (4h, BTC) — M4 PASADO | — | BTC 6/9, ETH 5/9, BNB 7/9 configs Sharpe ≥ 0.5. Parámetros: ATR(14)<P20 rolling 100b, price lookback 10b, hold 3b (12h), bidireccional. Implementado en C#. Pendiente: backtest QC con SL/TP. |
 | ⬜ | HITO-F | Strategy Scaffolder | Hito E | Comando/script que genera esqueleto de estrategia nueva: clase `IStrategy` + entrada JSON + tests de referencia + tests de comportamiento. Solo después de haber hecho dos estrategias manuales. |
 | ⬜ | HITO-G | Walk-Forward Analysis + Monte Carlo + Métricas | Hito F | Pipeline reproducible de validación: walk-forward, Monte Carlo de curva de equity, métricas estándar institucionales (Sharpe, Sortino, Calmar, MAR, profit factor, expectancy, recovery factor), estratificadas por régimen. **Puerta de validación**: ninguna estrategia entra a Hito D sin walk-forward aprobado acá. |
 | ⬜ | HITO-H | Optimización de Hiperparámetros | Hito G | Grid search / bayesiana con purged k-fold cross-validation (López de Prado) para evitar leakage temporal. El rango de búsqueda y el criterio los define el operador. |

@@ -3,25 +3,25 @@
     "1m":  { "Strategies": [] },
     "5m":  { "Strategies": [] },
     "15m": { "Strategies": [] },
-    "30m": {
+    "30m": { "Strategies": [] },
+    "1h":  { "Strategies": [] },
+    "4h":  {
       "Strategies": [
         {
-          "StrategyName": "IntradayMomentumStrategy",
+          "StrategyName": "AtrCompressionBreakoutStrategy",
           "FileModelName": "",
-          "Symbol": "ETHUSDT",
+          "Symbol": "BTCUSDT",
           "StopTakeMode": "Percentage",
           "StopLossPercentage": 2.0,
           "TakeProfitPercentage": 4.0,
           "StopLossAtrMultiplier": 0,
           "TakeProfitAtrMultiplier": 0,
           "RiskPerTradePercentage": 2.0,
-          "MaxBars": 1,
+          "MaxBars": 3,
           "CombineWithTimeExit": true
         }
       ]
     },
-    "1h":  { "Strategies": [] },
-    "4h":  { "Strategies": [] },
     "1d":  { "Strategies": [] }
   }
 }

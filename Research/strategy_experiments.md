@@ -10,6 +10,7 @@ Registro de hipótesis evaluadas por Fase 0. Fuente de verdad para evitar re-exp
 | E | H3 — Lead-lag BTC→ETH/BNB | 1h | BTC (señal), ETH, BNB | ❌ 0/6 configs (0%) | N/A (M4 rechazado) | ~47% | ❌ | Win rate sistemáticamente < 50% en todos los thresholds (0.5/1.0/1.5%) y ambos activos. Correlación BTC-ETH/BNB ocurre en la misma barra (simultaneidad), no con lag de 1 barra. Edge ya arbitrado. |
 | E | H1 — RSI(14) + HMM Squeeze | 4h | BTC, ETH, BNB | ❌ 0/18 configs (0%) | N/A (M4 rechazado) | 55-69% | ❌ | Win rate alto (55-69%) pero Sharpe negativo — retornos perdedores superan en magnitud a los ganadores. Muy pocas señales (RSI<25 en Squeeze: 12-19 trades/5 años = insuficiente poder estadístico). Sin edge explotable. |
 | E | Funding Rate Positioning (FRP) | Diario | BTC, ETH, SOL | ❌ Bidireccional: BTC 8/54, ETH 0/54, SOL 11/54. SHORT-only: BTC 0/54, ETH 3/54, SOL 5/54 | N/A (M4 rechazado) | N/A | ❌ | Señal no generalizable cross-asset. BTC tiene edge en el lado LONG (crowded shorts → squeeze alcista), no en el SHORT. ETH resistente a cualquier señal de funding. El mecanismo existe pero opera en timeframes intraday, no diarios. |
+| E | H2 — ATR Compression Breakout | 4h | BTC, ETH, BNB | ✅ BTC 6/9, ETH 5/9, BNB 7/9 | Pendiente | ~48% | ✅ M4 PASADO | Edge real con hold=3-4 barras (12-16h). ATR(14) < P20 rolling 100 + breakout de rango 10 barras. Win rate ~48-50%: la ventaja viene de asimetría en magnitud, no en frecuencia de dirección. |
 
 ---
 
@@ -57,6 +58,20 @@ Registro de hipótesis evaluadas por Fase 0. Fuente de verdad para evitar re-exp
   - El retorno medio por trade es positivo en los thresholds más extremos pero la std es ~3-5x el mean → Sharpe inevitablemente bajo.
 - Clasificación de régimen: centroide más cercano en espacio de features HMM escaladas (replica exacta de FeatureExtractor.cs). BNB usa modelo BTC como proxy.
 - Script: `Research/m4_rsi_hmm_squeeze.py`
+
+### H2 — ATR Compression Breakout
+- Hipótesis: el mercado alterna entre fases de compresión (ATR bajo) y expansión. Un rompimiento de rango durante compresión predice un movimiento direccional significativo.
+- M4 Binance 4h 2020-2025 sobre BTC/ETH/BNB, grid: ATR<P25/P35, lookback=10/20b, hold=4/8b (8 configs):
+  - BTC: 1/8, ETH: 2/8. Gate falla. Diagnóstico: hold=8 destruye la señal.
+- Diagnóstico A: grid reducido hold=[2,3,4], ATR=[P15/P20/P25], lookback=10 (9 configs):
+  - BTC: 6/9 ✅, ETH: 5/9 ✅, BNB: 7/9 ✅ — Gate pasado.
+  - hold=3 (12h) pasa cross-asset sin excepción: BTC +0.565, ETH +0.703, BNB +0.984 (Sharpe).
+  - hold=4 (16h) también pasa: BTC +0.822, ETH +0.659, BNB +0.670.
+  - hold=2 (8h) falla — edge no se materializó todavía.
+- Parámetros nominales: ATR<P20, lookback=10, hold=3 barras 4h (12h).
+- Implementación: `AtrCompressionBreakoutStrategy.cs`. BTCUSDT 4h, MaxBars=3, CombineWithTimeExit=true.
+- Scripts: `Research/m4_atr_compression_breakout.py` (grid original), diagnóstico A inline en sesión.
+- Próximo paso: backtest completo con SL/TP en sistema QC.
 
 ### Funding Rate Positioning (FRP)
 - Hipótesis: z-score del funding rate (ventanas 14/30/60d) en extremo → mercado overcrowded → señal contraria.
