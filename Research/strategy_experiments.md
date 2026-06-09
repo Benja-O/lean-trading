@@ -9,6 +9,7 @@ Registro de hipótesis evaluadas por Fase 0. Fuente de verdad para evitar re-exp
 | E | BollingerBandsStrategy | 4h | BTC, ETH, BNB | ❌ 5/9 configs (55.6%) | N/A (M4 rechazado) | N/A | ❌ | M4 falla: BTC OK en oversold=1,4; ETH falla todas; BNB OK todas. Inconsistencia cross-asset. |
 | E | H3 — Lead-lag BTC→ETH/BNB | 1h | BTC (señal), ETH, BNB | ❌ 0/6 configs (0%) | N/A (M4 rechazado) | ~47% | ❌ | Win rate sistemáticamente < 50% en todos los thresholds (0.5/1.0/1.5%) y ambos activos. Correlación BTC-ETH/BNB ocurre en la misma barra (simultaneidad), no con lag de 1 barra. Edge ya arbitrado. |
 | E | H1 — RSI(14) + HMM Squeeze | 4h | BTC, ETH, BNB | ❌ 0/18 configs (0%) | N/A (M4 rechazado) | 55-69% | ❌ | Win rate alto (55-69%) pero Sharpe negativo — retornos perdedores superan en magnitud a los ganadores. Muy pocas señales (RSI<25 en Squeeze: 12-19 trades/5 años = insuficiente poder estadístico). Sin edge explotable. |
+| E | Funding Rate Positioning (FRP) | Diario | BTC, ETH, SOL | ❌ Bidireccional: BTC 8/54, ETH 0/54, SOL 11/54. SHORT-only: BTC 0/54, ETH 3/54, SOL 5/54 | N/A (M4 rechazado) | N/A | ❌ | Señal no generalizable cross-asset. BTC tiene edge en el lado LONG (crowded shorts → squeeze alcista), no en el SHORT. ETH resistente a cualquier señal de funding. El mecanismo existe pero opera en timeframes intraday, no diarios. |
 
 ---
 
@@ -56,3 +57,14 @@ Registro de hipótesis evaluadas por Fase 0. Fuente de verdad para evitar re-exp
   - El retorno medio por trade es positivo en los thresholds más extremos pero la std es ~3-5x el mean → Sharpe inevitablemente bajo.
 - Clasificación de régimen: centroide más cercano en espacio de features HMM escaladas (replica exacta de FeatureExtractor.cs). BNB usa modelo BTC como proxy.
 - Script: `Research/m4_rsi_hmm_squeeze.py`
+
+### Funding Rate Positioning (FRP)
+- Hipótesis: z-score del funding rate (ventanas 14/30/60d) en extremo → mercado overcrowded → señal contraria.
+- Test 1 bidireccional (BTC/ETH/SOL, diario, 2020-2025, 54 configs): BTC 8/54, ETH 0/54, SOL 11/54. Gate: 27/54 en 2/3 activos — FAIL.
+- Test 2 SHORT-only (crowded longs → short): BTC 0/54, ETH 3/54, SOL 5/54. Peor que bidireccional — FAIL.
+- Hallazgo clave: el edge en BTC estaba en el lado LONG (funding muy negativo → short squeeze → precio sube), no en el SHORT como postulaba la teoría.
+- El filtro de tendencia (MA) es condición necesaria pero no suficiente: sin MA, todas las configs son negativas.
+- Ventana de 60d sistemáticamente peor: demasiado lenta para capturar eventos de crowding.
+- ETH sin señal en ninguna dirección, posiblemente por cambio estructural post-Merge (2022).
+- Diagnóstico: el mecanismo de desapalancamiento existe pero opera en timeframes sub-diarios (horas), donde los datos históricos de order book/funding granular no están disponibles sin costo.
+- Script: `Research/m4_funding_rate_positioning.py`
