@@ -82,7 +82,11 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 │   M4 rechazado: 5/9 configs pasan (55.6%). ETH sin edge.      │
 │ Candidata 4: H3 Lead-lag BTC→ETH/BNB (1h) ❌                  │
 │   M4 rechazado: 0/6 configs, win rate ~47%, lag ya arbitrado. │
-│ Candidata 5: próxima — H1 RSI Mean Reversion condicionado HMM │
+│ Candidata 5: H1 RSI(14)+HMM Squeeze (4h) ❌                   │
+│   M4 rechazado: 0/18 configs. Win rate OK (55-69%) pero Sharpe│
+│   negativo — magnitud de pérdidas supera ganancias. Señal muy  │
+│   infrecuente (3 trades/año en RSI<25+Squeeze).                │
+│ Candidata 6: próxima — H2 ATR Squeeze (última opción)          │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐

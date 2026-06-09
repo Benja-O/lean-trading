@@ -8,6 +8,7 @@ Registro de hipótesis evaluadas por Fase 0. Fuente de verdad para evitar re-exp
 | E | IntradayMomentumStrategy | 30m | ETH, BNB, BTC | ✅ ETH +0.645, BNB +0.691 / ❌ BTC -0.204 | -3.28 (ETH OOS 2025) | 36% | ❌ | Edge arbitrado por institucionales en 2025. M4 validó 2020-2024; OOS falla M1+M2. |
 | E | BollingerBandsStrategy | 4h | BTC, ETH, BNB | ❌ 5/9 configs (55.6%) | N/A (M4 rechazado) | N/A | ❌ | M4 falla: BTC OK en oversold=1,4; ETH falla todas; BNB OK todas. Inconsistencia cross-asset. |
 | E | H3 — Lead-lag BTC→ETH/BNB | 1h | BTC (señal), ETH, BNB | ❌ 0/6 configs (0%) | N/A (M4 rechazado) | ~47% | ❌ | Win rate sistemáticamente < 50% en todos los thresholds (0.5/1.0/1.5%) y ambos activos. Correlación BTC-ETH/BNB ocurre en la misma barra (simultaneidad), no con lag de 1 barra. Edge ya arbitrado. |
+| E | H1 — RSI(14) + HMM Squeeze | 4h | BTC, ETH, BNB | ❌ 0/18 configs (0%) | N/A (M4 rechazado) | 55-69% | ❌ | Win rate alto (55-69%) pero Sharpe negativo — retornos perdedores superan en magnitud a los ganadores. Muy pocas señales (RSI<25 en Squeeze: 12-19 trades/5 años = insuficiente poder estadístico). Sin edge explotable. |
 
 ---
 
@@ -45,3 +46,13 @@ Registro de hipótesis evaluadas por Fase 0. Fuente de verdad para evitar re-exp
 - Diagnóstico: la correlación BTC-ETH/BNB es contemporánea (misma barra 1h), no hay lag de 1 barra explotable.
   El efecto lead-lag documentado en literatura existe en timeframes de segundos/minutos (microestructura), no en 1h.
 - Script: `Research/m4_lead_lag_btc_eth.py`
+
+### H1 — RSI Mean Reversion condicionado por HMM Squeeze
+- Hipótesis: RSI(14) < umbral en régimen HMM Squeeze (baja vol, sin trend) filtra señales falsas de oversold durante downtrends fuertes.
+- M4 Binance 4h 2020-2025 sobre BTC/ETH/BNB, thresholds RSI 25/30/35, hold 8/12 barras:
+  - Win rate alto: 55-69% en casi todos los configs. El condicionamiento HMM sí filtra algo.
+  - Sharpe negativo en todos los 18 configs (0/18). Mejor resultado: ETH RSI<25 hold=8b → Sharpe +0.343 con 19 trades.
+  - Problema estructural: RSI<25 en Squeeze produce 12-19 trades en 5 años (~3/año). Insuficiente frecuencia para compensar la varianza de los retornos por trade.
+  - El retorno medio por trade es positivo en los thresholds más extremos pero la std es ~3-5x el mean → Sharpe inevitablemente bajo.
+- Clasificación de régimen: centroide más cercano en espacio de features HMM escaladas (replica exacta de FeatureExtractor.cs). BNB usa modelo BTC como proxy.
+- Script: `Research/m4_rsi_hmm_squeeze.py`
