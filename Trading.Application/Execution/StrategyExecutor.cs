@@ -24,6 +24,18 @@ namespace Trading.Application.Execution
         public IOrderHandle StopLossOrderHandle { get; set; }
         public IOrderHandle TakeProfitOrderHandle { get; set; }
 
+        /// <summary>
+        /// Precio de SL calculado en el momento de la señal (modo ATR).
+        /// Consumido y limpiado por OrderLifecycleService al procesar el fill de entrada.
+        /// </summary>
+        public decimal? PendingStopLossPrice { get; set; }
+
+        /// <summary>
+        /// Precio de TP calculado en el momento de la señal (modo ATR).
+        /// Consumido y limpiado por OrderLifecycleService al procesar el fill de entrada.
+        /// </summary>
+        public decimal? PendingTakeProfitPrice { get; set; }
+
         public int BarsHeld { get; private set; }
 
         /// <summary>
@@ -62,6 +74,8 @@ namespace Trading.Application.Execution
         {
             BarsHeld = 0;
             ResetOrderHandles();
+            PendingStopLossPrice = null;
+            PendingTakeProfitPrice = null;
         }
 
         public void ResetOrderHandles()

@@ -184,21 +184,32 @@ namespace Trading.Application.Execution
 
             decimal entryPrice = lifecycleEvent.FillPrice;
 
-            decimal stopLossFraction = strategyExecutor.RiskParameters.StopLossFraction;
-            decimal takeProfitFraction = strategyExecutor.RiskParameters.TakeProfitFraction;
-
             decimal stopLossPrice;
             decimal takeProfitPrice;
 
-            if (fillQuantity > 0)
+            if (strategyExecutor.PendingStopLossPrice.HasValue && strategyExecutor.PendingTakeProfitPrice.HasValue)
             {
-                stopLossPrice = _priceRounder.Round(instrumentId, entryPrice * (1 - stopLossFraction));
-                takeProfitPrice = _priceRounder.Round(instrumentId, entryPrice * (1 + takeProfitFraction));
+                // Modo ATR: precios calculados al momento de la señal por BarProcessingService.
+                stopLossPrice = _priceRounder.Round(instrumentId, strategyExecutor.PendingStopLossPrice.Value);
+                takeProfitPrice = _priceRounder.Round(instrumentId, strategyExecutor.PendingTakeProfitPrice.Value);
+                strategyExecutor.PendingStopLossPrice = null;
+                strategyExecutor.PendingTakeProfitPrice = null;
             }
             else
             {
-                stopLossPrice = _priceRounder.Round(instrumentId, entryPrice * (1 + stopLossFraction));
-                takeProfitPrice = _priceRounder.Round(instrumentId, entryPrice * (1 - takeProfitFraction));
+                // Modo Percentage: fracción fija del precio de fill.
+                decimal stopLossFraction = strategyExecutor.RiskParameters.StopLossFraction;
+                decimal takeProfitFraction = strategyExecutor.RiskParameters.TakeProfitFraction;
+                if (fillQuantity > 0)
+                {
+                    stopLossPrice = _priceRounder.Round(instrumentId, entryPrice * (1 - stopLossFraction));
+                    takeProfitPrice = _priceRounder.Round(instrumentId, entryPrice * (1 + takeProfitFraction));
+                }
+                else
+                {
+                    stopLossPrice = _priceRounder.Round(instrumentId, entryPrice * (1 + stopLossFraction));
+                    takeProfitPrice = _priceRounder.Round(instrumentId, entryPrice * (1 - takeProfitFraction));
+                }
             }
 
             strategyExecutor.StopLossOrderHandle = _orderRouter.SubmitStopMarketOrder(

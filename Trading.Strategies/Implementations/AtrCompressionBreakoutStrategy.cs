@@ -20,7 +20,7 @@ namespace Trading.Strategies.Implementations
     /// Validado en M4 (Binance 4h 2020-2025): 6/9 configs BTC, 5/9 ETH, 7/9 BNB.
     /// Configuración nominal: ATR&lt;P20, lookback=10, hold=3 barras.
     /// </summary>
-    public class AtrCompressionBreakoutStrategy : IStrategy
+    public class AtrCompressionBreakoutStrategy : IStrategy, IAtrProvider
     {
         private class SymbolState
         {
@@ -87,6 +87,13 @@ namespace Trading.Strategies.Implementations
 
             state.PriceHistory.Add(currentClose);
             return signal;
+        }
+
+        public decimal GetLastAtr(string ticker)
+        {
+            if (!_stateBySymbol.TryGetValue(ticker, out var state) || !state.Atr.IsReady)
+                return 0m;
+            return (decimal)state.Atr.Current.Value;
         }
 
         private static decimal ComputePercentile(RollingWindow<decimal> window, int percentile)

@@ -35,8 +35,8 @@ namespace Trading.Application.Tests.Strategies
             new(id, close, close + spread, close - spread, close, 0m, T0.AddHours(barIndex));
 
         /// <summary>
-        /// Alimenta la estrategia con `count` barras de rango lateral (close constante, spread bajo)
-        /// para llenar los indicadores sin disparar señales. Retorna el índice de barra siguiente.
+        /// Alimenta la estrategia con `count` barras de rango lateral (close constante, spread fijo).
+        /// Retorna el índice de barra siguiente.
         /// </summary>
         private static int WarmUp(AtrCompressionBreakoutStrategy strategy, InstrumentId id,
             int count, decimal close = 100m, int startIndex = 0, decimal spread = 1m)
@@ -44,6 +44,21 @@ namespace Trading.Application.Tests.Strategies
             for (int i = 0; i < count; i++)
                 strategy.EvaluateSignal(BuildBar(id, close, startIndex + i, spread));
             return startIndex + count;
+        }
+
+        /// <summary>
+        /// Crea un estado de compresión real usando dos fases:
+        /// 1. spread alto (10) → AtrHistory se llena con ATR ≈ 20 (alta volatilidad).
+        /// 2. spread bajo (0.1) → ATR decae a ≈ 0.7, muy por debajo del P20 del historial.
+        ///
+        /// Tras esta llamada: ATR actual ≈ 0.7 &lt; P20 ≈ 2.2 → compresión activa.
+        /// PriceHistory: últimas 10 barras con close=<paramref name="close"/>.
+        /// </summary>
+        private static int WarmUpToCompression(AtrCompressionBreakoutStrategy strategy, InstrumentId id,
+            decimal close = 100m, int startIndex = 0)
+        {
+            int nextBar = WarmUp(strategy, id, 200, close, startIndex, spread: 10m);
+            return WarmUp(strategy, id, 50, close, nextBar, spread: 0.1m);
         }
 
         [Fact]
@@ -65,15 +80,13 @@ namespace Trading.Application.Tests.Strategies
         {
             var strategy = new AtrCompressionBreakoutStrategy();
 
-            // Fase 1: 200 barras de lateral con spread=1 → ATR ≈ 1 (bajo).
-            // Estas barras llenan el historial ATR con valores bajos → P20 ≈ 1.
-            // También llenan el historial de precios con close=100.
-            int nextBar = WarmUp(strategy, BtcUsdt, 200, close: 100m, spread: 1m);
+            // WarmUpToCompression: fase alta (spread=10 → ATR≈20) + fase baja (spread=0.1 → ATR≈0.7).
+            // Resultado: AtrHistory con 50 valores ≈ 20 y 50 valores decrecientes; P20 ≈ 2.2.
+            // ATR actual ≈ 0.7 < P20 → compresión activa. PriceHistory: 10 barras con close=100.
+            int nextBar = WarmUpToCompression(strategy, BtcUsdt, close: 100m);
 
-            // Fase 2: disparar un rompimiento alcista MIENTRAS el ATR sigue bajo.
-            // El cierre de 110 > max(PriceHistory=100) con spread=1 → ATR ≈ 1 < P20 del historial bajo.
-            var breakoutBar = BuildBar(BtcUsdt, close: 110m, barIndex: nextBar, spread: 1m);
-            var signal = strategy.EvaluateSignal(breakoutBar);
+            // Rompimiento alcista: close=110 > max(PriceHistory=100).
+            var signal = strategy.EvaluateSignal(BuildBar(BtcUsdt, close: 110m, barIndex: nextBar, spread: 0.1m));
 
             signal.Should().Be(SignalDirection.Long,
                 because: "Con ATR comprimido y cierre que supera el máximo reciente, debe emitir Long.");
@@ -84,11 +97,10 @@ namespace Trading.Application.Tests.Strategies
         {
             var strategy = new AtrCompressionBreakoutStrategy();
 
-            int nextBar = WarmUp(strategy, BtcUsdt, 200, close: 100m, spread: 1m);
+            int nextBar = WarmUpToCompression(strategy, BtcUsdt, close: 100m);
 
-            // Rompimiento bajista: cierre de 90 < min(PriceHistory=100).
-            var breakoutBar = BuildBar(BtcUsdt, close: 90m, barIndex: nextBar, spread: 1m);
-            var signal = strategy.EvaluateSignal(breakoutBar);
+            // Rompimiento bajista: close=90 < min(PriceHistory=100).
+            var signal = strategy.EvaluateSignal(BuildBar(BtcUsdt, close: 90m, barIndex: nextBar, spread: 0.1m));
 
             signal.Should().Be(SignalDirection.Short,
                 because: "Con ATR comprimido y cierre por debajo del mínimo reciente, debe emitir Short.");
@@ -127,23 +139,26 @@ namespace Trading.Application.Tests.Strategies
                 because: "En compresión pero sin rompimiento de rango, no debe emitir señal.");
         }
 
+
         [Fact]
         public void EvaluateSignal_MultipleSymbols_KeepsIndependentState()
         {
             var strategy = new AtrCompressionBreakoutStrategy();
 
-            // BTC: warm-up con spread bajo.
-            int btcBar = WarmUp(strategy, BtcUsdt, 200, close: 100m, spread: 1m);
-
-            // ETH: warm-up con spread ALTO → ATR alto → no compresión.
+            // ETH: warm-up con spread alto → ATR alto ≈ P20 → sin compresión.
+            // Se hace primero para garantizar que el estado ETH no interfiere con BTC.
             int ethBar = WarmUp(strategy, EthUsdt, 200, close: 3000m, spread: 100m);
 
-            // BTC: rompimiento alcista claro en compresión → Long.
-            var btcSignal = strategy.EvaluateSignal(BuildBar(BtcUsdt, 120m, btcBar, spread: 1m));
+            // BTC: dos fases → compresión activa (ATR ≈ 0.7 < P20 ≈ 2.2).
+            int btcBar = WarmUpToCompression(strategy, BtcUsdt, close: 100m);
+
+            // BTC: rompimiento alcista → Long.
+            // close=110 produce TR=10.1 con prev_close=100; ATR ≈ 1.36 < P20 ≈ 2.05 → compresión activa.
+            var btcSignal = strategy.EvaluateSignal(BuildBar(BtcUsdt, 110m, btcBar, spread: 0.1m));
             btcSignal.Should().Be(SignalDirection.Long,
                 because: "BTC con ATR comprimido y breakout debe emitir Long.");
 
-            // ETH: rompimiento de precio pero ATR alto → Flat.
+            // ETH: rompimiento de precio pero sin compresión ATR → Flat.
             var ethSignal = strategy.EvaluateSignal(BuildBar(EthUsdt, 4000m, ethBar, spread: 100m));
             ethSignal.Should().Be(SignalDirection.Flat,
                 because: "ETH con ATR alto no debe emitir señal, incluso con rompimiento de precio.");

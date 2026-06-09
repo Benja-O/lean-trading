@@ -8,6 +8,7 @@ using Trading.Domain.Events;
 using Trading.Domain.Models;
 using Trading.Domain.ValueObjects;
 
+
 namespace Trading.Application.Execution
 {
     /// <summary>
@@ -158,6 +159,25 @@ namespace Trading.Application.Execution
                 decimal signedQuantity = signalDirection == SignalDirection.Long
                     ? quantityMagnitude
                     : -quantityMagnitude;
+
+                // Modo ATR: capturar precios de SL/TP al momento de la señal.
+                // El ATR cambia barra a barra; si esperamos al fill (barra siguiente) perdemos el valor correcto.
+                if (strategyExecutor.Definition.StopTakeMode == "Atr" &&
+                    strategyExecutor.Strategy is IAtrProvider atrProvider)
+                {
+                    decimal atr = atrProvider.GetLastAtr(instrumentId.Ticker);
+                    if (atr > 0m)
+                    {
+                        decimal slDist = strategyExecutor.Definition.StopLossAtrMultiplier * atr;
+                        decimal tpDist = strategyExecutor.Definition.TakeProfitAtrMultiplier * atr;
+                        strategyExecutor.PendingStopLossPrice = signalDirection == SignalDirection.Long
+                            ? marketBar.Close - slDist
+                            : marketBar.Close + slDist;
+                        strategyExecutor.PendingTakeProfitPrice = signalDirection == SignalDirection.Long
+                            ? marketBar.Close + tpDist
+                            : marketBar.Close - tpDist;
+                    }
+                }
 
                 strategyExecutor.EntryOrderHandle = _orderRouter.SubmitMarketOrder(
                     instrumentId, signedQuantity, OrderPurpose.Entry, strategyExecutor.ExecutorIdentifier);

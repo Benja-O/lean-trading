@@ -21,11 +21,25 @@ namespace Trading.Domain.Models
         public string StrategyName { get; set; }
         public string Symbol { get; set; }
 
+        /// <summary>
+        /// Modo de cálculo de SL/TP: "Percentage" (fracción fija del precio de entrada)
+        /// o "Atr" (múltiplo del ATR al momento de la señal).
+        /// Cuando es "Atr", StopLossPercentage y TakeProfitPercentage se usan solo para
+        /// el sizing (PositionSizer); el precio real de las órdenes se calcula con los multiplicadores ATR.
+        /// </summary>
+        public string StopTakeMode { get; set; } = "Percentage";
+
         /// <summary>Porcentaje de stop loss. Ejemplo: 3.0 representa 3%.</summary>
         public decimal StopLossPercentage { get; set; }
 
         /// <summary>Porcentaje de take profit. Ejemplo: 6.0 representa 6%.</summary>
         public decimal TakeProfitPercentage { get; set; }
+
+        /// <summary>Multiplicador de ATR para SL cuando StopTakeMode == "Atr". Ejemplo: 2.5.</summary>
+        public decimal StopLossAtrMultiplier { get; set; }
+
+        /// <summary>Multiplicador de ATR para TP cuando StopTakeMode == "Atr". Ejemplo: 3.5.</summary>
+        public decimal TakeProfitAtrMultiplier { get; set; }
 
         /// <summary>
         /// Porcentaje del portfolio arriesgado por trade. Ejemplo: 2.0 representa 2%.
