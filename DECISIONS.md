@@ -13,6 +13,7 @@
 
 | ADR | Título corto | Área |
 |---|---|---|
+| ADR-036 | ATR SL/TP mode: SL/TP basado en multiplicadores de ATR como alternativa al modo porcentaje | Arquitectura / Ejecución |
 | ADR-035 | AtrCompressionBreakoutStrategy: H2 Hito E — M4 pasado con diagnóstico de hold | Estrategias |
 | ADR-034 | IntradayMomentumStrategy: segunda estrategia manual (Hito E, candidata 2) | Estrategias |
 | ADR-033 | DonchianBreakoutStrategy: segunda estrategia manual (Hito E) | Estrategias |
@@ -46,6 +47,43 @@
 | ADR-003 | `OrderRegistry` vive en `Trading.Application` | Arquitectura |
 | ADR-002 | `RiskPerTradePercentage` falla loud si no está en `strategies.json` | Dominio |
 | ADR-001 | Desacople quirúrgico de QuantConnect: dominio Lean-free | Arquitectura |
+
+## ADR-036 — ATR SL/TP mode: SL/TP basado en multiplicadores de ATR
+**Fecha:** 2026-06-09
+**Estado:** Vigente
+**ADRs relacionados:** ADR-035 (AtrCompressionBreakoutStrategy), ADR-009 (bus de eventos)
+
+### Contexto
+
+H2 (AtrCompressionBreakoutStrategy) falló el backtest con Sharpe -0.922, DD 30.3%, kill switch 2025-03-19. Diagnóstico post-mortem: la señal tiene edge genuino (M4 pasado 6/9 BTC, 5/9 ETH, 7/9 BNB), pero el SL fijo de 2% es inadecuado para una estrategia de breakout de compresión de volatilidad. La distancia correcta del SL debe ser proporcional al ATR en el momento de la señal, no un porcentaje fijo del precio.
+
+### Decisión
+
+**Agregar soporte config-driven para SL/TP basado en multiplicadores de ATR**, sin modificar `IStrategy`. El modo se selecciona en `strategies.json` via `StopTakeMode: "Atr"`.
+
+Puntos clave de diseño:
+
+1. **Separación temporal señal / fill**: el ATR se captura en `BarProcessingService` al momento de la señal (barra actual), no al momento del fill (barra siguiente). Se almacena en `StrategyExecutor.PendingStopLossPrice` / `PendingTakeProfitPrice`.
+
+2. **Sin cambio a IStrategy**: la estrategia expone su ATR vía la interfaz opcional `IAtrProvider.GetLastAtr(ticker)`. `BarProcessingService` usa type check (`strategy is IAtrProvider`) para activar el modo ATR. Las estrategias que no implementen `IAtrProvider` siguen usando el modo porcentaje.
+
+3. **Compatibilidad con PositionSizer**: `StopLossPercentage` se mantiene en el JSON como aproximación estática para el sizing (PositionSizer no sabe de ATR). Con 2.5×ATR ≈ 3.5% para BTC 4h, la aproximación es razonable.
+
+4. **StopLossPercentage no debe ser 0 en modo ATR**: si es 0, `RiskParameters.FromPercentages` lanzaría una excepción (invariante). Se mantiene el valor como placeholder para el sizing.
+
+### Alternativas descartadas
+
+- **Cambiar IStrategy**: requeriría cambiar el contrato de todas las estrategias; over-engineering para una feature que quizás solo use una estrategia.
+- **Computar ATR en el fill (bar+1)**: el ATR cambia entre la señal y el fill. Usando el ATR de la barra del fill se rompería la lógica de "colocar SL a N×ATR del precio de señal".
+- **SL dinámico por trailing stop**: out of scope para Hito E; requeriría gestión activa durante la posición.
+
+### Consecuencias
+
+- Un nuevo `StopTakeMode` en `StrategyDefinition` rompe la config de estrategias que no incluyan el campo (serialización JSON nullable por default).
+- `PendingStopLossPrice` es nullable: si el ATR es 0 (indicador no ready) o la estrategia no implementa `IAtrProvider`, se usa el modo porcentaje como fallback.
+- El test de compresión del ATR tiene un artefacto: si el breakout bar tiene un gap grande (TR alto), el ATR se dispara y puede salir del rango de compresión. Esto es **comportamiento correcto** — una barra con gap extremo no debe clasificarse como breakout de compresión. Los tests usan breakouts moderados (10% vs 20%) para evitar este artefacto.
+
+---
 
 ## ADR-035 — AtrCompressionBreakoutStrategy: H2 Hito E — M4 pasado con diagnóstico de hold
 **Fecha:** 2026-06-09
