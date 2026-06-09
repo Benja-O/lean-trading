@@ -10,7 +10,8 @@ Registro de hipótesis evaluadas por Fase 0. Fuente de verdad para evitar re-exp
 | E | H3 — Lead-lag BTC→ETH/BNB | 1h | BTC (señal), ETH, BNB | ❌ 0/6 configs (0%) | N/A (M4 rechazado) | ~47% | ❌ | Win rate sistemáticamente < 50% en todos los thresholds (0.5/1.0/1.5%) y ambos activos. Correlación BTC-ETH/BNB ocurre en la misma barra (simultaneidad), no con lag de 1 barra. Edge ya arbitrado. |
 | E | H1 — RSI(14) + HMM Squeeze | 4h | BTC, ETH, BNB | ❌ 0/18 configs (0%) | N/A (M4 rechazado) | 55-69% | ❌ | Win rate alto (55-69%) pero Sharpe negativo — retornos perdedores superan en magnitud a los ganadores. Muy pocas señales (RSI<25 en Squeeze: 12-19 trades/5 años = insuficiente poder estadístico). Sin edge explotable. |
 | E | Funding Rate Positioning (FRP) | Diario | BTC, ETH, SOL | ❌ Bidireccional: BTC 8/54, ETH 0/54, SOL 11/54. SHORT-only: BTC 0/54, ETH 3/54, SOL 5/54 | N/A (M4 rechazado) | N/A | ❌ | Señal no generalizable cross-asset. BTC tiene edge en el lado LONG (crowded shorts → squeeze alcista), no en el SHORT. ETH resistente a cualquier señal de funding. El mecanismo existe pero opera en timeframes intraday, no diarios. |
-| E | H2 — ATR Compression Breakout | 4h | BTC, ETH, BNB | ✅ BTC 6/9, ETH 5/9, BNB 7/9 | Pendiente | ~48% | ✅ M4 PASADO | Edge real con hold=3-4 barras (12-16h). ATR(14) < P20 rolling 100 + breakout de rango 10 barras. Win rate ~48-50%: la ventaja viene de asimetría en magnitud, no en frecuencia de dirección. |
+| E | H2 — ATR Compression Breakout | 4h | BTC, ETH, BNB | ✅ BTC 6/9, ETH 5/9, BNB 7/9 | -0.922 (BTC, Sharpe) | 37% | ❌ Backtest fallido | M4 pasado. Backtest con SL 2%: Sharpe -0.922, Win 37%, DD 30.3% (kill switch disparó 2025-03-19). Causa: SL 2% fijo incompatible con hold 12h — volatilidad intraday corta posiciones antes de que el edge se materialice. El edge de la señal existe; el risk management la destruye. Ver ADR-035. |
+| E | ATR Compression + Taker Buy Ratio | 1h | BTC, ETH, BNB | ❌ BTC 0/54, ETH 9/54, BNB 0/54 | N/A (M4 rechazado) | N/A | ❌ | TBR no añade edge cross-asset en 1h. ETH tiene señal parcial (TBR=0.55, hold=4-6b, Sharpe ~0.8) pero estadísticamente débil (30-40 trades/4 años). BTC y BNB: 0 configs. El filtro TBR estrecha tanto la señal que no hay frecuencia suficiente. Script: `Research/m4_atr_tbr.py`. |
 
 ---
 
@@ -71,7 +72,20 @@ Registro de hipótesis evaluadas por Fase 0. Fuente de verdad para evitar re-exp
 - Parámetros nominales: ATR<P20, lookback=10, hold=3 barras 4h (12h).
 - Implementación: `AtrCompressionBreakoutStrategy.cs`. BTCUSDT 4h, MaxBars=3, CombineWithTimeExit=true.
 - Scripts: `Research/m4_atr_compression_breakout.py` (grid original), diagnóstico A inline en sesión.
-- Próximo paso: backtest completo con SL/TP en sistema QC.
+- **Backtest QC (2023-2025, BTC/ETH/BNB, SL 2%, TP 4%):**
+  - Sharpe: -0.922. Win Rate: 37%. DD máximo: 30.3% (kill switch disparó 2025-03-19).
+  - Causa raíz: SL 2% fijo se activa sistemáticamente durante la volatilidad intraday de las 12h de hold. El edge de la señal (asimetría de retornos en magnitud) requiere que la posición sobreviva la volatilidad del recorrido — el SL % fijo la mata antes.
+  - Hallazgo clave: el edge existe en la señal (M4 positivo), el problema está en el risk management. Un SL basado en ATR (dinámico, proporcional a la volatilidad del momento de entrada) podría preservar el edge. Ver ADR-035.
+
+### ATR Compression + Taker Buy Ratio (1h)
+- Hipótesis: el TBR (taker_buy_base_vol / total_vol) confirma la direccionalidad del breakout, filtrando fakeouts donde el precio rompe pero el flujo agresivo no acompaña.
+- M4 Binance 1h 2021-2024 sobre BTC/ETH/BNB, grid 54 configs (3 ATR × 2 lookback × 3 hold × 3 TBR_thr):
+  - BTC: 0/54 (0%). Mejor: P25/look=10b/hold=3b/TBR=0.55 → Sharpe +0.386.
+  - ETH: 9/54 (16.7%). Mejores: P15/look=10b/hold=4b/TBR=0.55 → Sharpe +0.829, T=36.
+  - BNB: 0/54 (0%). "Mejores" con TBR=0.58 tienen solo 11 trades — ruido estadístico.
+- Diagnóstico: TBR_thr bajo (0.52) → muchas señales pero Sharpe negativo en BTC/BNB. TBR_thr alto (0.55-0.58) → señales tan raras que no hay poder estadístico. El filtro TBR no añade valor cross-asset en 1h.
+- ETH tiene edge local pero los mejores configs tienen 30-40 trades/4 años — insuficiente para conclusión robusta.
+- Script: `Research/m4_atr_tbr.py`.
 
 ### Funding Rate Positioning (FRP)
 - Hipótesis: z-score del funding rate (ventanas 14/30/60d) en extremo → mercado overcrowded → señal contraria.

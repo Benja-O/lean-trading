@@ -81,10 +81,12 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 │   infrecuente (3 trades/año en RSI<25+Squeeze).                │
 │ Candidata 6: FRP — Funding Rate Positioning (diario) ❌        │
 │   M4 rechazado: ETH 0/54 configs. Mecanismo intraday, no diario│
-│ Candidata 7: H2 ATR Compression Breakout (4h) ✅ M4 PASADO    │
-│   BTC 6/9, ETH 5/9, BNB 7/9. hold=3 barras (12h) cross-asset.│
-│   Implementado: AtrCompressionBreakoutStrategy.cs. Pendiente:  │
-│   backtest completo con SL/TP en QC.                           │
+│ Candidata 7: H2 ATR Compression Breakout (4h) ❌ Backtest fail │
+│   M4 pasado. Backtest: Sharpe -0.922, Win 37%, DD 30.3%.       │
+│   Kill switch 2025-03-19. SL 2% fijo incompatible con hold 12h.│
+│   Edge de señal real; risk management la destruye. ADR-035.     │
+│ Candidata 8: ATR Compression + TBR (1h) ❌ M4 rechazado        │
+│   BTC 0/54, ETH 9/54, BNB 0/54. TBR no añade edge cross-asset.│
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
