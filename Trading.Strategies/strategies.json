@@ -5,49 +5,7 @@
     "15m": { "Strategies": [] },
     "30m": { "Strategies": [] },
     "1h":  { "Strategies": [] },
-    "4h":  {
-      "Strategies": [
-        {
-          "StrategyName": "AtrCompressionBreakoutStrategy",
-          "FileModelName": "",
-          "Symbol": "BTCUSDT",
-          "StopTakeMode": "Atr",
-          "StopLossPercentage": 3.5,
-          "TakeProfitPercentage": 6.0,
-          "StopLossAtrMultiplier": 2.5,
-          "TakeProfitAtrMultiplier": 3.5,
-          "RiskPerTradePercentage": 2.0,
-          "MaxBars": 3,
-          "CombineWithTimeExit": true
-        },
-        {
-          "StrategyName": "AtrCompressionBreakoutStrategy",
-          "FileModelName": "",
-          "Symbol": "ETHUSDT",
-          "StopTakeMode": "Atr",
-          "StopLossPercentage": 3.5,
-          "TakeProfitPercentage": 6.0,
-          "StopLossAtrMultiplier": 2.5,
-          "TakeProfitAtrMultiplier": 3.5,
-          "RiskPerTradePercentage": 2.0,
-          "MaxBars": 3,
-          "CombineWithTimeExit": true
-        },
-        {
-          "StrategyName": "AtrCompressionBreakoutStrategy",
-          "FileModelName": "",
-          "Symbol": "BNBUSDT",
-          "StopTakeMode": "Atr",
-          "StopLossPercentage": 3.5,
-          "TakeProfitPercentage": 6.0,
-          "StopLossAtrMultiplier": 2.5,
-          "TakeProfitAtrMultiplier": 3.5,
-          "RiskPerTradePercentage": 2.0,
-          "MaxBars": 3,
-          "CombineWithTimeExit": true
-        }
-      ]
-    },
+    "4h":  { "Strategies": [] },
     "1d":  { "Strategies": [] }
   }
 }
