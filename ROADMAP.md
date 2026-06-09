@@ -58,18 +58,11 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ 🔄 HITO C: Paper trading — EN CURSO desde 2026-06-03        │
-│ Propósito: VALIDACIÓN OPERATIVA del sistema, no de la       │
-│ estrategia. La EmaCrossStrategy es estrategia de            │
-│ desarrollo (sin walk-forward, sin edge validado); que       │
-│ pierda plata virtual durante el paper es irrelevante,       │
-│ incluso útil para ejercitar umbrales U1-U4 de POLICY.       │
-│ Lo que se valida: heartbeat real cada 60s, pings a          │
-│ Healthchecks.io, alerta Telegram, cadencia humana real      │
-│ (POLICY 4), kill switch real, comportamiento de U1-U4       │
-│ con equity en movimiento.                                   │
+│ ✅ HITO C: Paper trading — COMPLETADO 2026-06-09            │
 │ ✅ Infraestructura verificada (feed, heartbeat, pings)      │
-│ ⬜ Trades reales (necesario para validar U1-U4 y kill sw.)  │
+│ ✅ Primer trade real 2026-06-09T00:30 UTC (BTCUSDT 15m)     │
+│    Orden enviada 00:30 UTC, posición cerrada 04:36 UTC.     │
+│    Ciclo completo U1→U4 validado en paper brokerage.        │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -244,7 +237,7 @@ dado que la estrategia se ha validado en 15m, 1h y 4h.
 
 | Estado | ID | Hito | Pre-requisito | Comentario |
 |---|---|---|---|---|
-| ⬜ | HITO-C | Paper trading (validación operativa del sistema) | Bloque 3 ✅ | Propósito explícito: validar el sistema bajo wall-clock real, **no** validar la EmaCrossStrategy (que es estrategia de desarrollo sin walk-forward). Validaciones específicas: ver checklist heredado de ADR-021 (heartbeat, pings, Telegram, DEUDA-2 en live) y validaciones nuevas de POLICY 4 (cadencia diaria/semanal real, comportamiento de U1/U2 con equity en movimiento, flujo de kill switch real). Que la estrategia pierda equity virtual durante el paper es irrelevante; incluso útil para ejercitar U1-U4 sin riesgo real. |
+| ✅ | HITO-C | Paper trading (validación operativa del sistema) | Bloque 3 ✅ | **Completado 2026-06-09.** Primer trade 2026-06-09T00:30 UTC (BTCUSDT 15m), posición cerrada 04:36 UTC. Ciclo completo U1→U4 validado. Ver historial completado. |
 | ❌ | HITO-E candidata 1 | DonchianBreakoutStrategy (4h BTCUSDT) — descartada por Fase 0 | — | Backtest con lookback 20: Sharpe -1.742, win 24%. Backtest con lookback 126: Sharpe -2.623, win 13%. Falla M1 y M2 en ambas configuraciones. Ver ADR-033. |
 | ❌ | HITO-E candidata 2 | IntradayMomentumStrategy (30m, ETH) — descartada por Fase 0 | — | M4 pasado (ETH +0.645, BNB +0.691) pero backtest OOS 2025-2026 falla M1 y M2: Sharpe -3.28, Win 36%, Expectancy -0.304. Edge arbitrado por institucionales en 2025. Ver ADR-034. |
 | ⬜ | HITO-F | Strategy Scaffolder | Hito E | Comando/script que genera esqueleto de estrategia nueva: clase `IStrategy` + entrada JSON + tests de referencia + tests de comportamiento. Solo después de haber hecho dos estrategias manuales. |
@@ -273,6 +266,10 @@ dado que la estrategia se ha validado en 15m, 1h y 4h.
 ## Historial completado
 
 > Los refactors completados se mueven acá con su fecha y un resumen de qué cambió. Orden cronológico: más antiguo arriba.
+
+### ✅ HITO C — Paper trading: validación operativa del sistema
+**Fecha:** 2026-06-03 (inicio) → 2026-06-09 (cierre)
+**Resumen:** Validación operativa completa del sistema bajo wall-clock real con paper brokerage de Lean y data feed real de Binance Futures USDM. El propósito del hito fue validar la infraestructura, no la estrategia (EmaCrossStrategy es estrategia de desarrollo sin walk-forward). **Infraestructura verificada** desde 2026-06-03: feed sano (`BarStalenessSeconds` ~143-320s en mercado activo), heartbeat actualizándose cada 60s, pings a Healthchecks.io cada 5 min, JSONL escribiendo correctamente. **Tres bugs corregidos durante el hito** (ADR-031): (1) LeanClock UTC offset (+4h) — `_algorithm.Time` → `_algorithm.UtcTime`; (2) auto-restart vía `Environment.Exit(1)` cuando staleness > 1200s (parche operativo para race condition del plugin Binance); (3) epoch QC 1997-12-31 en Initialize() — fallback a `DateTime.UtcNow` cuando `UtcTime < año 2000`. **Fix adicional durante el hito** (ADR-032): warm-up dinámico de indicadores internos de estrategia — `WarmUpBars` en `IStrategy`, `isWarmingUp` flag en `BarProcessingService`, cálculo dinámico de `SetWarmUp` como `max(HMM mínimo, max estrategias × timeframe)`. **Primer trade real** 2026-06-09T00:30 UTC (BTCUSDT 15m, señal de cruce de EMA), posición cerrada 2026-06-09T04:36 UTC (SL o TP). Ciclo completo U1→U4 validado con equity en movimiento. `KillSwitchActive: false` — riesgo dentro de parámetros en todo momento. Tests al cierre: 146 verdes (143 Application + 3 nuevos de warm-up). Ver ADR-031, ADR-032.
 
 ### ✅ Validación multi-símbolo + fix estructural OPS-2 (ADR-028)
 **Fecha:** 2026-05-26 / 2026-05-27
