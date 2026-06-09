@@ -60,6 +60,17 @@ Si en el código provisto por el usuario detectás cualquiera de los anti-patron
 
 **Detente inmediatamente**, señala la violación citando la regla específica de `AI.md`, y propone el refactor. **No continúes con la tarea solicitada hasta que el usuario apruebe el fix** (en código existente) o aplicalo directamente (en código nuevo que estés generando vos).
 
+## 🗑️ Ciclo de vida de estrategias rechazadas
+
+Cuando una estrategia falla **M4** o los criterios de muerte **M1/M2** del backtest:
+
+1. **Eliminar el archivo `.cs`** con `git rm` — el historial de git preserva el código si se necesita recuperar.
+2. **No dejar clases `IStrategy` sin registrar** en `StrategyFactory` — el dead code confunde futuras sesiones.
+3. **Documentar el resultado** en `Research/strategy_experiments.md` antes del commit.
+4. El commit de eliminación lleva el mensaje `chore(hito-X): eliminar <Nombre>Strategy — rechazada por Fase 0`.
+
+Esta regla aplica tanto a rechazo por M4 (nunca llega a backtest) como a rechazo post-backtest (M1/M2 fallidos).
+
 ## Code Navigation
 Always use LSP tools for C# code navigation:
 - Use LSP goToDefinition before modifying any unfamiliar code
