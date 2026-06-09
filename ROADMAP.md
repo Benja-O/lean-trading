@@ -78,7 +78,10 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 │   Retirada por Fase 0: Sharpe -2.623, win 13%. ADR-033.     │
 │ Candidata 2: IntradayMomentumStrategy (30m, ETH) ❌          │
 │   M4 OK pero OOS falla: Sharpe -3.28, Win 36%. ADR-034.     │
-│ Candidata 3: pendiente — buscando próxima hipótesis          │
+│ Candidata 3: BollingerBandsStrategy (4h, multi-activo) ❌     │
+│   M4 rechazado: 5/9 configs pasan (55.6%). ETH sin edge.      │
+│ Candidata 4: próxima — opciones: RSI mean-reversion,          │
+│   ATR squeeze, BTC→ETH lead-lag                               │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
