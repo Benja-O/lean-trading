@@ -77,7 +77,7 @@ def _download_one(symbol, d):
             with open(tmp, "wb") as f:
                 for chunk in r.iter_content(CHUNK_BYTES):
                     f.write(chunk)
-            tmp.rename(dest)
+            tmp.replace(dest)   # replace() funciona en Windows aunque dest ya exista
             return (symbol, d, "ok")
         except Exception as exc:
             if attempt < RETRIES:
@@ -87,7 +87,24 @@ def _download_one(symbol, d):
                 return (symbol, d, "error")
 
 
+def _cleanup_tmps(symbol):
+    raw_root = BASE_PATH / "raw" / symbol
+    if not raw_root.exists():
+        return
+    tmps = list(raw_root.rglob("*.tmp"))
+    deleted = 0
+    for t in tmps:
+        try:
+            t.unlink(missing_ok=True)
+            deleted += 1
+        except PermissionError:
+            log.warning(f"[{symbol}] No se pudo eliminar {t.name} (en uso) — se omite")
+    if deleted:
+        log.info(f"[{symbol}] Limpiados {deleted}/{len(tmps)} archivos .tmp huérfanos antes de descargar")
+
+
 def download_symbol(symbol):
+    _cleanup_tmps(symbol)
     days = list(_iter_dates(START_DATE, END_DATE))
     counters = {"ok": 0, "skip": 0, "notfound": 0, "error": 0}
 
