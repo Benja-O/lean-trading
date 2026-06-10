@@ -179,18 +179,14 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 
 ### ⬜ Post-ADR-028 — Validaciones y deudas pendientes
 
-#### ⬜ Validación multi-símbolo + multi-timeframe simultáneos
+#### ✅ Validación multi-símbolo + multi-timeframe simultáneos
 **Bloque:** continuación de la validación del subsistema.
-**Estado:** pendiente, post-ADR-028.
-**Descripción:** Validar que el subsistema sigue agnóstico cuando los
+**Estado:** completado (fecha exacta no registrada — documentado retroactivamente).
+**Descripción:** Validación de que el subsistema sigue agnóstico cuando los
 tres símbolos operan en TFs distintos simultáneamente
-(BTC-15m / ETH-1h / TRB-4h o combinación equivalente).
-Configuración tentativa, parámetros a calibrar en sesión. Aporta evidencia
-adicional de que el wiring de consolidators independientes por símbolo +
-TF no interactúa de forma inesperada con el subsistema de ejecución
-bajo concurrencia mixta. **Pre-requisito:** ADR-028 cerrado (cumplido).
-**Bloqueantes:** ninguno técnico. Decisión del operador sobre prioridad
-relativa al hito de allocator multi-estrategia.
+(BTC-15m / ETH-1h / TRB-4h). Resultado: backtest OK, cero violaciones del
+invariante OPS-2, wiring de consolidators independientes por símbolo + TF
+sin interacciones inesperadas bajo concurrencia mixta.
 
 #### ⬜ Allocator multi-estrategia
 **Bloque:** hito propio.
