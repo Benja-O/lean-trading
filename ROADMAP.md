@@ -71,7 +71,7 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 │ Historial: Research/strategy_experiments.md                  │
 │                                                             │
 │ Sub-tareas de infraestructura (emergidas en sesión):        │
-│ ⬜ E-INFRA-1: Descarga histórica AggTrades (BTC/ETH/SOL)    │
+│ 🔄 E-INFRA-1: Descarga histórica AggTrades (BTC/ETH/SOL)    │
 │    Script: Research/download_aggtrades.py                   │
 │    Estado: BTC 161 ZIPs descargados (hasta 2021-06-12)      │
 │ ⬜ E-INFRA-2: Custom data loader C# para features 1h        │

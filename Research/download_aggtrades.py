@@ -19,7 +19,7 @@ import pandas as pd
 
 # ─── Configuración ────────────────────────────────────────────────────────────
 BASE_PATH   = Path(r"F:\Mis Documentos\Cripto monedas\Trading\Data\AggTrades")
-SYMBOLS     = ["BTCUSDT", "ETHUSDT", "TRBUSDTPERP"]
+SYMBOLS     = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 START_DATE  = date(2021, 1, 1)
 END_DATE    = date.today() - timedelta(days=1)
 BASE_URL    = "https://data.binance.vision/data/futures/um/daily/aggTrades"
