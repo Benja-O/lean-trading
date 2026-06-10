@@ -2,6 +2,8 @@
 
 > **Propósito:** registro de decisiones arquitectónicas tomadas durante el desarrollo del sistema. Cada entrada explica QUÉ se decidió, POR QUÉ, y QUÉ alternativas se consideraron y descartaron.
 >
+> **Cuándo escribir un ADR:** solo cuando hay código en el repo cuya existencia o forma no se entendería sin el ADR — una abstracción nueva, una interfaz, una decisión de diseño con consecuencias en múltiples componentes. Un resultado de research (candidata rechazada, backtest fallido, hipótesis descartada en M4) **no genera ADR**: va a `Research/strategy_experiments.md`. Si la única evidencia del ADR fuera texto sin cambio de código asociado, probablemente no es un ADR.
+>
 > **Reglas:**
 > - Entradas en orden cronológico inverso (la más reciente primero).
 > - Cada entrada tiene fecha, contexto, decisión, alternativas, consecuencias.
@@ -14,9 +16,7 @@
 | ADR | Título corto | Área |
 |---|---|---|
 | ADR-036 | ATR SL/TP mode: SL/TP basado en multiplicadores de ATR como alternativa al modo porcentaje | Arquitectura / Ejecución |
-| ADR-035 | AtrCompressionBreakoutStrategy: H2 Hito E — M4 pasado con diagnóstico de hold | Estrategias |
-| ADR-034 | IntradayMomentumStrategy: segunda estrategia manual (Hito E, candidata 2) | Estrategias |
-| ADR-033 | DonchianBreakoutStrategy: segunda estrategia manual (Hito E) | Estrategias |
+| ADR-035 | AtrCompressionBreakoutStrategy: insight SL% incompatible con multi-bar hold | Estrategias |
 | ADR-032 | WarmUpBars en IStrategy: warm-up dinámico de indicadores internos | Arquitectura |
 | ADR-031 | Hito C: feed verificado, race condition Binance, LeanClock UTC fix | Operaciones |
 | ADR-030 | Bypass ValidateSubscription plugin Binance para live local | Infraestructura |
@@ -85,64 +85,20 @@ Puntos clave de diseño:
 
 ---
 
-## ADR-035 — AtrCompressionBreakoutStrategy: H2 Hito E — M4 pasado con diagnóstico de hold
+## ADR-035 — SL% fijo es incompatible con estrategias de multi-bar hold
 **Fecha:** 2026-06-09
-**Estado:** Vigente — pendiente backtest QC completo
-**ADRs relacionados:** ADR-034 (protocolo M4), ADR-032 (WarmUpBars)
+**Estado:** Rechazada — estrategia eliminada. Ver ADR-036 para la solución.
+**ADRs relacionados:** ADR-036 (ATR SL/TP mode), ADR-032 (WarmUpBars)
 
 ### Contexto
 
-Candidata 7 de Hito E, tras 6 rechazos (Donchian, IntradayMomentum, BollingerBands, H3 lead-lag, H1 RSI+HMM, FRP funding rate). Última candidata planificada en la lista original.
+`AtrCompressionBreakoutStrategy` (hold=3 barras 4h = 12h) pasó M4 pero falló backtest OOS con SL 2% fijo: Sharpe -0.922, Win 37%, DD 30.3%. La misma estrategia con SL ATR 2.5× mejoró el DD (18.3%) y Sharpe (-0.779) pero la Win Rate permaneció en 37%.
 
-### Decisión
+### Insight arquitectónico
 
-**Hipótesis implementada:** ATR Compression Breakout (bidireccional, 4h).
-- Compresión: ATR(14) < percentil 20 de las últimas 100 lecturas del ATR (rolling window).
-- Rompimiento Long: Close actual > máximo de los 10 cierres anteriores.
-- Rompimiento Short: Close actual < mínimo de los 10 cierres anteriores.
-- Hold: 3 barras 4h (12h) via `MaxBars=3 + CombineWithTimeExit=true`.
-- WarmUpBars = 114 (14 para ATR ready + 100 para llenar la ventana del percentil).
+**Un SL porcentual fijo destruye el edge de estrategias con holding period largo.** El SL se activa sistemáticamente durante la volatilidad intraday del recorrido antes de que el movimiento direccional se materialice. El edge existe en la señal (M4 positivo) pero la gestión del riesgo lo cancela. Ver `Research/strategy_experiments.md` para detalles completos.
 
-**Proceso M4:** el grid original (hold=[4,8], ATR=[P25,P35], look=[10,20] → 8 configs) falló porque hold=8 destruía la señal. Hold=4 pasaba cross-asset (BTC +0.822, ETH +0.659, BNB +0.670) pero el conteo 1/8 BTC y 2/8 ETH no alcanzaba el gate. Diagnóstico A con hold=[2,3,4] confirmó el mecanismo: hold=3 pasa los tres activos sin excepción (6/9 BTC, 5/9 ETH, 7/9 BNB). El cambio de grid está justificado porque la hipótesis del decay rápido surgió del análisis de hold=4 vs hold=8, no de buscar configuraciones individuales que pasen.
-
-**Implementación:** `AtrCompressionBreakoutStrategy.cs`. Sin dependencia del clasificador HMM (el filtro ATR cumple el rol de comprimir el régimen). El PriceHistory se actualiza DESPUÉS de evaluar la señal para que siempre contenga los N cierres anteriores, sin look-ahead.
-
-**Limpieza:** `StrategyFactory` tenía referencias muertas a `DonchianBreakoutStrategy` e `IntradayMomentumStrategy` (clases eliminadas por git rm en commit anterior pero no removidas del factory). Corregido en este commit.
-
-### Alternativas consideradas
-
-- **Añadir HMM Squeeze como filtro adicional:** descartado. H1 ya probó RSI+HMM y el condicionamiento por Squeeze reducía demasiado la frecuencia (3 trades/año). El ATR < P20 ya captura el estado de compresión sin depender del HMM.
-- **P25 en lugar de P20:** P20 es más estricto (menos señales, mayor calidad de compresión). Ambos pasan el M4; P20 elegido por mayor consistencia en Sharpe cross-asset.
-- **Hold=4 en lugar de hold=3:** ambos pasan. Hold=3 tiene mejor Sharpe promedio en ETH y BNB; hold=4 es ligeramente mejor en BTC. Hold=3 es más conservador.
-
-### Pendiente
-
-Backtest completo en QC con SL 2% / TP 4% / MaxBars=3 para verificar M1 (Sharpe ≥ 0.5) y M2 (Win rate ≥ 40%). Si pasa, proceder a Hito F.
-
----
-
-## ADR-034 — M4 obligatorio antes de IStrategy + patrón de estrategia tiempo-dependiente
-**Fecha:** 2026-06-08
-**Estado:** Vigente
-**ADRs relacionados:** ADR-032 (WarmUpBars)
-
-### Decisión
-
-**M4 obligatorio:** antes de implementar cualquier `IStrategy`, ejecutar M4 — señal pura (tamaño fijo, sin SL/TP ni vol-scaling) sobre ≥ 3 activos. Umbral: Sharpe ≥ 0.5 en ≥ 2/3 activos. Si no pasa, descartar la hipótesis sin escribir código.
-
-**Razón:** las candidatas a Hito E mostraron que el código puede ser correcto y el edge no existir. El M4 detecta esto antes de invertir tiempo en implementación.
-
-**Patrón para estrategias tiempo-dependientes** (derivado de IntradayMomentumStrategy): diseño en dos pasos — barra de referencia registra estado sin emitir señal; barra de entrada emite la señal si el estado es del mismo período. Validar con fecha para evitar contaminación cross-day. MaxBars alineado al holding period que validó el M4, no al intervalo entre referencia y entrada.
-
-Ver resultados de experimentos: [`research/strategy_experiments.md`](research/strategy_experiments.md).
-
----
-
-## ADR-033 — DonchianBreakoutStrategy (Hito E, candidata 1)
-**Fecha:** 2026-06-08
-**Estado:** ~~Retirada~~ — descartada por Fase 0. Ver [`research/strategy_experiments.md`](research/strategy_experiments.md).
-
-**Hallazgo arquitectónico:** `StrategyFactory` confirmado como único punto de registro. Agregar una `IStrategy` no requiere modificar el host — solo la clase + entrada en `strategies.json`. Patrón válido para todas las estrategias futuras.
+Consecuencia directa: la infraestructura ATR SL/TP (`StopTakeMode: "Atr"`, `IAtrProvider`, pending prices en `StrategyExecutor`) fue construida para resolver este problema. Ver ADR-036.
 
 ---
 
