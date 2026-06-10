@@ -6,7 +6,15 @@ namespace Trading.Strategies.Infrastructure
 {
     public static class StrategyFactory
     {
-        public static IStrategy Create(string strategyName)
+        /// <summary>
+        /// Crea una estrategia por nombre. Las estrategias que implementan IMicrostructureAwareStrategy
+        /// reciben el proveedor de features microestructurales; las demás lo ignoran.
+        ///
+        /// El parámetro microstructureProvider puede ser null para estrategias que no lo requieren
+        /// (EmaCrossStrategy y similares OHLCV-only). Si una estrategia microestructural recibe null,
+        /// debe degradarse a Flat gracefully (nunca lanzar excepción).
+        /// </summary>
+        public static IStrategy Create(string strategyName, IMicrostructureProvider microstructureProvider = null)
         {
             return strategyName?.ToLower() switch
             {

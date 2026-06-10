@@ -15,6 +15,7 @@ using System.Net.Http;
 using Trading.Application.Eventing;
 using Trading.Application.Execution;
 using Trading.Application.Health;
+using Trading.Application.Microstructure;
 using Trading.Application.Regimes;
 using Trading.Application.Risk;
 using Trading.Application.Sizing;
@@ -178,6 +179,19 @@ namespace Trading.Strategies
             }
             var regimeRegistry = new MarketRegimeRegistry(regimeClassifiers, _clock, _logger);
 
+            // ===== Features microestructurales (E-INFRA-2) =====
+            // Carga opcional: si el CSV no existe para un símbolo, el registry devuelve null y las
+            // estrategias OHLCV-only (EmaCrossStrategy) no se ven afectadas. Solo las estrategias
+            // microestructurales (Hito E) degradan a Flat cuando el proveedor retorna null.
+            var microstructureRegistry = new MicrostructureRegistry(_logger);
+            foreach (var symbolTicker in symbolsToLoad)
+            {
+                string csvPath = System.IO.Path.Combine(
+                    System.AppContext.BaseDirectory, "microstructure",
+                    $"{symbolTicker}_1h_features.csv");
+                microstructureRegistry.Load(new InstrumentId(symbolTicker), csvPath);
+            }
+
             // ===== Construcción de executors =====
             var strategyCompatibilities = new Dictionary<string, StrategyRegimeCompatibility>();
 
@@ -200,7 +214,7 @@ namespace Trading.Strategies
 
                     foreach (var strategyDefinition in strategyGroup)
                     {
-                        var strategy = StrategyFactory.Create(strategyDefinition.StrategyName);
+                        var strategy = StrategyFactory.Create(strategyDefinition.StrategyName, microstructureRegistry);
 
                         var riskParameters = RiskParameters.FromPercentages(
                             stopLossPercentage: strategyDefinition.StopLossPercentage,

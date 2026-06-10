@@ -15,6 +15,7 @@
 
 | ADR | Título corto | Área |
 |---|---|---|
+| ADR-037 | E-INFRA-2: IMicrostructureProvider — features AggTrades sin cambiar IStrategy | Estrategias / Infraestructura |
 | ADR-036 | ATR SL/TP mode: SL/TP basado en multiplicadores de ATR como alternativa al modo porcentaje | Arquitectura / Ejecución |
 | ADR-035 | AtrCompressionBreakoutStrategy: insight SL% incompatible con multi-bar hold | Estrategias |
 | ADR-032 | WarmUpBars en IStrategy: warm-up dinámico de indicadores internos | Arquitectura |
@@ -47,6 +48,42 @@
 | ADR-003 | `OrderRegistry` vive en `Trading.Application` | Arquitectura |
 | ADR-002 | `RiskPerTradePercentage` falla loud si no está en `strategies.json` | Dominio |
 | ADR-001 | Desacople quirúrgico de QuantConnect: dominio Lean-free | Arquitectura |
+
+## ADR-037 — E-INFRA-2: IMicrostructureProvider — features AggTrades sin cambiar IStrategy
+**Fecha:** 2026-06-10
+
+**Contexto:**
+Hito E requiere investigar estrategias basadas en features microestructurales derivadas de AggTrades
+de Binance (OFI, CVD, arrival rate, mean trade size, buy/sell ratio, price return). Los datos se
+generan offline con `Research/download_aggtrades.py` y se persisten como CSV por símbolo.
+El sistema necesita que estas features estén disponibles en el backtester sin romper la
+infraestructura existente de estrategias OHLCV-only (EmaCrossStrategy y futuras).
+
+**Decisión:**
+Opción A — inyección por constructor en la estrategia, sin modificar `IStrategy`.
+
+- `MicrostructureBar` (Domain/Models): value object inmutable con las 7 features + InstrumentId + BarUtc.
+- `IMicrostructureProvider` (Domain/Abstractions): contrato de solo lectura con `GetBar(InstrumentId, DateTime)`.
+- `MicrostructureRegistry` (Application/Microstructure): implementa `IMicrostructureProvider`. Carga el CSV al boot en un `Dictionary<(InstrumentId, DateTime), MicrostructureBar>`, lookup O(1). Si el CSV no existe, loguea Warning y retorna null para ese instrumento — las estrategias OHLCV-only no se ven afectadas.
+- `StrategyFactory.Create` acepta `IMicrostructureProvider` como parámetro opcional. Las estrategias microestructurales lo reciben por constructor; las OHLCV-only lo ignoran.
+- `TradingAlgorithmHost`: construye el registry, carga CSVs para todos los símbolos activos, pasa el registry al factory.
+- CSV cargado desde `{BaseDirectory}/microstructure/{SYMBOL}_1h_features.csv`, generado por el pipeline Python.
+
+**Alternativas consideradas:**
+
+- **Opción B — extender `IStrategy` con `BarContext { MarketBar, MicrostructureBar? }`**: más limpio a largo plazo pero toca la interfaz y todos los tests existentes. Diferida a Hito F. Ver nota de deuda abajo.
+- **Lean `AddData<>`**: requiere implementar `BaseData`, adaptar el formato al sistema de archivos de Lean, y gestionar la sincronización temporal dentro del motor. Complejidad injustificada para un lookup simple de features pre-computadas.
+- **Parquet directo en C#**: requeriría añadir `Parquet.Net` como dependencia al proyecto de producción. El CSV es suficiente y no añade dependencias.
+
+**Consecuencias:**
+- Las estrategias microestructurales deben manejar `null` gracefully (degradar a `Flat` si no hay datos).
+- El CSV debe estar en `{BaseDirectory}/microstructure/` antes de correr el backtest. Si no está, el sistema arranca igual con Warning (no fail-fast, por diseño — las estrategias OHLCV-only no lo necesitan).
+- `StrategyFactory` recibe el provider aunque no todas las estrategias lo usen — acoplamiento mínimo y aceptable.
+
+**Deuda hacia Hito F:**
+Cuando el Scaffolder generalice la creación de estrategias, evaluar migrar a `BarContext { MarketBar Bar, MicrostructureBar? Micro }` como único parámetro de `IStrategy.EvaluateSignal`. Esto eliminaría la inyección por constructor y haría el acceso a features uniforme para todas las estrategias. El debate está registrado aquí para no repetirlo desde cero en Hito F.
+
+---
 
 ## ADR-036 — ATR SL/TP mode: SL/TP basado en multiplicadores de ATR
 **Fecha:** 2026-06-09
