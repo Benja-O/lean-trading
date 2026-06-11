@@ -67,12 +67,11 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
 │ ✅ HITO E: Segunda estrategia manual — COMPLETADO 2026-06-11  │
-│ 13 evaluadas, 12 rechazadas. Aprobada: OfiContrarianStrategy │
-│ M4 PASS 25/27 configs (BTC +0.87, ETH +1.48, SOL +1.37).   │
-│ QC IS 2021-2024: Sharpe=0.503, CAGR 11.69%, DD 41.1%.       │
-│ Long-only: OFI bottom 15% (mean reversion post-sellers).     │
-│ Historial: Research/strategy_experiments.md                  │
-│ Tests actuales: 175 verdes. ADR-038.                         │
+│ 13 evaluadas, 12 rechazadas. Candidata: OfiContrarianStrategy│
+│ M4 PASS 25/27, QC IS Sharpe=0.503. RECHAZADA en Hito G:     │
+│ OOS 2025 Sharpe=-0.703, P(Sharpe<0)=77%. Edge bull-only.    │
+│ Eliminada del repo. Historial: Research/strategy_experiments │
+│ Tests al cierre: 175 verdes. ADR-038, ADR-039.               │
 │                                                             │
 │ Sub-tareas de infraestructura completadas:                  │
 │ ✅ E-INFRA-1: Descarga histórica AggTrades (BTC/ETH/SOL)    │
@@ -94,16 +93,14 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ HITO G: Walk-Forward Analysis + Monte Carlo + Métricas      │
-│ Pipeline reproducible de validación de estrategias:         │
-│ - Walk-forward con ventanas deslizantes optimización/test.  │
-│ - Monte Carlo sobre curva de equity para distribuciones     │
-│   de drawdown, Sharpe, etc.                                 │
-│ - Métricas estándar institucionales: Sharpe, Sortino,       │
-│   Calmar, MAR, recovery factor, profit factor, expectancy.  │
-│ - Métricas estratificadas por régimen (gracias a Hito B).   │
-│ PUERTA DE VALIDACIÓN: ninguna estrategia entra a Hito D     │
-│ sin walk-forward aprobado acá.                              │
+│ ✅ HITO G: IS/OOS + Monte Carlo — COMPLETADO 2026-06-11      │
+│ Trading.Analytics (C#, strategy-agnostic). Lee CSV IS+OOS,  │
+│ calcula 9 métricas institucionales, MC block bootstrap 10k. │
+│ Gate 1: Trades≥50, NetProfit>0, Sharpe≥0.3, PF≥1.1.        │
+│ Gate 2: P(Sharpe<0)≤20%, MedianMaxDD≤55%, P5 CAGR>-5%.     │
+│ Primera validación: OfiContrarianStrategy RECHAZADA.        │
+│ OOS Sharpe=-0.703, P(Sharpe<0)=77%. Edge bull-only.         │
+│ PUERTA DE VALIDACIÓN activa. Estado: sin candidata.         │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -235,9 +232,9 @@ dado que la estrategia se ha validado en 15m, 1h y 4h.
 | Estado | ID | Hito | Pre-requisito | Comentario |
 |---|---|---|---|---|
 | ✅ | HITO-C | Paper trading (validación operativa del sistema) | Bloque 3 ✅ | **Completado 2026-06-09.** Primer trade 2026-06-09T00:30 UTC (BTCUSDT 15m), posición cerrada 04:36 UTC. Ciclo completo U1→U4 validado. Ver historial completado. |
-| ✅ | HITO-E | Segunda estrategia manual — COMPLETADO 2026-06-11 | Hito C ✅ | 13 candidatas evaluadas, 12 rechazadas. Aprobada: `OfiContrarianStrategy` — M4 PASS 25/27 configs + QC IS 2021-2024 Sharpe=0.503 ≥ 0.5, CAGR 11.69%, Net Profit +55.7%, Max DD 41.1%. Long-only: OFI bottom 15% percentil (mean reversion post sellers exhaustion) en BTC/ETH/SOL 1h. 175 tests verdes. ADR-038. Ver `Research/strategy_experiments.md`. |
+| ✅ | HITO-E | Segunda estrategia manual — COMPLETADO 2026-06-11 | Hito C ✅ | 13 candidatas evaluadas, 12 rechazadas. Candidata aprobada IS: `OfiContrarianStrategy` — M4 PASS 25/27, QC IS Sharpe=0.503. **Rechazada en Hito G (2026-06-11):** OOS 2025 Sharpe=-0.703, P(Sharpe<0)=77%, edge ligado a bull market 2021-2024. Eliminada del repo. ADR-038, ADR-039. Ver `Research/strategy_experiments.md`. |
 | ✅ | HITO-F | Strategy Scaffolder | Hito E | **Completado 2026-06-11.** `New-Strategy.ps1` en raíz del repo. Genera clase `IStrategy` + tests skeleton. Imprime snippet JSON y entrada `StrategyFactory`. Ver historial completado. |
-| ⬜ | HITO-G | Walk-Forward Analysis + Monte Carlo + Métricas | Hito F | Pipeline reproducible de validación: walk-forward, Monte Carlo de curva de equity, métricas estándar institucionales (Sharpe, Sortino, Calmar, MAR, profit factor, expectancy, recovery factor), estratificadas por régimen. **Puerta de validación**: ninguna estrategia entra a Hito D sin walk-forward aprobado acá. |
+| ✅ | HITO-G | IS/OOS Validation + Monte Carlo + Métricas | Hito F | **Completado 2026-06-11.** `Trading.Analytics` (C#, strategy-agnostic): lee transaction-log.csv IS+OOS, calcula 9 métricas institucionales, block bootstrap MC 10k sims. Gate 1: Trades≥50, NetProfit>0, Sharpe≥0.3, PF≥1.1. Gate 2: P(Sharpe<0)≤20%, MedianMaxDD≤55%, P5 CAGR>-5%. Primera validación: `OfiContrarianStrategy` RECHAZADA (OOS Sharpe=-0.703, P(Sharpe<0)=77%). Ver ADR-039. Estado: pipeline listo, sin candidata activa. |
 | ⬜ | HITO-H | Optimización de Hiperparámetros | Hito G | Grid search / bayesiana con purged k-fold cross-validation (López de Prado) para evitar leakage temporal. El rango de búsqueda y el criterio los define el operador. |
 | ⬜ | HITO-D-prev | Validación de broker real (sin estrategia) | Hito H (o paralelo a Hito G/H si tiempo lo permite) | Tareas one-shot contra Binance live que no requieren estrategia corriendo: API keys + scopes + withdrawal locks; órdenes manuales de tamaño mínimo para medir comisiones reales y slippage real; funding fees en perpetuals; reconciliación portfolio interno vs broker. Separado de Hito D para que "live con capital chico" no arranque solo porque el broker ya está conectado. |
 | ⬜ | HITO-D | Live trading con capital chico | Hito D-prev + al menos una estrategia con walk-forward aprobado en Hito G | Requisito de entrada **inquebrantable**: estrategia con walk-forward aprobado. EmaCrossStrategy NO opera live (POLICY 7.1). El tamaño "chico" es el riesgo psicológico que el operador puede absorber sin distorsionar su juicio operativo; no es "tan poco que no importa" (POLICY P4). |
@@ -262,6 +259,10 @@ dado que la estrategia se ha validado en 15m, 1h y 4h.
 ## Historial completado
 
 > Los refactors completados se mueven acá con su fecha y un resumen de qué cambió. Orden cronológico: más antiguo arriba.
+
+### ✅ HITO G — IS/OOS Validation + Monte Carlo
+**Fecha:** 2026-06-11
+**Resumen:** Pipeline reproducible de validación de estrategias implementada como herramienta C# standalone `Trading.Analytics` (proyecto console, net10.0, strategy-agnostic). Lee `transaction-log.csv` generado por Lean para IS y OOS, reconstruye trades completos (FIFO pairing), calcula 9 métricas institucionales (Sharpe, Sortino, Calmar, Profit Factor, Expectancy, Win Rate, Max DD, CAGR, Recovery Factor), corre Monte Carlo con block bootstrap (bloque=5, overlapping, 10k simulaciones, seed=42) sobre trades OOS, y evalúa dos gates de aprobación. Gate 1 (métricas deterministas OOS): Trades≥50, NetProfit>0, Sharpe≥0.3, PF≥1.1, Expectancy>0. Gate 2 (distribución MC): P(Sharpe<0)≤20%, MedianMaxDD≤55%, P5 CAGR>-5%. Exit code 0 si pasa, 1 si falla. Genera reporte markdown con tabla comparativa IS vs OOS. Primera estrategia validada: `OfiContrarianStrategy` — IS Sharpe=0.564 (Gate 1: PASA), OOS Sharpe=-0.703 (Gate 1+2: FALLA). Diagnóstico: Win rate colapsó 44%→36%, P(Sharpe<0)=77%. Edge ligado a bull market 2021-2024, no generaliza. Estrategia eliminada del repo. Ver ADR-039.
 
 ### ✅ HITO F — Strategy Scaffolder
 **Fecha:** 2026-06-11

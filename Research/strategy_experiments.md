@@ -17,7 +17,7 @@ Registro de hipótesis evaluadas por Fase 0. Fuente de verdad para evitar re-exp
 | E | ATR Compression + Taker Buy Ratio | 1h | BTC, ETH, BNB | ❌ BTC 0/54, ETH 9/54, BNB 0/54 | N/A (M4 rechazado) | N/A | ❌ | TBR no añade edge cross-asset en 1h. ETH tiene señal parcial (TBR=0.55, hold=4-6b, Sharpe ~0.8) pero estadísticamente débil (30-40 trades/4 años). BTC y BNB: 0 configs. El filtro TBR estrecha tanto la señal que no hay frecuencia suficiente. Script: `Research/m4_atr_tbr.py`. |
 
 | E | OFI Momentum | 1h | BTC, ETH, SOL | ❌ 0/27 configs (0%) — Sharpe negativo en todos. Mejor: BTC +0.383 (window=24, thr=0.75, hold=8) | N/A (M4 rechazado) | N/A | ❌ | OFI en top percentil no predice continuación en 1h. Contrariamente, Short cuando OFI bajo da Sharpe -1.2 (implica que precio SUBE después de venta agresiva). Script: `Research/m4_ofi_momentum.py`. |
-| E | OFI Contrarian (Long-only) | 1h | BTC, ETH, SOL | ✅ 25/27 configs. Mejor: BTC +0.869, ETH +1.475, SOL +1.367 (window=24, thr=0.85, hold=8) | **0.503** (IS 2021-2024, NullOPS-2, SL=10%, TP=15%) | 44% | ✅ | QC IS PASA M1 (Sharpe=0.503≥0.5). CAGR 11.69%, DD 41.1% (alto — 3 activos cripto correlacionados). Kill switch 1 vez (2024-08-05, 8 pérdidas consecutivas → cooling-off 1 día). Ver ADR-038. |
+| E | OFI Contrarian (Long-only) | 1h | BTC, ETH, SOL | ✅ 25/27 configs. Mejor: BTC +0.869, ETH +1.475, SOL +1.367 (window=24, thr=0.85, hold=8) | **0.503** (IS 2021-2024) | 44% IS / 36% OOS | ❌ | Hito G OOS FALLA. OOS 2025-2026Q1: Sharpe=-0.703, Net=-12.7%, PF=0.84. Win rate colapsó 44%→36%. P(Sharpe<0)=77%. Edge ligado al bull market 2021-2024; no generaliza. Eliminada. Ver ADR-039. |
 
 ---
 

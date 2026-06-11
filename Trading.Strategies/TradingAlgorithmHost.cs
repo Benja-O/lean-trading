@@ -127,7 +127,7 @@ namespace Trading.Strategies
             {
                 // Backtest: ventana temporal y cash simulado.
                 SetStartDate(2025, 1, 1);
-                SetEndDate(2026, 3, 31);
+                SetEndDate(2025, 12, 31);
                 SetCash("USDT", InitialAccountCashUsdt);
                 SetCash("USD", 0);
             }

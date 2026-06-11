@@ -15,6 +15,7 @@
 
 | ADR | Título corto | Área |
 |---|---|---|
+| ADR-039 | Hito G: IS/OOS validation + Monte Carlo — metodología y rechazo OfiContrarian | Validación |
 | ADR-038 | OfiContrarianStrategy: aprobación QC IS 2021-2024 y decisiones de design | Estrategias |
 | ADR-037 | E-INFRA-2: IMicrostructureProvider — features AggTrades sin cambiar IStrategy | Estrategias / Infraestructura |
 | ADR-036 | ATR SL/TP mode: SL/TP basado en multiplicadores de ATR como alternativa al modo porcentaje | Arquitectura / Ejecución |
@@ -49,6 +50,88 @@
 | ADR-003 | `OrderRegistry` vive en `Trading.Application` | Arquitectura |
 | ADR-002 | `RiskPerTradePercentage` falla loud si no está en `strategies.json` | Dominio |
 | ADR-001 | Desacople quirúrgico de QuantConnect: dominio Lean-free | Arquitectura |
+
+## ADR-039 — Hito G: IS/OOS validation + block bootstrap Monte Carlo
+**Fecha:** 2026-06-11
+**Estado:** Aceptada
+**ADRs relacionados:** ADR-038 (OfiContrarianStrategy diseño IS), ADR-037 (E-INFRA-2)
+
+### Contexto
+
+Hito G requería una pipeline reproducible de validación de estrategias: construirla una vez y reutilizarla para cualquier candidata futura. El objetivo de este hito era doble: (1) construir la herramienta `Trading.Analytics`, (2) validar `OfiContrarianStrategy` como primera estrategia a través del pipeline.
+
+**Terminología**: en la literatura "walk-forward analysis" implica múltiples ventanas IS/OOS con re-optimización de parámetros en cada ventana. Para estrategias de parámetros fijos (no re-optimizados), el enfoque correcto es IS/OOS split único + Monte Carlo sobre el OOS. El true WFA con re-optimización pertenece a Hito H.
+
+### Decisiones
+
+**D1 — Trading.Analytics: herramienta C# standalone, strategy-agnostic.**
+Proyecto `Trading.Analytics` (console, net10.0). Lee `transaction-log.csv` de Lean como fuente de verdad. No depende de ningún modelo de dominio del sistema — opera sobre filas CSV con PnL. Reusable para cualquier estrategia futura sin modificación.
+
+Pipeline: `LeanTransactionLogParser` → `TradePairer` (FIFO por símbolo) → `MetricsCalculator` → `MonteCarloEngine` → `ValidationGates` → `ValidationReportWriter`.
+
+Uso: `Trading.Analytics --is-log <path> --oos-log <path> --strategy <name> --output <dir>`. Exit code 0 = ambos gates pasan; 1 = alguno falla.
+
+**D2 — FIFO trade pairing; Sells sin Buy previo se descartan.**
+Las órdenes del CSV son fills individuales (Entry, SL, TP). Se reconstruyen trades completos: Buy = apertura, Sell = cierre del mismo símbolo (FIFO). Sells sin Buy previo en el OOS (posiciones carry-over del IS aún abiertas al inicio de la ventana) se descartan silenciosamente: son artefactos de la ventana, no trades completos del OOS.
+
+**D3 — Equity curve desde PnL diario; Sharpe anualizado por sqrt(252).**
+La equity curve agrupa PnL por fecha de cierre con carry-forward. Los retornos diarios alimentan el Sharpe (sqrt(252) × mean/std) y Sortino (solo retornos negativos en el denominador, MAR=0). Calmar = CAGR / MaxDD. Recovery Factor = NetProfit / MaxDD.
+
+**D4 — Monte Carlo: block bootstrap, bloque=5 (overlapping), 10,000 simulaciones, seed=42.**
+El block bootstrap preserva la autocorrelación de corto plazo entre retornos consecutivos de trades. Ventanas solapadas de 5 trades. 10,000 simulaciones. Se reportan P5/P50/P95 de Sharpe, MaxDD y CAGR sobre el OOS, más P(Sharpe<0) y P(CAGR<0).
+
+**D5 — Gate 1 (métricas OOS deterministas) y Gate 2 (distribución Monte Carlo).**
+
+Gate 1 — todos deben pasar:
+- Trades ≥ 50 (muestra mínima estadísticamente razonable)
+- Net profit > 0
+- Sharpe ≥ 0.3
+- Profit Factor ≥ 1.1
+- Expectancy > 0
+
+Gate 2 — todos deben pasar:
+- P(Sharpe < 0) ≤ 20%
+- Mediana Max DD ≤ 55%
+- P5 CAGR > −5%
+
+Los criterios son estrictos por diseño: el gate debe ser difícil de pasar, no fácil de ajustar post-hoc. Cualquier estrategia que falle un criterio por poco debe considerarse señal de fragilidad, no candidata a relajar el umbral.
+
+### Resultado: OfiContrarianStrategy RECHAZADA
+
+**IS 2021-2024** (184 trades):
+Sharpe=0.564, PF=1.17, Expectancy=+0.52%, Win=44%, Net=+73.6%. Gate 1: PASA.
+
+**OOS 2025-2026Q1** (133 trades, 2025-01-01 → 2026-03-31):
+Sharpe=-0.703, PF=0.84, Expectancy=-0.28%, Win=36%, Net=-12.7%, MaxDD=22.9%. Gate 1: FALLA (Sharpe, PF, Expectancy, Net profit).
+
+**Monte Carlo OOS** (10k sims, block=5):
+P(Sharpe<0)=77%, MedianMaxDD=62.5%, P5 CAGR=-28%. Gate 2: FALLA los 3 criterios.
+
+**Diagnóstico del fallo:** Win rate colapsó de 44% (IS) a 36% (OOS) — 8pp de caída consistente a lo largo del período OOS. El edge de OFI percentile como señal contrarian estaba ligado al contexto de mercado alcista de 2021-2024, donde la presión vendedora se absorbía rápidamente por demanda estructural. En 2025, con dinámicas de mercado diferentes, el rebote post-sellers no materializa con la misma frecuencia. La señal es real (M4 positivo, IS positivo) pero no es robusta a cambios de régimen macro. El modelo fue correcto para el período de entrenamiento; el edge no generaliza.
+
+**Acciones tomadas:**
+- `OfiContrarianStrategy.cs` y `OfiContrarianStrategyTests.cs`: eliminados con `git rm`.
+- `StrategyFactory.cs`: entrada OFI removida.
+- `strategies.json`: 3 entradas 1h removidas.
+- `Research/strategy_experiments.md`: actualizado con resultado OOS y diagnóstico.
+- Resultado completo: `F:\Lean\data\results\analytics\validation-oficontrarianstrategy-20260611.md`.
+
+### Alternativas consideradas
+
+**A — Relajar gates para admitir la estrategia con ajustes.** Descartado: los gates son el contrato de entrada a capital real. Relajarlos post-hoc sobre la primera estrategia que los falla es p-hacking de criterios, exactamente lo que los gates buscan prevenir.
+
+**B — Re-optimizar parámetros sobre el OOS.** Descartado: pertenece a Hito H. El punto del IS/OOS split es medir la robustez del edge SIN re-optimización. Re-optimizar sobre OOS convierte el OOS en IS.
+
+**C — Extender el OOS para capturar más datos.** Descartado: 15 meses y 133 trades es muestra estadísticamente suficiente. El problema es la dirección del fallo (Win rate consistentemente más bajo), no el ruido.
+
+### Consecuencias
+
+- `Trading.Analytics` está listo y reusable para cualquier estrategia futura. El pipeline completo ejecuta en < 2 minutos.
+- Pipeline de estrategias: sin candidata activa. Hito D sigue bloqueado (POLICY P1).
+- Próxima acción: nueva candidata vía proceso de research (Hito E), scaffolder (Hito F), luego validación con Hito G.
+- Los criterios de los gates (D5) quedan documentados en este ADR como referencia permanente para futuras validaciones.
+
+---
 
 ## ADR-038 — OfiContrarianStrategy: aprobación QC IS 2021-2024 y decisiones de design
 **Fecha:** 2026-06-11
