@@ -67,11 +67,12 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
 │ 🔄 HITO E: Segunda estrategia manual — EN CURSO              │
-│ 10 candidatas probadas, todas rechazadas.                    │
-│ Última: CvdBullishDivergenceStrategy — M4 pasó (señales     │
-│ solapadas inflan Sharpe), QC IS falla (Sharpe -1.85).       │
+│ 12 evaluadas, 11 rechazadas. Última: OfiContrarianStrategy   │
+│ M4 PASS 25/27 configs (BTC +0.87, ETH +1.48, SOL +1.37).   │
+│ Long-only: compra cuando OFI en bottom 15% (mean reversion   │
+│ post exhaustion of sellers). Pendiente: QC IS 2021-2024.    │
 │ Historial: Research/strategy_experiments.md                  │
-│ Tests actuales: 167 verdes.                                 │
+│ Tests actuales: 175 verdes.                                  │
 │                                                             │
 │ Sub-tareas de infraestructura completadas:                  │
 │ ✅ E-INFRA-1: Descarga histórica AggTrades (BTC/ETH/SOL)    │
@@ -236,7 +237,7 @@ dado que la estrategia se ha validado en 15m, 1h y 4h.
 | Estado | ID | Hito | Pre-requisito | Comentario |
 |---|---|---|---|---|
 | ✅ | HITO-C | Paper trading (validación operativa del sistema) | Bloque 3 ✅ | **Completado 2026-06-09.** Primer trade 2026-06-09T00:30 UTC (BTCUSDT 15m), posición cerrada 04:36 UTC. Ciclo completo U1→U4 validado. Ver historial completado. |
-| 🔄 | HITO-E | Segunda estrategia manual — en curso | Hito C ✅ | 10 candidatas rechazadas. Última: `CvdBullishDivergenceStrategy` — M4 pasó (artefacto de señales solapadas), QC IS 2021-2024 falla (Sharpe -1.85). 167 tests verdes. Ver `Research/strategy_experiments.md`. |
+| 🔄 | HITO-E | Segunda estrategia manual — en curso | Hito C ✅ | 12 candidatas evaluadas, 11 rechazadas. Última: `OfiContrarianStrategy` — M4 PASS (25/27 configs, BTC +0.869 / ETH +1.475 / SOL +1.367). Implementada. Pendiente QC IS backtest 2021-2024. 175 tests verdes. Ver `Research/strategy_experiments.md`. |
 | ⬜ | HITO-F | Strategy Scaffolder | Hito E | Comando/script que genera esqueleto de estrategia nueva: clase `IStrategy` + entrada JSON + tests de referencia + tests de comportamiento. Solo después de haber hecho dos estrategias manuales. |
 | ⬜ | HITO-G | Walk-Forward Analysis + Monte Carlo + Métricas | Hito F | Pipeline reproducible de validación: walk-forward, Monte Carlo de curva de equity, métricas estándar institucionales (Sharpe, Sortino, Calmar, MAR, profit factor, expectancy, recovery factor), estratificadas por régimen. **Puerta de validación**: ninguna estrategia entra a Hito D sin walk-forward aprobado acá. |
 | ⬜ | HITO-H | Optimización de Hiperparámetros | Hito G | Grid search / bayesiana con purged k-fold cross-validation (López de Prado) para evitar leakage temporal. El rango de búsqueda y el criterio los define el operador. |

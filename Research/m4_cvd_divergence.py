@@ -79,13 +79,32 @@ def compute_signals(df: pd.DataFrame, lookback: int) -> pd.Series:
     return signals
 
 
+def filter_overlapping_signals(signals: pd.Series, hold: int) -> pd.Series:
+    """
+    Suprime señales disparadas mientras hay una posición abierta.
+    Si se entra en t, cualquier señal en [t+1, t+hold-1] es ignorada.
+    Esto replica el comportamiento real del sistema: una sola posición por activo.
+    """
+    arr = signals.values.copy()
+    in_position_until = -1
+    for i in range(len(arr)):
+        if arr[i] != 0:
+            if i <= in_position_until:
+                arr[i] = 0
+            else:
+                in_position_until = i + hold - 1
+    return pd.Series(arr, index=signals.index, dtype=int)
+
+
 def compute_sharpe(signals: pd.Series, close: pd.Series, hold: int) -> tuple[float, int, float]:
     """
     Retorna (sharpe_anualizado, num_trades, mean_return_pct).
 
     Retorno por operación: señal × (close[t+hold] / close[t] - 1).
     Sharpe anualizado: mean / std × sqrt(trades_por_año).
+    NOTA: se filtra señales solapadas antes de evaluar (position tracking).
     """
+    signals = filter_overlapping_signals(signals, hold)
     forward_ret = close.shift(-hold) / close - 1
 
     mask = (signals != 0) & forward_ret.notna()
@@ -218,12 +237,14 @@ def main() -> None:
         fwd   = close.shift(-4) / close - 1
         years = (close.index[-1] - close.index[0]).total_seconds() / (365.25 * 86400)
         results_dir = {}
-        for lbl, mask_cond in [("Short", sigs == -1), ("Long", sigs == 1), ("Both", sigs != 0)]:
-            mask = mask_cond & fwd.notna()
+        for lbl, raw_mask in [("Short", sigs == -1), ("Long", sigs == 1), ("Both", sigs != 0)]:
+            dir_sigs = sigs.where(raw_mask, 0)
+            filtered  = filter_overlapping_signals(dir_sigs, 4)
+            mask = (filtered != 0) & fwd.notna()
             if mask.sum() < MIN_TRADES:
                 results_dir[lbl] = "N/A"
                 continue
-            tr = sigs[mask].astype(float) * fwd[mask]
+            tr = filtered[mask].astype(float) * fwd[mask]
             m, s = tr.mean(), tr.std(ddof=1)
             if s == 0:
                 results_dir[lbl] = "N/A"

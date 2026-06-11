@@ -19,6 +19,7 @@ namespace Trading.Strategies.Infrastructure
             return strategyName?.ToLower() switch
             {
                 "emacrossstrategy" or "emacross" => new EmaCrossStrategy(),
+                "oficontrarianstrategy" or "oficontrarian" => new OfiContrarianStrategy(microstructureProvider),
 
                 null or "" => throw new ArgumentNullException(nameof(strategyName),
                     "El nombre de la estrategia no puede ser nulo o vacío."),

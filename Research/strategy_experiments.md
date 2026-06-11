@@ -16,6 +16,9 @@ Registro de hipótesis evaluadas por Fase 0. Fuente de verdad para evitar re-exp
 | E | ATR Compression + SL ATR (2.5×, TP 3.5×) | 4h | BTC, ETH, BNB | ✅ (H2) | -0.779 | 37% | ❌ | ATR SL mejora DD (30.3%→18.3%) y Sharpe (-0.922→-0.779) pero win rate permanece 37%. OPS-2 disparó BTC 2025-07-27 (PF 0.70), ETH 2025-12-01 (PF 0.75). Falla M1 y M2. El problema es el edge de la señal, no el risk management. |
 | E | ATR Compression + Taker Buy Ratio | 1h | BTC, ETH, BNB | ❌ BTC 0/54, ETH 9/54, BNB 0/54 | N/A (M4 rechazado) | N/A | ❌ | TBR no añade edge cross-asset en 1h. ETH tiene señal parcial (TBR=0.55, hold=4-6b, Sharpe ~0.8) pero estadísticamente débil (30-40 trades/4 años). BTC y BNB: 0 configs. El filtro TBR estrecha tanto la señal que no hay frecuencia suficiente. Script: `Research/m4_atr_tbr.py`. |
 
+| E | OFI Momentum | 1h | BTC, ETH, SOL | ❌ 0/27 configs (0%) — Sharpe negativo en todos. Mejor: BTC +0.383 (window=24, thr=0.75, hold=8) | N/A (M4 rechazado) | N/A | ❌ | OFI en top percentil no predice continuación en 1h. Contrariamente, Short cuando OFI bajo da Sharpe -1.2 (implica que precio SUBE después de venta agresiva). Script: `Research/m4_ofi_momentum.py`. |
+| E | OFI Contrarian (Long-only) | 1h | BTC, ETH, SOL | ✅ 25/27 configs. Mejor: BTC +0.869, ETH +1.475, SOL +1.367 (window=24, thr=0.85, hold=8) | Pendiente QC IS | 51-52% | Pendiente | M4 PASS. Long cuando OFI en bottom 15% (vendedores agotados → rebote). 2022 bear: BTC -0.863, SOL -0.586, ETH +0.919. Implementada. Script: `Research/m4_ofi_contrarian.py`. |
+
 ---
 
 ## Notas por experimento
@@ -114,3 +117,28 @@ Registro de hipótesis evaluadas por Fase 0. Fuente de verdad para evitar re-exp
 - ETH sin señal en ninguna dirección, posiblemente por cambio estructural post-Merge (2022).
 - Diagnóstico: el mecanismo de desapalancamiento existe pero opera en timeframes sub-diarios (horas), donde los datos históricos de order book/funding granular no están disponibles sin costo.
 - Script: `Research/m4_funding_rate_positioning.py`
+
+### OFI Momentum (candidata A — rechazada M4)
+- Hipótesis: OFI en top percentil del historial reciente indica compra institucional agresiva → precio continúa subiendo (momentum de flujo).
+- M4 IS 2021-2024 (1h, BTC/ETH/SOL, grid 27 configs: window=[24,48,96], thr=[0.75,0.80,0.85], hold=[4,6,8]):
+  - 0/27 configs pasan el gate. Sharpe negativo en casi todos.
+- Diagnóstico direccional (window=48, thr=0.80, hold=6):
+  - Short cuando OFI bajo (vendedores agresivos): BTC -0.220, ETH -0.935, SOL -1.203 → precio SUBE después de venta agresiva.
+  - Long cuando OFI alto (compradores agresivos): BTC +0.010, ETH +0.120, SOL +0.775 → edge débil, solo SOL relevante.
+- Hallazgo: el OFI en 1h es mean-reverting, no momentum. Buying pressure gets absorbed (precio ya subió con la compra agresiva). La señal contraria (buy the dip after heavy selling) tiene mucho más edge.
+- Script: `Research/m4_ofi_momentum.py`
+
+### OFI Contrarian — Long-only (candidata B, derived from OFI Momentum analysis)
+- Hipótesis: cuando OFI está en el percentil inferior de su distribución reciente (vendedores agresivos), el mercado está sobre-vendido localmente y el precio rebota en las próximas N horas.
+- M4 IS 2021-2024 (1h, BTC/ETH/SOL, grid 27 configs: window=[24,48,96], thr=[0.75,0.80,0.85], hold=[4,6,8]):
+  - 25/27 configs pasan el gate (93%).
+  - Mejor: window=24, threshold=0.85, hold=8: BTC +0.869, ETH +1.475, SOL +1.367 (media +1.237).
+- Análisis anual (window=24, thr=0.85, hold=8):
+  - 2021: BTC +1.353, ETH +2.618, SOL +2.793 (bull market fuerte)
+  - 2022: BTC -0.863, ETH +0.919, SOL -0.586 (bear market: Long-only pierde en BTC/SOL)
+  - 2023: BTC +1.653, ETH +0.844, SOL +1.863 (recovery)
+  - 2024: BTC +1.744, ETH +1.100, SOL +1.126 (bull market)
+- Win rate: 50-52%, expectancy BTC +0.060%/trade, ETH +0.130%, SOL +0.179%.
+- Riesgo principal: Long-only pierde en bear markets sostenidos. OPS-2 puede disparar durante 2022.
+- Implementada: `OfiContrarianStrategy.cs`, 7 tests unitarios, registrada en StrategyFactory.
+- Script: `Research/m4_ofi_contrarian.py`
