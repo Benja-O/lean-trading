@@ -18,7 +18,12 @@ namespace Trading.Strategies.Infrastructure
         {
             return strategyName?.ToLower() switch
             {
-                "emacrossstrategy" or "emacross" => new EmaCrossStrategy(),
+                "emacrossstrategy" or "emacross"                         => new EmaCrossStrategy(),
+                "sellingclimaxstrategy" or "sellingclimax"               => new SellingClimaxStrategy(microstructureProvider),
+                "tradesizeinstitutionalstrategy" or "tradesizeinstitutional" => new TradeSizeInstitutionalStrategy(microstructureProvider),
+                "vwapdeviationstrategy" or "vwapdeviation"               => new VwapDeviationStrategy(),
+                "tradecountspikestrategy" or "tradecountspike"           => new TradeCountSpikeStrategy(microstructureProvider),
+                "cvdsellexhaustionstrategy" or "cvdsellexhaustion"       => new CvdSellExhaustionStrategy(microstructureProvider),
 
                 null or "" => throw new ArgumentNullException(nameof(strategyName),
                     "El nombre de la estrategia no puede ser nulo o vacío."),
