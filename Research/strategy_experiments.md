@@ -4,6 +4,8 @@ Registro de hipótesis evaluadas por Fase 0. Fuente de verdad para evitar re-exp
 
 | Hito | Estrategia | TF | Activos | M4 | Backtest Sharpe | Win Rate | Estado | Razón descarte |
 |---|---|---|---|---|---|---|---|---|
+| E | CVD Divergence bidireccional | 1h | BTC, ETH, SOL | ❌ 0/9 configs (0%) bidireccional. Long-only: ✅ 9/9 configs, BTC +1.74 / ETH +0.52 / SOL +0.95 (3/3) | N/A — ver CvdBullishDivergenceStrategy | N/A | ✅→ CvdBullishDivergenceStrategy implementada | Bidireccional falla: Short signals destruyen el Sharpe en ETH y SOL (SOL Short -0.92). Long-only pasa 3/3 activos con lookback=24, hold=6. Implementado como estrategia Long-only separada. Script: `Research/m4_cvd_divergence.py`. |
+| E | CvdBullishDivergenceStrategy | 1h | BTC, ETH, SOL | ✅ BTC +1.74, ETH +0.52, SOL +0.95 (lookback=24, hold=6 — 3/3 activos) | Pendiente backtest QC | N/A | 🔄 Implementada, pendiente backtest QC | M4 pasado con robustez (9/9 configs pasan ≥2/3 activos). Parámetros nominales: lookback=24, MaxBarsInPosition=6. Implementación: `CvdBullishDivergenceStrategy.cs`. |
 | E | DonchianBreakoutStrategy | 4h | BTC | ⚠️ +0.705 (señal mensual — escala incorrecta) | -2.623 (lookback 126) | 13% | ❌ | Win rate 13-24% con cualquier lookback. Desconexión de escala entre M4 (mensual) e implementación (4h). |
 | E | IntradayMomentumStrategy | 30m | ETH, BNB, BTC | ✅ ETH +0.645, BNB +0.691 / ❌ BTC -0.204 | -3.28 (ETH OOS 2025) | 36% | ❌ | Edge arbitrado por institucionales en 2025. M4 validó 2020-2024; OOS falla M1+M2. |
 | E | BollingerBandsStrategy | 4h | BTC, ETH, BNB | ❌ 5/9 configs (55.6%) | N/A (M4 rechazado) | N/A | ❌ | M4 falla: BTC OK en oversold=1,4; ETH falla todas; BNB OK todas. Inconsistencia cross-asset. |
