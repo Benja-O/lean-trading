@@ -1,4 +1,5 @@
 {
+  "MicrostructureDataPath": "F:\\Mis Documentos\\Cripto monedas\\Trading\\Data\\AggTrades\\features",
   "Timeframes": {
     "1m":  { "Strategies": [] },
     "5m":  { "Strategies": [] },

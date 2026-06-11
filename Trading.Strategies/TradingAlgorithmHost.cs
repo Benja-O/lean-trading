@@ -184,11 +184,12 @@ namespace Trading.Strategies
             // estrategias OHLCV-only (EmaCrossStrategy) no se ven afectadas. Solo las estrategias
             // microestructurales (Hito E) degradan a Flat cuando el proveedor retorna null.
             var microstructureRegistry = new MicrostructureRegistry(_logger);
+            string microstructureDir = rootConfiguration.MicrostructureDataPath
+                ?? System.IO.Path.Combine(System.AppContext.BaseDirectory, "microstructure");
             foreach (var symbolTicker in symbolsToLoad)
             {
                 string csvPath = System.IO.Path.Combine(
-                    System.AppContext.BaseDirectory, "microstructure",
-                    $"{symbolTicker}_1h_features.csv");
+                    microstructureDir, $"{symbolTicker}_1h_features.csv");
                 microstructureRegistry.Load(new InstrumentId(symbolTicker), csvPath);
             }
 

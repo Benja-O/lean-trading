@@ -9,5 +9,11 @@ namespace Trading.Domain.Models
     public class RootConfig
     {
         public Dictionary<string, TimeframeNode> Timeframes { get; set; } = new();
+
+        /// <summary>
+        /// Directorio donde están los CSVs de features microestructurales ({SYMBOL}_1h_features.csv).
+        /// Si es null, se usa {AppContext.BaseDirectory}/microstructure como fallback.
+        /// </summary>
+        public string? MicrostructureDataPath { get; set; }
     }
 }

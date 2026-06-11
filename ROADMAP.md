@@ -71,12 +71,14 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 │ Historial: Research/strategy_experiments.md                  │
 │                                                             │
 │ Sub-tareas de infraestructura (emergidas en sesión):        │
-│ 🔄 E-INFRA-1: Descarga histórica AggTrades (BTC/ETH/SOL)    │
+│ ✅ E-INFRA-1: Descarga histórica AggTrades (BTC/ETH/SOL)    │
 │    Script: Research/download_aggtrades.py                   │
-│    Estado: BTC 161 ZIPs descargados (hasta 2021-06-12)      │
-│ ⬜ E-INFRA-2: Custom data loader C# para features 1h        │
-│    Carga Parquet de features (OFI/CVD/arrival/etc.) como    │
-│    data feed en el backtester de Lean.                      │
+│    47,664 barras 1h por símbolo (2021-01-01 → 2026-06-09)  │
+│    CSVs en: F:\Mis Documentos\...\AggTrades\features\       │
+│ ✅ E-INFRA-2: Custom data loader C# para features 1h        │
+│    IMicrostructureProvider + MicrostructureRegistry          │
+│    Path configurable vía MicrostructureDataPath en          │
+│    strategies.json (sin copia al build output)              │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
