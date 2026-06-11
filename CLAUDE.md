@@ -29,8 +29,6 @@ El flujo normal es Sonnet (este modelo). Opus está justificado únicamente cuan
 | Hito E — Mean Reversion | **Diseño** de estrategia (indicadores, lógica de señal, parámetros) | **Opus** | Decisión de research sin plantilla previa; una dirección equivocada se descubre tarde |
 | Hito E — Mean Reversion | Implementación (IStrategy, tests, wiring) | Sonnet | Patrones ya establecidos por EmaCrossStrategy |
 | Hito F — Scaffolder | Diseño + implementación | Sonnet | La generalización surge de dos estrategias ya construidas |
-| **Hito G — Walk-Forward + Monte Carlo** | **Diseño del pipeline estadístico** | **Opus** | Hito metodológicamente más complejo del proyecto: purged k-fold, leakage temporal, estratificación por régimen. Un error acá invalida silenciosamente toda la validación posterior |
-| Hito G | Implementación del pipeline | Sonnet | Una vez el diseño está cerrado |
 | **Hito H — Optimización de hiperparámetros** | **Diseño del framework** (criterio anti-sobreajuste, búsqueda bayesiana, integración con Hito G) | **Opus** | Decisiones metodológicas complejas con riesgo de sobreajuste silencioso |
 | Hito H | Implementación | Sonnet | |
 | Hito D-prev / D / Bloque 4 | Todo | Sonnet | Operativo o refactors con patrones claros |
