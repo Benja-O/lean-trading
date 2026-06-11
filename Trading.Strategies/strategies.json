@@ -5,7 +5,34 @@
     "5m":  { "Strategies": [] },
     "15m": { "Strategies": [] },
     "30m": { "Strategies": [] },
-    "1h":  { "Strategies": [] },
+    "1h":  {
+      "Strategies": [
+        {
+          "StrategyName": "OfiContrarianStrategy",
+          "Symbol": "BTCUSDT",
+          "StopLossPercentage": 10.0,
+          "TakeProfitPercentage": 15.0,
+          "RiskPerTradePercentage": 1.0,
+          "MaxBars": 8
+        },
+        {
+          "StrategyName": "OfiContrarianStrategy",
+          "Symbol": "ETHUSDT",
+          "StopLossPercentage": 10.0,
+          "TakeProfitPercentage": 15.0,
+          "RiskPerTradePercentage": 1.0,
+          "MaxBars": 8
+        },
+        {
+          "StrategyName": "OfiContrarianStrategy",
+          "Symbol": "SOLUSDT",
+          "StopLossPercentage": 10.0,
+          "TakeProfitPercentage": 15.0,
+          "RiskPerTradePercentage": 1.0,
+          "MaxBars": 8
+        }
+      ]
+    },
     "4h":  { "Strategies": [] },
     "1d":  { "Strategies": [] }
   }

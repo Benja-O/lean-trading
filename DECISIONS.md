@@ -15,6 +15,7 @@
 
 | ADR | Título corto | Área |
 |---|---|---|
+| ADR-038 | OfiContrarianStrategy: aprobación QC IS 2021-2024 y decisiones de design | Estrategias |
 | ADR-037 | E-INFRA-2: IMicrostructureProvider — features AggTrades sin cambiar IStrategy | Estrategias / Infraestructura |
 | ADR-036 | ATR SL/TP mode: SL/TP basado en multiplicadores de ATR como alternativa al modo porcentaje | Arquitectura / Ejecución |
 | ADR-035 | AtrCompressionBreakoutStrategy: insight SL% incompatible con multi-bar hold | Estrategias |
@@ -48,6 +49,53 @@
 | ADR-003 | `OrderRegistry` vive en `Trading.Application` | Arquitectura |
 | ADR-002 | `RiskPerTradePercentage` falla loud si no está en `strategies.json` | Dominio |
 | ADR-001 | Desacople quirúrgico de QuantConnect: dominio Lean-free | Arquitectura |
+
+## ADR-038 — OfiContrarianStrategy: aprobación QC IS 2021-2024 y decisiones de design
+**Fecha:** 2026-06-11
+
+**Contexto:**
+Hito E requería una segunda estrategia manual con edge validado en M4 y QC IS 2021-2024. Después de 12 candidatas rechazadas, `OfiContrarianStrategy` pasó ambas fases.
+
+**Hipótesis:** OFI (Order Flow Imbalance) normalizado en el rango [-1,1] es mean-reverting en 1h. Cuando el OFI está en el percentil inferior de su historial reciente (vendedores agresivos dominan), el precio tiende a rebotar porque los vendedores se agotan. Señal long-only: `ofi_percentile < (1 - threshold)`.
+
+**Resultados M4 (Python, IS 2021-2024, 0.04% round-trip, grid 27 configs):**
+- BTC +0.869, ETH +1.475, SOL +1.367 con window=24, threshold=0.85, hold=8h
+- 25/27 configs pasan Sharpe ≥ 0.5 (93%)
+- Win rate 50-52%, expectancy positiva en los 3 activos
+- Lado Short (high OFI → price drops) no tiene edge estable: descartado. Long-only.
+
+**Resultados QC IS 2021-2024 (SL=10%, TP=15%, MaxBars=8, Risk=1%, NullStrategyHealthMonitor):**
+- Sharpe portfolio combinado: **0.503** (umbral M1 = 0.5 → PASA)
+- CAGR: 11.69%, Net Profit: +55.7% ($100k → $155,663)
+- Sortino: 0.702, Probabilistic Sharpe: 21.44%
+- Max Drawdown: **41.1%** — alto, esperado con 3 activos cripto altamente correlacionados
+- Win Rate: 44%, Avg Win: +1.48%, Avg Loss: -1.01%, P/L Ratio: 1.46, Expectancy: 0.078
+- 640 trades cerrados en 4 años, 1946 órdenes totales
+- Kill switch ConsecutiveLossesMonitor: 1 activación en 2024-08-05 (8 pérdidas consecutivas), cooling-off 1 día, luego recovered.
+- Backtest completado exitosamente (Status: Completed, sin RuntimeError).
+- Slippage: 0.2% round-trip embedido en fill prices (ConstantSlippageModel 0.1% por lado). MÁS conservador que M4 (0.04% round-trip). La diferencia de Sharpe entre M4 (~1.2) y QC IS (0.503) se explica por: position sizing conservador (10% equity por trade con SL=10%/Risk=1%), SL/TP early exits (win rate cae de 50% en M4 a 44% en QC), portfolio effects (3 activos correlacionados compartiendo capital).
+
+**Decisiones de design:**
+
+**A. Rolling percentile via Queue<double>, no array circular propio.**
+Se eligió `Queue<double>` del BCL (queue simple): `Enqueue` nueva observación, `Dequeue` cuando `Count > lookback`. Lectura con `ToArray()` en cada bar — no es O(n) el hotpath que importa. Alternativa: array circular + puntero de escritura (O(1) amortizado, más complejo). La Queue es suficiente para 24-96 elementos y el hotpath de un bar 1h no requiere optimización sub-ms.
+
+**B. Timestamp alignment: `marketBar.TimestampUtc.AddHours(-1)` para lookup de microBar.**
+Los `MarketBar` de QC reportan el cierre de la barra (e.g., 01:00 UTC para la barra 00:00-01:00). Las filas del CSV de microestructura están keyed por inicio de barra (00:00 UTC). La estrategia hace `AddHours(-1)` para mapear el cierre al inicio y encontrar el microBar correspondiente. Alternativa: almacenar filas keyed por cierre en el MicrostructureRegistry. Se eligió mantener el registry keyed por inicio (formato nativo del CSV) y ajustar en la estrategia — la convención es más limpia y evita ambigüedad sobre qué timestamp representa la fila.
+
+**C. Long-only: Side Short descartado.**
+M4 confirmó que el lado Short (high OFI → price drops) no tiene edge estable en 2021-2024 en ninguno de los 3 activos. El contexto es que los mercados cripto tienen sesgo alcista estructural en ese período: la venta agresiva se absorbe rápidamente y el precio rebota. Una estrategia Long+Short habría degradado el Sharpe cross-asset. El lado Short no se implementó — no hay constante en la clase ni en la config para activarlo.
+
+**D. NullStrategyHealthMonitor para QC IS.**
+El IS test bypasea el OPS-2 monitor (StrategyHealthMonitor) para medir la señal pura sin interrupción por degradación detectada. El kill switch ConsecutiveLossesMonitor (riesgo global, NO OPS-2) sigue activo — es el guard de riesgo del portafolio que se debe mantener incluso en IS. En paper/live se restaura el StrategyHealthMonitor. Esta decisión está documentada en el código como comentario en la sesión IS, pero el archivo de producción (post-aprobación QC IS) usa el monitor real.
+
+**Consecuencias:**
+- `OfiContrarianStrategy` es la segunda estrategia de producción del sistema (primera: `EmaCrossStrategy` como estrategia de validación infra, vetada para live por POLICY P1).
+- El Max DD de 41.1% en IS implica que el OPS-2 disparará durante bear markets (2022-Q2 típicamente). Esto es **correcto y esperado** — el monitor pausará la estrategia durante la detección de degradación, no antes.
+- La diferencia M4 Sharpe (1.2) vs QC IS Sharpe (0.503) es estructural: M4 mide el edge de la señal pura, QC IS mide el performance del sistema completo con position sizing, SL/TP y portfolio effects. Ambas métricas son válidas para sus propósitos.
+- Próximo hito: Hito F (Strategy Scaffolder). La existencia de dos estrategias manuales (EmaCross + OfiContrarian) permite identificar qué generalizar.
+
+---
 
 ## ADR-037 — E-INFRA-2: IMicrostructureProvider — features AggTrades sin cambiar IStrategy
 **Fecha:** 2026-06-10

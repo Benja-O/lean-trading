@@ -17,7 +17,7 @@ Registro de hipótesis evaluadas por Fase 0. Fuente de verdad para evitar re-exp
 | E | ATR Compression + Taker Buy Ratio | 1h | BTC, ETH, BNB | ❌ BTC 0/54, ETH 9/54, BNB 0/54 | N/A (M4 rechazado) | N/A | ❌ | TBR no añade edge cross-asset en 1h. ETH tiene señal parcial (TBR=0.55, hold=4-6b, Sharpe ~0.8) pero estadísticamente débil (30-40 trades/4 años). BTC y BNB: 0 configs. El filtro TBR estrecha tanto la señal que no hay frecuencia suficiente. Script: `Research/m4_atr_tbr.py`. |
 
 | E | OFI Momentum | 1h | BTC, ETH, SOL | ❌ 0/27 configs (0%) — Sharpe negativo en todos. Mejor: BTC +0.383 (window=24, thr=0.75, hold=8) | N/A (M4 rechazado) | N/A | ❌ | OFI en top percentil no predice continuación en 1h. Contrariamente, Short cuando OFI bajo da Sharpe -1.2 (implica que precio SUBE después de venta agresiva). Script: `Research/m4_ofi_momentum.py`. |
-| E | OFI Contrarian (Long-only) | 1h | BTC, ETH, SOL | ✅ 25/27 configs. Mejor: BTC +0.869, ETH +1.475, SOL +1.367 (window=24, thr=0.85, hold=8) | Pendiente QC IS | 51-52% | Pendiente | M4 PASS. Long cuando OFI en bottom 15% (vendedores agotados → rebote). 2022 bear: BTC -0.863, SOL -0.586, ETH +0.919. Implementada. Script: `Research/m4_ofi_contrarian.py`. |
+| E | OFI Contrarian (Long-only) | 1h | BTC, ETH, SOL | ✅ 25/27 configs. Mejor: BTC +0.869, ETH +1.475, SOL +1.367 (window=24, thr=0.85, hold=8) | **0.503** (IS 2021-2024, NullOPS-2, SL=10%, TP=15%) | 44% | ✅ | QC IS PASA M1 (Sharpe=0.503≥0.5). CAGR 11.69%, DD 41.1% (alto — 3 activos cripto correlacionados). Kill switch 1 vez (2024-08-05, 8 pérdidas consecutivas → cooling-off 1 día). Ver ADR-038. |
 
 ---
 
@@ -128,7 +128,7 @@ Registro de hipótesis evaluadas por Fase 0. Fuente de verdad para evitar re-exp
 - Hallazgo: el OFI en 1h es mean-reverting, no momentum. Buying pressure gets absorbed (precio ya subió con la compra agresiva). La señal contraria (buy the dip after heavy selling) tiene mucho más edge.
 - Script: `Research/m4_ofi_momentum.py`
 
-### OFI Contrarian — Long-only (candidata B, derived from OFI Momentum analysis)
+### OFI Contrarian — Long-only (candidata B — APROBADA QC IS)
 - Hipótesis: cuando OFI está en el percentil inferior de su distribución reciente (vendedores agresivos), el mercado está sobre-vendido localmente y el precio rebota en las próximas N horas.
 - M4 IS 2021-2024 (1h, BTC/ETH/SOL, grid 27 configs: window=[24,48,96], thr=[0.75,0.80,0.85], hold=[4,6,8]):
   - 25/27 configs pasan el gate (93%).
@@ -138,7 +138,16 @@ Registro de hipótesis evaluadas por Fase 0. Fuente de verdad para evitar re-exp
   - 2022: BTC -0.863, ETH +0.919, SOL -0.586 (bear market: Long-only pierde en BTC/SOL)
   - 2023: BTC +1.653, ETH +0.844, SOL +1.863 (recovery)
   - 2024: BTC +1.744, ETH +1.100, SOL +1.126 (bull market)
-- Win rate: 50-52%, expectancy BTC +0.060%/trade, ETH +0.130%, SOL +0.179%.
-- Riesgo principal: Long-only pierde en bear markets sostenidos. OPS-2 puede disparar durante 2022.
+- Win rate M4: 50-52%, expectancy BTC +0.060%/trade, ETH +0.130%, SOL +0.179%.
+- **QC IS 2021-2024 (SL=10%, TP=15%, MaxBars=8, Risk=1%, NullStrategyHealthMonitor):**
+  - Sharpe: **0.503** — PASA M1 (≥0.5). Sortino: 0.702.
+  - CAGR: 11.69%, Net Profit: +55.7% ($100k→$155,663).
+  - Max Drawdown: **41.1%** (alto; esperado con 3 activos cripto correlacionados).
+  - Win Rate: 44%, Avg Win: +1.48%, Avg Loss: -1.01%, P/L Ratio: 1.46.
+  - Trades cerrados: 640, expectancy portfolio: +0.078.
+  - Kill switch: 1 vez en 2024-08-05 (8 pérdidas consecutivas), cooling-off 1 día. Luego recuperó.
+  - Fees: ₮1.28 fijo (negligible); slippage 0.2% round-trip ya embedido en fills.
+  - Estado backtest: Completed (2021-01-01 → 2024-12-31).
 - Implementada: `OfiContrarianStrategy.cs`, 7 tests unitarios, registrada en StrategyFactory.
-- Script: `Research/m4_ofi_contrarian.py`
+- Scripts: `Research/m4_ofi_contrarian.py`, `Research/m4_ofi_momentum.py`.
+- ADR: ADR-038.
