@@ -86,13 +86,11 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ HITO F: Strategy Scaffolder                                 │
-│ Comando que genera esqueleto de estrategia nueva:           │
-│ - Clase IStrategy + entrada en strategies.json              │
-│ - Tests de referencia de indicadores                        │
-│ - Tests de comportamiento con datos sintéticos              │
-│ Recién se construye DESPUÉS de tener dos estrategias        │
-│ hechas a mano para saber qué generalizar.                   │
+│ ✅ HITO F: Strategy Scaffolder — COMPLETADO 2026-06-11      │
+│ New-Strategy.ps1 en la raíz del repo.                       │
+│ Uso: .\New-Strategy.ps1 -Name RsiMeanReversion              │
+│ Genera: clase IStrategy skeleton + tests (3 stubs) +        │
+│ snippet JSON para strategies.json + línea StrategyFactory.  │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -238,7 +236,7 @@ dado que la estrategia se ha validado en 15m, 1h y 4h.
 |---|---|---|---|---|
 | ✅ | HITO-C | Paper trading (validación operativa del sistema) | Bloque 3 ✅ | **Completado 2026-06-09.** Primer trade 2026-06-09T00:30 UTC (BTCUSDT 15m), posición cerrada 04:36 UTC. Ciclo completo U1→U4 validado. Ver historial completado. |
 | ✅ | HITO-E | Segunda estrategia manual — COMPLETADO 2026-06-11 | Hito C ✅ | 13 candidatas evaluadas, 12 rechazadas. Aprobada: `OfiContrarianStrategy` — M4 PASS 25/27 configs + QC IS 2021-2024 Sharpe=0.503 ≥ 0.5, CAGR 11.69%, Net Profit +55.7%, Max DD 41.1%. Long-only: OFI bottom 15% percentil (mean reversion post sellers exhaustion) en BTC/ETH/SOL 1h. 175 tests verdes. ADR-038. Ver `Research/strategy_experiments.md`. |
-| ⬜ | HITO-F | Strategy Scaffolder | Hito E | Comando/script que genera esqueleto de estrategia nueva: clase `IStrategy` + entrada JSON + tests de referencia + tests de comportamiento. Solo después de haber hecho dos estrategias manuales. |
+| ✅ | HITO-F | Strategy Scaffolder | Hito E | **Completado 2026-06-11.** `New-Strategy.ps1` en raíz del repo. Genera clase `IStrategy` + tests skeleton. Imprime snippet JSON y entrada `StrategyFactory`. Ver historial completado. |
 | ⬜ | HITO-G | Walk-Forward Analysis + Monte Carlo + Métricas | Hito F | Pipeline reproducible de validación: walk-forward, Monte Carlo de curva de equity, métricas estándar institucionales (Sharpe, Sortino, Calmar, MAR, profit factor, expectancy, recovery factor), estratificadas por régimen. **Puerta de validación**: ninguna estrategia entra a Hito D sin walk-forward aprobado acá. |
 | ⬜ | HITO-H | Optimización de Hiperparámetros | Hito G | Grid search / bayesiana con purged k-fold cross-validation (López de Prado) para evitar leakage temporal. El rango de búsqueda y el criterio los define el operador. |
 | ⬜ | HITO-D-prev | Validación de broker real (sin estrategia) | Hito H (o paralelo a Hito G/H si tiempo lo permite) | Tareas one-shot contra Binance live que no requieren estrategia corriendo: API keys + scopes + withdrawal locks; órdenes manuales de tamaño mínimo para medir comisiones reales y slippage real; funding fees en perpetuals; reconciliación portfolio interno vs broker. Separado de Hito D para que "live con capital chico" no arranque solo porque el broker ya está conectado. |
@@ -264,6 +262,10 @@ dado que la estrategia se ha validado en 15m, 1h y 4h.
 ## Historial completado
 
 > Los refactors completados se mueven acá con su fecha y un resumen de qué cambió. Orden cronológico: más antiguo arriba.
+
+### ✅ HITO F — Strategy Scaffolder
+**Fecha:** 2026-06-11
+**Resumen:** Script PowerShell `New-Strategy.ps1` en la raíz del repo. Uso: `.\New-Strategy.ps1 -Name RsiMeanReversion`. Genera dos archivos: (1) `Trading.Strategies/Implementations/{Name}Strategy.cs` con clase `sealed`, `IStrategy`, `WarmUpBars`, `EvaluateSignal` con `Dictionary<string, object>` por ticker y TODO comments; (2) `Trading.Application.Tests/Strategies/{Name}StrategyTests.cs` con tres tests stubs: `WarmUpBars_ReturnsExpectedValue`, `EvaluateSignal_DuringWarmUp_ReturnsFlat` y `EvaluateSignal_TODO_DescribeScenario`. Imprime en consola: línea de registro en `StrategyFactory.cs` y snippet JSON para `strategies.json`. Guard fail-loud si alguno de los dos archivos ya existe. Normalización del nombre: acepta con o sin sufijo "Strategy". Implementado en PowerShell puro (sin dependencias externas), ASCII-only para compatibilidad con PS 5.1 sin BOM. Motivación: con objetivo de cartera multi-estrategia/multi-activo, el scaffolder reduce el costo marginal de evaluar cada candidata en fase M4 y garantiza que todas las estrategias arrancan con la estructura y convenciones correctas.
 
 ### ✅ HITO C — Paper trading: validación operativa del sistema
 **Fecha:** 2026-06-03 (inicio) → 2026-06-09 (cierre)
