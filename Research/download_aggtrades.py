@@ -138,11 +138,18 @@ def _parse_bool(v):
 def _read_zip(path):
     try:
         with zipfile.ZipFile(path) as zf:
-            with zf.open(zf.namelist()[0]) as f:
+            fname = zf.namelist()[0]
+            # Binance agregó header row a sus CSVs ~ago 2022; detectarlo por primera celda
+            with zf.open(fname) as f:
+                first_cell = f.readline().decode("utf-8", errors="ignore").split(",")[0].strip()
+            has_header = not first_cell.lstrip("-").isdigit()
+
+            with zf.open(fname) as f:
                 df = pd.read_csv(
                     f,
                     header=None,
                     names=CSV_COLS,
+                    skiprows=1 if has_header else 0,
                     dtype=CSV_DTYPES,
                     converters={"is_buyer_maker": _parse_bool},
                 )
