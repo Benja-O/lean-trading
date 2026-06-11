@@ -6,7 +6,35 @@
     "15m": { "Strategies": [] },
     "30m": { "Strategies": [] },
     "1h":  {
-      "Strategies": []
+      "Strategies": [
+        {
+          "StrategyName": "VwapDeviationStrategy",
+          "Symbol": "BTCUSDT",
+          "StopLossPercentage": 5.0,
+          "TakeProfitPercentage": 10.0,
+          "RiskPerTradePercentage": 1.0,
+          "CombineWithTimeExit": true,
+          "MaxBars": 6
+        },
+        {
+          "StrategyName": "VwapDeviationStrategy",
+          "Symbol": "ETHUSDT",
+          "StopLossPercentage": 5.0,
+          "TakeProfitPercentage": 10.0,
+          "RiskPerTradePercentage": 1.0,
+          "CombineWithTimeExit": true,
+          "MaxBars": 6
+        },
+        {
+          "StrategyName": "VwapDeviationStrategy",
+          "Symbol": "SOLUSDT",
+          "StopLossPercentage": 5.0,
+          "TakeProfitPercentage": 10.0,
+          "RiskPerTradePercentage": 1.0,
+          "CombineWithTimeExit": true,
+          "MaxBars": 6
+        }
+      ]
     },
     "4h":  { "Strategies": [] },
     "1d":  { "Strategies": [] }

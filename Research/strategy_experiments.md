@@ -128,6 +128,40 @@ Registro de hipótesis evaluadas por Fase 0. Fuente de verdad para evitar re-exp
 - Hallazgo: el OFI en 1h es mean-reverting, no momentum. Buying pressure gets absorbed (precio ya subió con la compra agresiva). La señal contraria (buy the dip after heavy selling) tiene mucho más edge.
 - Script: `Research/m4_ofi_momentum.py`
 
+---
+
+## Hipótesis de Microestructura (Hito E — batch 2, sesión 2026-06-11)
+
+Evaluación de 10 hipótesis basadas en datos AggTrades (OFI, CVD, ArrivalRate, MeanTradeSize, BuySellRatio, PriceReturn).
+Período IS: 2021-2024. Período OOS: 2025-2026-06-09. Activos: BTCUSDT, ETHUSDT, SOLUSDT. Timeframe: 1h.
+
+| ID | Hipótesis | Implementación | M4 Sharpe (BTC/ETH/SOL) | QC IS Sharpe | QC OOS Sharpe | Estado |
+|---|---|---|---|---|---|---|
+| H1 | VWAP Deviation — Long cuando (close-vwap)/vwap < -1.5% | VwapDeviationStrategy | ✅ PASS (≥2/3) | -0.369 | — | ❌ FAIL IS |
+| H2 | Trade Count Spike — Long cuando ArrivalRate en P95 y PriceReturn plano | TradeCountSpikeStrategy | ✅ PASS (≥2/3) | -1.553 | — | ❌ FAIL IS |
+| H3 | CVD Sell Exhaustion — Long cuando close=min(47b) y CvdDelta>0 | CvdSellExhaustionStrategy | ✅ PASS (≥2/3) | 2.178 | 1.718 | ✅ APROBADA |
+| H4 | CVD Structure Shift — Long cuando CVD cambia de negativo a positivo | — (M4 FAIL) | ❌ FAIL | — | — | ❌ |
+| H5 | Trade Size Institutional — Long cuando MeanTradeSize en P90 y BSR>1.02 | TradeSizeInstitutionalStrategy | ✅ PASS (≥2/3) | 3.985 | 4.186 | ✅ APROBADA |
+| H6 | CVD-OFI Divergence — Long cuando CVD positivo pero OFI negativo | — (M4 FAIL) | ❌ FAIL | — | — | ❌ |
+| H7 | Arrival Rate Momentum — Long cuando ArrivalRate acelerando | — (M4 FAIL) | ❌ FAIL | — | — | ❌ |
+| H8 | Bid-Ask Imbalance — Long cuando BuySellRatio en percentil extremo | — (M4 FAIL) | ❌ FAIL | — | — | ❌ |
+| H9 | Trade Count Spike Short — Short cuando ArrivalRate spike y return positivo | — (M4 FAIL) | ❌ FAIL | — | — | ❌ |
+| H10 | Selling Climax — Long cuando SellingPressure extrema (ArrivalRate+return<-0.3%) | SellingClimaxStrategy | ✅ PASS (≥2/3) | -5.128 (SL=30%) | — | ❌ FAIL IS |
+
+### Notas por hipótesis
+
+**H1 — VwapDeviation**: Sin filtro de dirección. Entra en "dips" que en enero 2021 eran caídas de -10-14%. OPS-2/ConsecutiveLossesMonitor la mata antes de que pueda recuperar. Sharpe IS=-0.369, WR=50%.
+
+**H2 — TradeCountSpike**: ArrivalRate spike + PriceReturn plano. El filtro `|return| < 0.5%` previene entradas en los crashes de enero 2021, pero la estrategia igual fue matada por OPS-2 en febrero 2022. Sharpe IS=-1.553, WR=58%. No hay dirección de flujo que proteja.
+
+**H3 — CvdSellExhaustion**: Condición `close ≤ min(47b)` AND `CvdDelta > 0` proporciona dos filtros naturales: (a) precio en mínimo local genuino, (b) flujo neto positivo (compradores superan vendedores netos). El CvdDelta > 0 durante crashes donde los vendedores dominan protege de las caídas de enero 2021. OPS-2 mató ETHUSDT en sep-2023 y BTC/SOL en ene-2022, pero antes habían sido rentables. IS Sharpe=2.178, OOS Sharpe=1.718, CAGR OOS=30.4%, P(Sharpe<0)=1%. **APROBADA Hito G**.
+
+**H5 — TradeSizeInstitutional**: MeanTradeSize en P90 + BuySellRatio > 1.02. El filtro BSR > 1.02 previene entrada cuando hay presión vendedora neta — mecanismo de protección clave durante el crash de enero 2021 (BSR colapsa <1 durante pánico). IS Sharpe=3.985, OOS Sharpe=4.186 (OOS mejor que IS — señal robusta), CAGR OOS=97%, MaxDD=5.9%, P(Sharpe<0)=0%. **APROBADA Hito G — resultado extraordinario**.
+
+**H10 — SellingClimax**: ArrivalRate spike + PriceReturn < -0.3%. Contrarian puro sin filtro de flujo. Con SL=5%: Sharpe=-3.183 (caídas de enero 2021 >5% causan stop masivos). Con SL=30%: Sharpe=-5.128 (permite pérdidas enormes en crashes). No existe SL viable para este tipo de señal contrarian sin filtro de flujo.
+
+**H4/H6/H7/H8/H9**: Rechazadas en M4. Hipótesis de momentum de CVD/OFI/ArrivalRate o bid-ask imbalance no mostraron Sharpe ≥ 0.5 en ≥2/3 activos en el grid de parámetros evaluado (scripts: `Research/m4_micro_*.py`).
+
 ### OFI Contrarian — Long-only (candidata B — APROBADA QC IS)
 - Hipótesis: cuando OFI está en el percentil inferior de su distribución reciente (vendedores agresivos), el mercado está sobre-vendido localmente y el precio rebota en las próximas N horas.
 - M4 IS 2021-2024 (1h, BTC/ETH/SOL, grid 27 configs: window=[24,48,96], thr=[0.75,0.80,0.85], hold=[4,6,8]):

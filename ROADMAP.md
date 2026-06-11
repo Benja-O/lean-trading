@@ -67,11 +67,11 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
 │ ✅ HITO E: Segunda estrategia manual — COMPLETADO 2026-06-11  │
-│ 13 evaluadas, 12 rechazadas. Candidata: OfiContrarianStrategy│
-│ M4 PASS 25/27, QC IS Sharpe=0.503. RECHAZADA en Hito G:     │
-│ OOS 2025 Sharpe=-0.703, P(Sharpe<0)=77%. Edge bull-only.    │
-│ Eliminada del repo. Historial: Research/strategy_experiments │
-│ Tests al cierre: 175 verdes. ADR-038, ADR-039.               │
+│ Batch 1 (OFI): OfiContrarianStrategy rechazada Hito G.      │
+│ Batch 2 (microestructura): 10 hipótesis, 2 APROBADAS:       │
+│   CvdSellExhaustionStrategy (IS=2.178 / OOS=1.718)          │
+│   TradeSizeInstitutionalStrategy (IS=3.985 / OOS=4.186)     │
+│ ADR-038, ADR-039. Historial: Research/strategy_experiments  │
 │                                                             │
 │ Sub-tareas de infraestructura completadas:                  │
 │ ✅ E-INFRA-1: Descarga histórica AggTrades (BTC/ETH/SOL)    │
@@ -98,9 +98,10 @@ El proyecto está organizado en bloques de trabajo. Los refactors técnicos est�
 │ calcula 9 métricas institucionales, MC block bootstrap 10k. │
 │ Gate 1: Trades≥50, NetProfit>0, Sharpe≥0.3, PF≥1.1.        │
 │ Gate 2: P(Sharpe<0)≤20%, MedianMaxDD≤55%, P5 CAGR>-5%.     │
-│ Primera validación: OfiContrarianStrategy RECHAZADA.        │
-│ OOS Sharpe=-0.703, P(Sharpe<0)=77%. Edge bull-only.         │
-│ PUERTA DE VALIDACIÓN activa. Estado: sin candidata.         │
+│ Validaciones: OFI rechazada; CvdSellExhaustion APROBADA     │
+│ (OOS Sharpe=1.718, CAGR=30.4%, P(Sharpe<0)=1%);            │
+│ TradeSizeInstitutional APROBADA (OOS Sharpe=4.186,          │
+│ CAGR=97%, P(Sharpe<0)=0%). 2 candidatas activas.            │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -232,9 +233,9 @@ dado que la estrategia se ha validado en 15m, 1h y 4h.
 | Estado | ID | Hito | Pre-requisito | Comentario |
 |---|---|---|---|---|
 | ✅ | HITO-C | Paper trading (validación operativa del sistema) | Bloque 3 ✅ | **Completado 2026-06-09.** Primer trade 2026-06-09T00:30 UTC (BTCUSDT 15m), posición cerrada 04:36 UTC. Ciclo completo U1→U4 validado. Ver historial completado. |
-| ✅ | HITO-E | Segunda estrategia manual — COMPLETADO 2026-06-11 | Hito C ✅ | 13 candidatas evaluadas, 12 rechazadas. Candidata aprobada IS: `OfiContrarianStrategy` — M4 PASS 25/27, QC IS Sharpe=0.503. **Rechazada en Hito G (2026-06-11):** OOS 2025 Sharpe=-0.703, P(Sharpe<0)=77%, edge ligado a bull market 2021-2024. Eliminada del repo. ADR-038, ADR-039. Ver `Research/strategy_experiments.md`. |
+| ✅ | HITO-E | Segunda estrategia manual — COMPLETADO 2026-06-11 | Hito C ✅ | **Batch 1 (OFI):** 13 candidatas evaluadas, OfiContrarianStrategy aprobada IS (Sharpe=0.503) pero rechazada Hito G (OOS Sharpe=-0.703). ADR-038, ADR-039. **Batch 2 (microestructura, 2026-06-11):** 10 hipótesis evaluadas (H1-H10). 5 pasaron M4. 2 APROBADAS Hito G: `CvdSellExhaustionStrategy` (IS=2.178 / OOS=1.718) y `TradeSizeInstitutionalStrategy` (IS=3.985 / OOS=4.186). 3 RECHAZADAS IS (H1 VwapDeviation=-0.369, H2 TradeCountSpike=-1.553, H10 SellingClimax=-5.128). Ver `Research/strategy_experiments.md`. |
 | ✅ | HITO-F | Strategy Scaffolder | Hito E | **Completado 2026-06-11.** `New-Strategy.ps1` en raíz del repo. Genera clase `IStrategy` + tests skeleton. Imprime snippet JSON y entrada `StrategyFactory`. Ver historial completado. |
-| ✅ | HITO-G | IS/OOS Validation + Monte Carlo + Métricas | Hito F | **Completado 2026-06-11.** `Trading.Analytics` (C#, strategy-agnostic): lee transaction-log.csv IS+OOS, calcula 9 métricas institucionales, block bootstrap MC 10k sims. Gate 1: Trades≥50, NetProfit>0, Sharpe≥0.3, PF≥1.1. Gate 2: P(Sharpe<0)≤20%, MedianMaxDD≤55%, P5 CAGR>-5%. Primera validación: `OfiContrarianStrategy` RECHAZADA (OOS Sharpe=-0.703, P(Sharpe<0)=77%). Ver ADR-039. Estado: pipeline listo, sin candidata activa. |
+| ✅ | HITO-G | IS/OOS Validation + Monte Carlo + Métricas | Hito F | **Completado 2026-06-11.** `Trading.Analytics` (C#, strategy-agnostic): lee transaction-log.csv IS+OOS, calcula 9 métricas institucionales, block bootstrap MC 10k sims. Gate 1: Trades≥50, NetProfit>0, Sharpe≥0.3, PF≥1.1. Gate 2: P(Sharpe<0)≤20%, MedianMaxDD≤55%, P5 CAGR>-5%. Validaciones: OfiContrarianStrategy RECHAZADA; CvdSellExhaustion APROBADA (OOS Sharpe=1.718, P(Sharpe<0)=1%); TradeSizeInstitutional APROBADA (OOS Sharpe=4.186, P(Sharpe<0)=0%). Estado: **2 candidatas activas** listas para Hito D-prev / Hito D. |
 | ⬜ | HITO-H | Optimización de Hiperparámetros | Hito G | Grid search / bayesiana con purged k-fold cross-validation (López de Prado) para evitar leakage temporal. El rango de búsqueda y el criterio los define el operador. |
 | ⬜ | HITO-D-prev | Validación de broker real (sin estrategia) | Hito H (o paralelo a Hito G/H si tiempo lo permite) | Tareas one-shot contra Binance live que no requieren estrategia corriendo: API keys + scopes + withdrawal locks; órdenes manuales de tamaño mínimo para medir comisiones reales y slippage real; funding fees en perpetuals; reconciliación portfolio interno vs broker. Separado de Hito D para que "live con capital chico" no arranque solo porque el broker ya está conectado. |
 | ⬜ | HITO-D | Live trading con capital chico | Hito D-prev + al menos una estrategia con walk-forward aprobado en Hito G | Requisito de entrada **inquebrantable**: estrategia con walk-forward aprobado. EmaCrossStrategy NO opera live (POLICY 7.1). El tamaño "chico" es el riesgo psicológico que el operador puede absorber sin distorsionar su juicio operativo; no es "tan poco que no importa" (POLICY P4). |
