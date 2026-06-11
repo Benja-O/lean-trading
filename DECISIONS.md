@@ -67,7 +67,7 @@ Opción A — inyección por constructor en la estrategia, sin modificar `IStrat
 - `MicrostructureRegistry` (Application/Microstructure): implementa `IMicrostructureProvider`. Carga el CSV al boot en un `Dictionary<(InstrumentId, DateTime), MicrostructureBar>`, lookup O(1). Si el CSV no existe, loguea Warning y retorna null para ese instrumento — las estrategias OHLCV-only no se ven afectadas.
 - `StrategyFactory.Create` acepta `IMicrostructureProvider` como parámetro opcional. Las estrategias microestructurales lo reciben por constructor; las OHLCV-only lo ignoran.
 - `TradingAlgorithmHost`: construye el registry, carga CSVs para todos los símbolos activos, pasa el registry al factory.
-- CSV cargado desde `{BaseDirectory}/microstructure/{SYMBOL}_1h_features.csv`, generado por el pipeline Python.
+- CSV cargado desde la ruta configurada en `strategies.json` → `MicrostructureDataPath`. Si el campo es null, fallback a `{BaseDirectory}/microstructure/{SYMBOL}_1h_features.csv`. Esto evita copiar los CSVs (~17 MB total) al build output cuando ya residen en un directorio de datos externo.
 
 **Alternativas consideradas:**
 
