@@ -403,17 +403,17 @@ namespace Trading.Strategies
         }
 
         // Hook D-prev: coloca UNA orden de 1 SOL para verificar conectividad real del broker.
-        // Activar con: set BROKER_VALIDATION_MODE=1 antes de arrancar el proceso.
+        // Activar: agregar "broker-validation-mode": true en config.json (a nivel raíz).
         // Eliminar este método tras completar el checklist de Hito D-prev (ADR-041).
         private void PlaceBrokerValidationOrderIfRequested()
         {
             if (!LiveMode) return;
-            if (Environment.GetEnvironmentVariable("BROKER_VALIDATION_MODE") != "1") return;
+            if (!QuantConnect.Configuration.Config.GetBool("broker-validation-mode")) return;
 
             _logger.Warning(
-                "D-prev — BROKER_VALIDATION_MODE activo: colocando orden de prueba 1 SOL en Binance USDT-M. " +
+                "D-prev — broker-validation-mode activo: colocando orden de prueba 1 SOL (~$67) en Binance USDT-M. " +
                 "Verificar fill en Binance Web y cerrar la posición manualmente si el SL/TP no la cierra. " +
-                "Desactivar BROKER_VALIDATION_MODE tras confirmar Hito D-prev completado.");
+                "Poner broker-validation-mode: false en config.json tras confirmar Hito D-prev completado.");
 
             _orderRouter.SubmitMarketOrder(new InstrumentId("SOLUSDT"), 1m, "broker-validation-d-prev");
         }
