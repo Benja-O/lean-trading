@@ -76,6 +76,7 @@ namespace Trading.Strategies
         // Servicios de Application
         private OrderRegistry _orderRegistry;
         private RiskOrchestrator _riskOrchestrator;
+        private DrawdownMonitor _drawdownMonitor;
         private ConsecutiveLossesMonitor _consecutiveLossesMonitor;
         private PositionSizer _positionSizer;
         private BarProcessingService _barProcessingService;
@@ -110,13 +111,13 @@ namespace Trading.Strategies
             string strategiesFilePath = System.IO.Path.Combine(System.AppContext.BaseDirectory, "strategies.json");
             var rootConfiguration = _strategyConfigurationLoader.Load(strategiesFilePath);
 
-            var drawdownMonitor = new DrawdownMonitor(_portfolioState, 0.25m);
+            _drawdownMonitor = new DrawdownMonitor(_portfolioState, 0.25m);
             _consecutiveLossesMonitor = new ConsecutiveLossesMonitor(8);
             var activeInstruments = ExtractActiveInstruments(rootConfiguration);
             var riskAction = new LiquidateAllRiskAction(_orderRouter, _portfolioState, activeInstruments);
             var coolingOffTracker = new CoolingOffTracker(_clock, TimeSpan.FromDays(1));
             _riskOrchestrator = new RiskOrchestrator(
-                new IRiskMonitor[] { drawdownMonitor, _consecutiveLossesMonitor },
+                new IRiskMonitor[] { _drawdownMonitor, _consecutiveLossesMonitor },
                 riskAction, coolingOffTracker, _clock, _logger, domainEventBus);
             _positionSizer = new PositionSizer(_portfolioState, _instrumentMetadata, _logger);
 
@@ -132,8 +133,9 @@ namespace Trading.Strategies
                 SetCash("USD", 0);
             }
             // En live, el cash y el rango temporal los provee el brokerage / wall clock.
-
-            drawdownMonitor.InitializeWithCurrentValue();
+            // DrawdownMonitor se inicializa en OnWarmupFinished(), no aquí:
+            // en live mode el broker carga el balance real DESPUÉS de Initialize(),
+            // por lo que capturarlo aquí daría el default de Lean (~100k) como high-water mark.
 
             this.SetBrokerageModel(BrokerageName.Binance, AccountType.Margin);
             SetBenchmark(x => 0);
@@ -399,6 +401,9 @@ namespace Trading.Strategies
         public override void OnWarmupFinished()
         {
             base.OnWarmupFinished();
+            // El balance real del broker ya está cargado; este es el momento correcto
+            // para fijar el high-water mark del DrawdownMonitor.
+            _drawdownMonitor.InitializeWithCurrentValue();
             PlaceBrokerValidationOrderIfRequested();
         }
 
