@@ -194,7 +194,7 @@ if __name__ == '__main__':
     print("M4: RSI Mean Reversion condicionado por HMM Squeeze (4h)")
     print("=" * 65)
 
-    MODEL_DIR = r'f:\DesarrolloTrading\QuantConnect\Lean\models\regime'
+    MODEL_DIR = r'f:\DesarrolloTrading\QuantConnect\Lean\Trading.Models\regime'
     START = '2020-01-01'
     END   = '2025-12-31'
 

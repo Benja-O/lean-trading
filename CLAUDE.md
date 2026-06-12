@@ -64,10 +64,34 @@ Cuando una estrategia falla **M4** o los criterios de muerte **M1/M2** del backt
 
 1. **Eliminar el archivo `.cs`** con `git rm` — el historial de git preserva el código si se necesita recuperar.
 2. **No dejar clases `IStrategy` sin registrar** en `StrategyFactory` — el dead code confunde futuras sesiones.
-3. **Documentar el resultado** en `Research/strategy_experiments.md` antes del commit.
+3. **Documentar el resultado** en `Trading.Research/strategy_experiments.md` antes del commit.
 4. El commit de eliminación lleva el mensaje `chore(hito-X): eliminar <Nombre>Strategy — rechazada por Fase 0`.
 
 Esta regla aplica tanto a rechazo por M4 (nunca llega a backtest) como a rechazo post-backtest (M1/M2 fallidos).
+
+## 🗂️ Mapa de directorios — qué pertenece a quién
+
+Este repo es un fork de **QuantConnect/Lean**. La mayoría de las carpetas son de Lean y **no deben modificarse** salvo que la tarea lo exija explícitamente. Las carpetas propias del proyecto de trading son:
+
+| Carpeta | Dueño | Contenido |
+|---|---|---|
+| `Trading.Domain/` | **Nuestro** | Entidades, interfaces, value objects |
+| `Trading.Domain.Tests/` | **Nuestro** | Tests unitarios de dominio |
+| `Trading.Application/` | **Nuestro** | Casos de uso, servicios de aplicación |
+| `Trading.Application.Tests/` | **Nuestro** | Tests de aplicación |
+| `Trading.Strategies/` | **Nuestro** | Implementaciones IStrategy (EmaCross, Cvd, etc.) |
+| `Trading.Strategies.Tests/` | **Nuestro** | Tests de estrategias |
+| `Trading.Analytics/` | **Nuestro** | Indicadores, métricas, cálculos analíticos |
+| `Trading.Data/` | **Nuestro** | Adaptadores de datos, repositorios |
+| `Trading.Research/` | **Nuestro** | Scripts M4 (`m4_*.py`), `strategy_experiments.md` |
+| `Trading.Models/` | **Nuestro** | Modelos de régimen y artefactos ML entrenados |
+| `Algorithm.CSharp/` | **Lean** | Algoritmos de ejemplo de QC — no agregar código nuestro |
+| `Research/` | **Lean** | Notebooks de QC; contiene `QuantConnect.Research.csproj` — no mezclar |
+| Todo lo demás | **Lean** | No tocar salvo necesidad explícita y justificada |
+
+**Regla:** Antes de crear o mover un archivo, verificar en esta tabla a qué dueño pertenece el directorio destino. Si no aparece en la columna "Nuestro", preguntar antes de actuar.
+
+> **Origen del error:** `Research/` tiene `QuantConnect.Research.csproj` y es de Lean, pero históricamente se mezclaron scripts custom ahí. La carpeta `Trading.Research/` es el destino correcto para todo script propio.
 
 ## Code Navigation
 Always use LSP tools for C# code navigation:

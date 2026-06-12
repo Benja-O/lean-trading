@@ -57,7 +57,7 @@
     <!-- Modelos HMM versionados en el repo (Hito B, Paso 3). MSBuild los copia a
          {OutputPath}/models/regime/ en cada build para que el host los encuentre
          vía Path.Combine(AppContext.BaseDirectory, "models", "regime", ...). -->
-    <Content Include="..\models\regime\*.hmm.json">
+    <Content Include="..\Trading.Models\regime\*.hmm.json">
       <Link>models\regime\%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
