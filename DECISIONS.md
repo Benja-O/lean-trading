@@ -15,6 +15,7 @@
 
 | ADR | TÃ­tulo corto | Ãrea |
 |---|---|---|
+| ADR-041 | Hito D-prev: protocolo de validación broker real Binance USDT-M | Operaciones / Infraestructura |
 | ADR-040 | Pipeline de validación de estrategias: M4 → QC IS → QC OOS → Trading.Analytics | Research / Validación |
 | ADR-039 | Hito G: IS/OOS validation + Monte Carlo â€” metodologÃ­a y rechazo OfiContrarian | ValidaciÃ³n |
 | ADR-038 | OfiContrarianStrategy: aprobaciÃ³n QC IS 2021-2024 y decisiones de design | Estrategias |
@@ -51,6 +52,94 @@
 | ADR-003 | `OrderRegistry` vive en `Trading.Application` | Arquitectura |
 | ADR-002 | `RiskPerTradePercentage` falla loud si no estÃ¡ en `strategies.json` | Dominio |
 | ADR-001 | Desacople quirÃºrgico de QuantConnect: dominio Lean-free | Arquitectura |
+
+## ADR-041 — Hito D-prev: protocolo de validación broker real Binance USDT-M
+**Fecha:** 2026-06-12
+**Estado:** Aceptada
+**ADRs relacionados:** ADR-031 (Hito C: paper trading), ADR-030 (Bypass ValidateSubscription Binance)
+
+### Contexto
+
+Hito C validó que el sistema opera correctamente en `live-paper` (fills ficticios, datos reales).
+Antes de promover las estrategias aprobadas en Hito G a paper trading real (Hito D), es
+necesario verificar que el broker real Binance USDT-M acepta y procesa órdenes enviadas desde Lean.
+El riesgo a validar: que el adapter `BinanceFuturesBrokerage` + `BrokerageTransactionHandler`
+funcionen correctamente bajo las condiciones reales del exchange (comisiones, tamaño mínimo,
+notional mínimo, reconciliación de balance).
+
+La validación se hace con capital mínimo para no exponer equity real significativo durante el
+proceso de verificación.
+
+### Decisión
+
+Se adoptó el siguiente protocolo de validación en cinco pasos:
+
+**Paso 1 — API keys con permiso de trading**
+Crear API keys en Binance Futures USDT-M con permisos: lectura + futures trading (sin retiro).
+Restringir por IP de la máquina de trading. Reemplazar las keys de solo-lectura en `config.json`.
+
+**Paso 2 — Cuenta con capital mínimo (~50 USDT)**
+Depositar USDT suficiente para cubrir el notional mínimo del test y las comisiones:
+1 SOL × precio ~$170 = ~$170 notional. Con apalancamiento 1× en cuenta pequeña, depositar
+mínimo 50 USDT. Capital en riesgo durante D-prev: valor de 1 SOL (~$170, sin apalancamiento).
+
+**Paso 3 — Conectividad sin órdenes**
+Cambiar `"environment"` a `"live-futures-binance"` en `config.json`. Arrancar sin
+`BROKER_VALIDATION_MODE`. Verificar en los logs:
+  - Balance USDT carga correctamente desde Binance
+  - SOLUSDT, BTCUSDT, ETHUSDT se suscriben sin error
+  - Heartbeat.json muestra estado alive
+
+**Paso 4 — Orden de prueba: 1 SOL**
+Setear `BROKER_VALIDATION_MODE=1` y reiniciar. Al completar el warmup, `OnWarmupFinished()`
+coloca una orden de mercado de 1 SOL en SOLUSDT. Criterios de verificación:
+  - `OrderEvent.Filled` se registra en el JSONL
+  - El tag `broker-validation-d-prev` aparece en `OrderRegistry`
+  - El balance USDT en heartbeat.json disminuye ~precio de 1 SOL
+  - La posición se cierra vía SL/TP (MaxBars=8) o manualmente
+
+**Paso 5 — Reconciliación de balance**
+Ejecutar `Trading.Research/broker_validation/reconcile.ps1`. Criterio de aceptación:
+discrepancia entre balance Lean y balance Binance <= 0.5%.
+
+### Funding fees (gap conocido)
+
+Los contratos perpetuos Binance USDT-M cobran funding cada 8 horas (~0.01% típico).
+Este costo NO está modelado en el P&L de Lean (no existe en `BinanceFeeModel` para perpetuos).
+Para las estrategias aprobadas con hold=6-8 barras en 1h, la exposición máxima es ~8h,
+implicando funding de ~0.01% por posición. Este monto es inferior a la comisión taker (0.04%)
+y no altera materialmente la expectancy de H5 (OOS Sharpe=4.186) ni H3 (OOS Sharpe=1.718).
+
+**Decisión**: los funding fees se rastrean externamente (estado de cuenta Binance mensual)
+pero no se modelan en el motor. Se revisará si el haircut real backtest→live supera el 50%
+esperado (POLICY P3), en cuyo caso se considerará incorporarlos al modelo.
+
+### Comisiones
+
+Binance Futures taker: 0.04% por lado (0.08% round-trip), sin descuento BNB.
+El modelo actual usa `ConstantFeeModel(0.001 USDT)` en backtest (fee fija negligible).
+En live, las comisiones reales las aplica el exchange directamente sobre el USDT balance.
+La reconciliación `reconcile.ps1` captura esta diferencia.
+
+### Alternativas descartadas
+
+- **Testnet de Binance Futures**: descartado porque la calidad de datos del testnet es pobre
+  (fills artificiales, book thin), lo que invalida la validación de slippage y fills reales.
+- **Orden de BTCUSDT**: 1 BTC tiene notional ~$60k, 0.001 BTC tiene notional ~$60 pero ese
+  es el lot size mínimo. Con capital ~50 USDT es marginal. SOLUSDT permite 1 SOL (~$170)
+  con más cómodo capital de prueba.
+
+### Consecuencias
+
+- `TradingAlgorithmHost` tiene un método `PlaceBrokerValidationOrderIfRequested()` en
+  `OnWarmupFinished()` que coloca la orden de prueba cuando `BROKER_VALIDATION_MODE=1`.
+  **Este método debe eliminarse tras completar Hito D-prev.**
+- `config.json` tiene el environment `live-futures-binance` listo para activar.
+- `Trading.Research/broker_validation/reconcile.ps1` ejecuta la reconciliación de balance.
+- POLICY.md secciones 7.4 y 7.5 están en estado `pre-paper`, se promoverán a `paper`
+  tras completar este checklist.
+
+---
 
 ## ADR-040 — Pipeline de validación de estrategias: M4 → QC IS → QC OOS → Trading.Analytics
 **Fecha:** 2026-06-12

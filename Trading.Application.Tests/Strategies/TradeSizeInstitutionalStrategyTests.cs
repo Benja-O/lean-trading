@@ -1,5 +1,6 @@
 using FluentAssertions;
 using System;
+using Trading.Application.Tests.Fakes;
 using Trading.Domain.Models;
 using Trading.Domain.ValueObjects;
 using Trading.Strategies.Implementations;
@@ -10,10 +11,15 @@ namespace Trading.Application.Tests.Strategies
     public class TradeSizeInstitutionalStrategyTests
     {
         private static readonly InstrumentId BtcUsdt = new("BTCUSDT");
+        private static readonly DateTime BaseTime = new(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
         private static MarketBar BuildBar(decimal close, int barIndex) =>
-            new(BtcUsdt, close,
-                new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddHours(barIndex));
+            new(BtcUsdt, close, BaseTime.AddHours(barIndex));
+
+        private static MicrostructureBar BuildMsBar(int barIndex, double meanTradeSize, double buySellRatio) =>
+            new(BtcUsdt, BaseTime.AddHours(barIndex),
+                ofi: 0, cvdDelta: 0, cvd: 0, arrivalRate: 100,
+                meanTradeSize: meanTradeSize, buySellRatio: buySellRatio, priceReturn: 0);
 
         [Fact]
         public void WarmUpBars_ReturnsExpectedValue()
@@ -35,11 +41,41 @@ namespace Trading.Application.Tests.Strategies
         }
 
         [Fact]
-        public void EvaluateSignal_TODO_DescribeScenario()
+        public void EvaluateSignal_InstitutionalAccumulation_ReturnsLong()
         {
-            // TODO: implementar test para el escenario principal de senal
-            var strategy = new TradeSizeInstitutionalStrategy();
-            Assert.True(false, "Test pendiente de implementacion.");
+            // H5: MeanTradeSize en P90 del historial Y BuySellRatio > 1.02 → Long.
+            // Se llenan 25 barras con meanTradeSize=1.0 (baseline) para que la siguiente
+            // barra con meanTradeSize=10.0 caiga en el percentil 100 de la ventana de 24.
+            var provider = new FakeMicrostructureProvider();
+            var strategy = new TradeSizeInstitutionalStrategy(provider);
+
+            for (int i = 0; i < 25; i++)
+            {
+                provider.Add(BuildMsBar(i, meanTradeSize: 1.0, buySellRatio: 1.0));
+                strategy.EvaluateSignal(BuildBar(100m, i));
+            }
+
+            provider.Add(BuildMsBar(25, meanTradeSize: 10.0, buySellRatio: 1.05));
+            strategy.EvaluateSignal(BuildBar(100m, 25))
+                .Should().Be(SignalDirection.Long);
+        }
+
+        [Fact]
+        public void EvaluateSignal_LowBuySellRatio_ReturnsFlat()
+        {
+            // MeanTradeSize institucional pero BSR <= threshold → no hay acumulación neta → Flat.
+            var provider = new FakeMicrostructureProvider();
+            var strategy = new TradeSizeInstitutionalStrategy(provider);
+
+            for (int i = 0; i < 25; i++)
+            {
+                provider.Add(BuildMsBar(i, meanTradeSize: 1.0, buySellRatio: 1.0));
+                strategy.EvaluateSignal(BuildBar(100m, i));
+            }
+
+            provider.Add(BuildMsBar(25, meanTradeSize: 10.0, buySellRatio: 1.0));
+            strategy.EvaluateSignal(BuildBar(100m, 25))
+                .Should().Be(SignalDirection.Flat);
         }
     }
 }

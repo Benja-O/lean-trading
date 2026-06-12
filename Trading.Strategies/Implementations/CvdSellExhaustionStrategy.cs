@@ -16,13 +16,13 @@ namespace Trading.Strategies.Implementations
     {
         private const int Lookback = 48;
 
-        private readonly IMicrostructureProvider _microstructure;
+        private readonly IMicrostructureProvider? _microstructure;
         // Queue almacena N-1 = 47 closes previos; incluye barra actual para rolling min de 48 barras
         private readonly Dictionary<string, Queue<double>> _closeHistoryBySymbol = new();
 
         public int WarmUpBars => Lookback + 2;
 
-        public CvdSellExhaustionStrategy(IMicrostructureProvider microstructure)
+        public CvdSellExhaustionStrategy(IMicrostructureProvider? microstructure = null)
         {
             _microstructure = microstructure;
         }

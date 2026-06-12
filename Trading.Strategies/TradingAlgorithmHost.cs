@@ -396,6 +396,28 @@ namespace Trading.Strategies
             SetWarmUp(warmUpSpan);
         }
 
+        public override void OnWarmupFinished()
+        {
+            base.OnWarmupFinished();
+            PlaceBrokerValidationOrderIfRequested();
+        }
+
+        // Hook D-prev: coloca UNA orden de 1 SOL para verificar conectividad real del broker.
+        // Activar con: set BROKER_VALIDATION_MODE=1 antes de arrancar el proceso.
+        // Eliminar este método tras completar el checklist de Hito D-prev (ADR-041).
+        private void PlaceBrokerValidationOrderIfRequested()
+        {
+            if (!LiveMode) return;
+            if (Environment.GetEnvironmentVariable("BROKER_VALIDATION_MODE") != "1") return;
+
+            _logger.Warning(
+                "D-prev — BROKER_VALIDATION_MODE activo: colocando orden de prueba 1 SOL en Binance USDT-M. " +
+                "Verificar fill en Binance Web y cerrar la posición manualmente si el SL/TP no la cierra. " +
+                "Desactivar BROKER_VALIDATION_MODE tras confirmar Hito D-prev completado.");
+
+            _orderRouter.SubmitMarketOrder(new InstrumentId("SOLUSDT"), 1m, "broker-validation-d-prev");
+        }
+
         public override void OnData(Slice data)
         {
             if (IsWarmingUp) return;

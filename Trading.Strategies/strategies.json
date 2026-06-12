@@ -5,10 +5,37 @@
     "5m":  { "Strategies": [] },
     "15m": { "Strategies": [] },
     "30m": { "Strategies": [] },
-    "1h":  {
+    "1h": {
       "Strategies": [
         {
-          "StrategyName": "VwapDeviationStrategy",
+          "StrategyName": "TradeSizeInstitutionalStrategy",
+          "Symbol": "BTCUSDT",
+          "StopLossPercentage": 5.0,
+          "TakeProfitPercentage": 10.0,
+          "RiskPerTradePercentage": 1.0,
+          "CombineWithTimeExit": true,
+          "MaxBars": 8
+        },
+        {
+          "StrategyName": "TradeSizeInstitutionalStrategy",
+          "Symbol": "ETHUSDT",
+          "StopLossPercentage": 5.0,
+          "TakeProfitPercentage": 10.0,
+          "RiskPerTradePercentage": 1.0,
+          "CombineWithTimeExit": true,
+          "MaxBars": 8
+        },
+        {
+          "StrategyName": "TradeSizeInstitutionalStrategy",
+          "Symbol": "SOLUSDT",
+          "StopLossPercentage": 5.0,
+          "TakeProfitPercentage": 10.0,
+          "RiskPerTradePercentage": 1.0,
+          "CombineWithTimeExit": true,
+          "MaxBars": 8
+        },
+        {
+          "StrategyName": "CvdSellExhaustionStrategy",
           "Symbol": "BTCUSDT",
           "StopLossPercentage": 5.0,
           "TakeProfitPercentage": 10.0,
@@ -17,7 +44,7 @@
           "MaxBars": 6
         },
         {
-          "StrategyName": "VwapDeviationStrategy",
+          "StrategyName": "CvdSellExhaustionStrategy",
           "Symbol": "ETHUSDT",
           "StopLossPercentage": 5.0,
           "TakeProfitPercentage": 10.0,
@@ -26,7 +53,7 @@
           "MaxBars": 6
         },
         {
-          "StrategyName": "VwapDeviationStrategy",
+          "StrategyName": "CvdSellExhaustionStrategy",
           "Symbol": "SOLUSDT",
           "StopLossPercentage": 5.0,
           "TakeProfitPercentage": 10.0,

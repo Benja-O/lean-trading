@@ -377,6 +377,78 @@ Riesgo por trade: 2.0% (campo RiskPerTradePercentage en strategies.json).
 
 ---
 
+### 7.4 TradeSizeInstitutionalStrategy / BTC-ETH-SOL / 1h
+
+**Naturaleza de esta estrategia.** H5 del batch de microestructura (Hito E/G, 2026-06-11).
+Completó el pipeline completo: M4 (3/3 activos, Sharpe medio +2.7) → QC IS 2021-2024
+(Sharpe=3.985) → QC OOS 2025 (Sharpe=4.186, MaxDD=5.9%, CAGR=97%). Monte Carlo Gate 2:
+P(Sharpe<0)=0%. Resultado extraordinario: OOS supera IS, señal robusta fuera de muestra.
+
+**Hipótesis.** MeanTradeSize en P90 del historial reciente (SizeWindow=24) Y BuySellRatio >
+1.02 → acumulación institucional silenciosa → precio sube. El filtro BSR previene entradas
+durante pánico (BSR colapsa < 1 en crashes). Long-only.
+
+```
+Estado: pre-paper (pendiente Hito D-prev — validación broker real Binance)
+Fecha inicio paper: pendiente
+Fecha inicio live: pendiente (mínimo 50 trades paper O 30 días, el que llegue después)
+Trades acumulados en vivo: 0
+
+Símbolos activos: BTCUSDT 1h, ETHUSDT 1h, SOLUSDT 1h
+Parámetros (alineados con QC IS/OOS): SL=5%, TP=10%, MaxBars=8, Risk=1%
+
+Umbrales de apagado automático:
+  U1. Drawdown absoluto desde ATH equity de la estrategia > 25%
+  U2. Drawdown rolling 30 días > 15% sostenido 5 días consecutivos
+  U3. Profit factor rolling 30 trades < 1.0 sostenido 10 trades consecutivos *
+  U4. Expectancy rolling 30 trades < 0 sostenido 10 trades consecutivos *
+
+  * U3 y U4 solo se arman tras 50 trades acumulados en vivo.
+
+Filtro de régimen: ninguno (la estrategia no declara CompatibleRegimes — opera
+                   en todos los regímenes, consistent con la config del QC IS/OOS).
+
+Riesgo por trade: 1.0% (campo RiskPerTradePercentage en strategies.json).
+```
+
+---
+
+### 7.5 CvdSellExhaustionStrategy / BTC-ETH-SOL / 1h
+
+**Naturaleza de esta estrategia.** H3 del batch de microestructura (Hito E/G, 2026-06-11).
+Completó el pipeline completo: M4 (≥2/3 activos, BTC Sharpe=+2.178 IS en QC) → QC IS
+2021-2024 (Sharpe=2.178) → QC OOS 2025 (Sharpe=1.718, CAGR=30.4%). Monte Carlo Gate 2:
+P(Sharpe<0)=1%.
+
+**Hipótesis.** close ≤ mínimo de las últimas 48 barras (mínimo local genuino) Y CvdDelta > 0
+(compradores netos en la barra) → vendedores agotados → rebote inminente. El CvdDelta > 0
+durante crashes donde dominan vendedores actúa como filtro natural. Long-only.
+
+```
+Estado: pre-paper (pendiente Hito D-prev — validación broker real Binance)
+Fecha inicio paper: pendiente
+Fecha inicio live: pendiente (mínimo 50 trades paper O 30 días, el que llegue después)
+Trades acumulados en vivo: 0
+
+Símbolos activos: BTCUSDT 1h, ETHUSDT 1h, SOLUSDT 1h
+Parámetros (alineados con QC IS/OOS): SL=5%, TP=10%, MaxBars=6, Risk=1%
+
+Umbrales de apagado automático:
+  U1. Drawdown absoluto desde ATH equity de la estrategia > 25%
+  U2. Drawdown rolling 30 días > 15% sostenido 5 días consecutivos
+  U3. Profit factor rolling 30 trades < 1.0 sostenido 10 trades consecutivos *
+  U4. Expectancy rolling 30 trades < 0 sostenido 10 trades consecutivos *
+
+  * U3 y U4 solo se arman tras 50 trades acumulados en vivo.
+
+Filtro de régimen: ninguno (la estrategia no declara CompatibleRegimes — opera
+                   en todos los regímenes, consistent con la config del QC IS/OOS).
+
+Riesgo por trade: 1.0% (campo RiskPerTradePercentage en strategies.json).
+```
+
+---
+
 ## Apéndice A — Glosario de términos
 
 - **ATH (All-Time High):** máximo histórico observado de una serie (equity, precio).

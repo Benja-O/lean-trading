@@ -18,12 +18,12 @@ namespace Trading.Strategies.Implementations
         private const double SizePct               = 0.90;
         private const double BuySellRatioThreshold = 1.02;
 
-        private readonly IMicrostructureProvider _microstructure;
+        private readonly IMicrostructureProvider? _microstructure;
         private readonly Dictionary<string, Queue<double>> _historyBySymbol = new();
 
         public int WarmUpBars => SizeWindow + 2;
 
-        public TradeSizeInstitutionalStrategy(IMicrostructureProvider microstructure)
+        public TradeSizeInstitutionalStrategy(IMicrostructureProvider? microstructure = null)
         {
             _microstructure = microstructure;
         }
