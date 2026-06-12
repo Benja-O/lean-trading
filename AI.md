@@ -199,6 +199,82 @@ Configuración operativa que NO se commitea al repositorio. Lectura vía `Enviro
    - Schema vive en `Trading.Configuration/Schemas`. Validación con `IValidateOptions<T>` al boot.
    - Si falta un campo obligatorio o un valor está fuera de rango, el sistema **no arranca**. Mensaje de error debe indicar archivo, campo y rango esperado.
 
+## 🔬 Pipeline de Research e Incorporación de Estrategias
+
+Proceso estándar para cualquier nueva hipótesis de trading. **Las fases son lineales con early exit**: si una falla, la hipótesis se descarta y no se avanza a la siguiente. El rationale completo y las alternativas consideradas están en ADR-040.
+
+### Fase 0 — M4 (Python, validación rápida)
+
+Script en `Trading.Research/m4_*.py`. No requiere tocar código C#.
+
+- Período IS: 2021-01-01 → 2024-12-31. Activos: BTC, ETH, SOL. Comisión: 0.04% round-trip.
+- **Gate:** Sharpe ≥ 0.5 en al menos 2 de los 3 activos.
+- **Regla crítica (bloqueante):** el script DEBE trackear estado de posición abierta. Señales solapadas sin posición cerrada inflan el Sharpe artificialmente y producen un falso positivo en M4. Sin este tracking, el gate no tiene valor estadístico.
+- Si falla → documentar en `Trading.Research/strategy_experiments.md`. No implementar `IStrategy`.
+
+### Fase 1 — Implementación `IStrategy`
+
+- Crear clase con `WarmUpBars` = período del indicador más lento.
+- Registrar en `StrategyFactory.Create`.
+- Escribir en el **mismo commit**: test de referencia del indicador + test de comportamiento con barras sintéticas (ver sección Testing).
+- Commit sin resultados de backtest todavía.
+
+### Fase 2 — QC IS (In-Sample 2021-2024)
+
+`strategies.json`: BTC/ETH/SOL 1h, SL/TP según la estrategia, Risk=1%.
+`StrategyHealthMonitor`: **NullStrategyHealthMonitor** (mide el edge puro sin que OPS-2 interrumpa).
+`ConsecutiveLossesMonitor`: activo (guard de riesgo del portfolio).
+`SetStartDate(2021, 1, 1); SetEndDate(2024, 12, 31);`
+
+Procedimiento operativo obligatorio antes de cada run:
+1. `dotnet build Trading.Strategies/Trading.Strategies.csproj`
+2. Copiar `Trading.Strategies/strategies.json` → `Launcher/bin/Debug/strategies.json`
+3. Verificar que **no existe** `Launcher/bin/Debug/net10.0/Trading.Strategies.dll` (el Lean Loader prioriza ese subdirectorio — si existe una versión vieja ahí, se carga esa en lugar del DLL compilado).
+
+**Gate QC IS (M1):** Sharpe del portfolio combinado ≥ 0.5.
+Si falla → `git rm` de la clase y sus tests. Documentar en `Trading.Research/strategy_experiments.md`.
+
+### Fase 3 — QC OOS (Out-of-Sample 2025-presente)
+
+Mismo `strategies.json`. Solo cambia el período:
+`SetStartDate(2025, 1, 1); SetEndDate(año, mes, día);` — fecha lo más cercana al día de evaluación.
+Mismo procedimiento operativo que Fase 2.
+Exportar `transaction-log.csv` con nombre explícito: `{hipótesis}-oos-2025-{año}.csv`.
+No hay gate numérico en esta fase — el CSV alimenta Fase 4.
+
+### Fase 4 — Trading.Analytics (Gate 1 + Gate 2)
+
+```
+dotnet run --project Trading.Analytics -- --is-log <csv> --oos-log <csv> --strategy <nombre> --output <dir>
+```
+
+Gate 1 (OOS determinista — todos deben pasar): Trades ≥ 50, NetProfit > 0, Sharpe ≥ 0.3, PF ≥ 1.1, Expectancy > 0.
+Gate 2 (Monte Carlo 10k — todos deben pasar): P(Sharpe < 0) ≤ 20%, Mediana MaxDD ≤ 55%, P5 CAGR > −5%.
+
+Si falla → `git rm`. Documentar en `Trading.Research/strategy_experiments.md`.
+
+**Si APROBADA:**
+- Agregar entrada en `POLICY.md` sección 7 (estado pre-paper, umbrales U1-U4).
+- Actualizar `ROADMAP.md` con métricas IS/OOS.
+- Commit: `feat(hito-G): <Nombre>Strategy APROBADA IS=X.XX / OOS=X.XX`.
+
+### Monitor en IS vs producción
+
+| Contexto | StrategyHealthMonitor |
+|---|---|
+| QC IS / QC OOS (investigación) | `NullStrategyHealthMonitor` |
+| Paper / Live | `StrategyHealthMonitor` real (OPS-2) |
+
+### Nomenclatura de archivos de resultados
+
+```
+F:\Lean\data\results\backtest-logs\{hipótesis}-{estrategia}-is-{año_ini}-{año_fin}.csv
+F:\Lean\data\results\backtest-logs\{hipótesis}-{estrategia}-oos-{año_ini}-{año_fin}.csv
+F:\Lean\data\results\analytics\validation-{estrategia}-{YYYYMMDD}.md
+```
+
+---
+
 ## 🚫 Anti-patrones Prohibidos (Cheat Sheet)
 
 Listado explícito de cosas que **nunca** deben aparecer en código de este proyecto:
