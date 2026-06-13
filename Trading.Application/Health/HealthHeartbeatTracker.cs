@@ -69,6 +69,21 @@ namespace Trading.Application.Health
             }
         }
 
+        /// <summary>
+        /// Re-baselina el tracking al iniciar el modo live (post-warmup).
+        /// Las barras del warmup usan algorithm time (histórico), por lo que
+        /// _lastBarProcessedUtc queda desfasado respecto al wall clock real.
+        /// Llamar con DateTime.UtcNow desde OnWarmupFinished() para que el
+        /// primer tick del auto-restart timer vea staleness ~ segundos, no horas.
+        /// </summary>
+        public void MarkLiveModeStart(DateTime wallClockNow)
+        {
+            lock (_lock)
+            {
+                _lastBarProcessedUtc = wallClockNow;
+            }
+        }
+
         private void OnBarProcessed(BarProcessedEvent e)
         {
             lock (_lock)

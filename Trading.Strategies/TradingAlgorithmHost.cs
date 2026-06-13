@@ -404,6 +404,11 @@ namespace Trading.Strategies
             // El balance real del broker ya está cargado; este es el momento correcto
             // para fijar el high-water mark del DrawdownMonitor.
             _drawdownMonitor.InitializeWithCurrentValue();
+            // Las barras de warmup usan algorithm time (histórico). Re-baselinar el
+            // tracker con wall clock actual para que el auto-restart timer no dispare
+            // al comparar DateTime.UtcNow contra un timestamp histórico del último bar.
+            if (LiveMode)
+                _healthHeartbeatTracker.MarkLiveModeStart(DateTime.UtcNow);
             PlaceBrokerValidationOrderIfRequested();
         }
 
