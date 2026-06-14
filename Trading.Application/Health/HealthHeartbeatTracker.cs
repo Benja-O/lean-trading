@@ -16,6 +16,7 @@ namespace Trading.Application.Health
         private readonly DateTime _processStartedUtc;
         private DateTime? _lastBarProcessedUtc;
         private DateTime? _lastBarTimestampUtc;
+        private DateTime? _lastDataReceivedUtc;
         private DateTime? _lastOrderSubmittedUtc;
         private DateTime? _lastOrderFilledUtc;
         private DateTime? _lastRiskBreachUtc;
@@ -65,6 +66,10 @@ namespace Trading.Application.Health
                     BarStalenessSeconds: _lastBarProcessedUtc.HasValue
                         ? (now - _lastBarProcessedUtc.Value).TotalSeconds
                         : (double?)null,
+                    LastDataReceivedUtc: _lastDataReceivedUtc,
+                    DataFeedStalenessSeconds: _lastDataReceivedUtc.HasValue
+                        ? (now - _lastDataReceivedUtc.Value).TotalSeconds
+                        : (double?)null,
                     SinkLastWriteFailureMessage: _sinkLastWriteFailureMessage);
             }
         }
@@ -72,15 +77,32 @@ namespace Trading.Application.Health
         /// <summary>
         /// Re-baselina el tracking al iniciar el modo live (post-warmup).
         /// Las barras del warmup usan algorithm time (histórico), por lo que
-        /// _lastBarProcessedUtc queda desfasado respecto al wall clock real.
-        /// Llamar con DateTime.UtcNow desde OnWarmupFinished() para que el
-        /// primer tick del auto-restart timer vea staleness ~ segundos, no horas.
+        /// _lastBarProcessedUtc y _lastDataReceivedUtc quedan desfasados respecto
+        /// al wall clock real. Llamar con DateTime.UtcNow desde OnWarmupFinished()
+        /// para que el primer tick del auto-restart timer (que mira el feed) y el
+        /// ping gate (que mira las barras de estrategia) vean staleness ~ segundos.
         /// </summary>
         public void MarkLiveModeStart(DateTime wallClockNow)
         {
             lock (_lock)
             {
                 _lastBarProcessedUtc = wallClockNow;
+                _lastDataReceivedUtc = wallClockNow;
+            }
+        }
+
+        /// <summary>
+        /// Marca que el feed entregó datos de minuto (liveness del WebSocket).
+        /// Llamado desde OnData en cada slice live (~cada 60s). Independiente de la
+        /// cadencia de barras de estrategia: el auto-restart usa esta marca para
+        /// detectar un socket congelado sin importar el timeframe (1h, 4h, etc.).
+        /// wallClockNow debe ser DateTime.UtcNow (wall clock real, no IClock simulado).
+        /// </summary>
+        public void MarkDataFeedAlive(DateTime wallClockNow)
+        {
+            lock (_lock)
+            {
+                _lastDataReceivedUtc = wallClockNow;
             }
         }
 

@@ -15,6 +15,7 @@
 
 | ADR | TÃ­tulo corto | Ãrea |
 |---|---|---|
+| ADR-042 | Dead-man's switch: liveness del feed (datos de minuto) en vez de cierre de barras de estrategia | Operaciones / Health |
 | ADR-041 | Hito D-prev: protocolo de validación broker real Binance USDT-M | Operaciones / Infraestructura |
 | ADR-040 | Pipeline de validación de estrategias: M4 → QC IS → QC OOS → Trading.Analytics | Research / Validación |
 | ADR-039 | Hito G: IS/OOS validation + Monte Carlo â€” metodologÃ­a y rechazo OfiContrarian | ValidaciÃ³n |
@@ -52,6 +53,72 @@
 | ADR-003 | `OrderRegistry` vive en `Trading.Application` | Arquitectura |
 | ADR-002 | `RiskPerTradePercentage` falla loud si no estÃ¡ en `strategies.json` | Dominio |
 | ADR-001 | Desacople quirÃºrgico de QuantConnect: dominio Lean-free | Arquitectura |
+
+## ADR-042 — Dead-man's switch: liveness del feed en vez de cierre de barras de estrategia
+**Fecha:** 2026-06-14
+**Estado:** Aceptada
+**ADRs relacionados:** ADR-021 (Monitoreo básico: heartbeat + Healthchecks.io), ADR-031 (Hito C: LeanClock UTC), ADR-032 (warm-up dinámico)
+
+### Contexto
+
+Durante la validación de conectividad del Hito D-prev (paso 3), el proceso live terminaba
+solo con `Environment.Exit(1)` poco después del warmup, sin error de Lean. Se diagnosticaron
+dos causas encadenadas en el auto-restart timer (dead-man's switch del feed):
+
+1. **Desfase de reloj post-warmup.** El timer comparaba `DateTime.UtcNow` (wall clock) contra
+   `LastBarProcessedUtc`, que se poblaba con `_clock.UtcNow` (= `_algorithm.UtcTime`, tiempo de
+   algoritmo). Durante el warmup las barras se procesan con timestamps históricos, así que al
+   terminar el warmup la marca quedaba horas en el pasado → staleness aparente >> umbral → Exit(1)
+   a los ~60s. Se mitigó con `MarkLiveModeStart(DateTime.UtcNow)` en `OnWarmupFinished()`.
+
+2. **Señal equivocada.** Tras la mitigación, el proceso moría a los ~20 min exactos. El umbral
+   de auto-restart (20 min) usaba el cierre de **barras de estrategia** como proxy de "el feed
+   está vivo". Pero todas las estrategias activas (H3/H5) operan en **1h**: una barra consolidada
+   cierra una vez por hora, así que pasan hasta ~60 min de silencio legítimo entre `BarProcessedEvent`.
+   El umbral de 20 min era estructuralmente más corto que la cadencia natural de la estrategia.
+   El comentario original ("supera el período 15m, barra más frecuente") delataba que el umbral
+   se calibró para un timeframe de 15m que ya no existe en la config.
+
+El propósito real del dead-man's switch (per ADR-021) es detectar que la re-suscripción al
+WebSocket falló en silencio tras una reconexión. Eso es **liveness del feed**, no cadencia de
+estrategia: son dos conceptos distintos que el diseño previo conflacionaba.
+
+### Decisión
+
+El auto-restart mide **liveness del feed** vía los datos de minuto crudos, no el cierre de
+barras de estrategia:
+
+- `HealthHeartbeatTracker` expone `MarkDataFeedAlive(DateTime wallClockNow)`, llamado desde
+  `OnData` en cada slice live (cadencia ~1min, resolución Minute del feed). Mantiene
+  `_lastDataReceivedUtc` separado de `_lastBarProcessedUtc`.
+- El timer compara `DateTime.UtcNow - LastDataReceivedUtc` contra un umbral de **5 min**
+  (tolera ~5 barras de minuto perdidas). Detecta un socket congelado en ~2 min, independiente
+  del timeframe de las estrategias (1h, 4h, etc.).
+- `_lastBarProcessedUtc` se mantiene para el **ping gate** de Healthchecks.io (umbral 90 min,
+  ADR-021), que sí mide procesamiento de barras de estrategia y tolera la cadencia de 1h.
+- `MarkLiveModeStart` re-baselina **ambas** marcas a wall clock en `OnWarmupFinished()`, para
+  que ni el auto-restart ni el ping gate vean los timestamps históricos del warmup.
+
+`OnData` y `TradingAlgorithmHost` son el adaptador autorizado a usar `DateTime.UtcNow` crudo
+(ADR-021/ADR-031): la regla del IClock simulado aplica a `Trading.Application`, no al host.
+
+### Alternativas descartadas
+
+- **Subir el umbral de auto-restart a 90 min** (igual al ping gate): one-liner, mantiene el
+  proxy de barras de estrategia. Descartado: detectaría un feed muerto recién en 90-150 min,
+  demasiado lento para trading live, y volvería a romperse si se agrega una estrategia de 4h.
+- **Publicar `BarProcessedEvent` en cada barra de minuto** (no solo en la consolidada): mezclaría
+  la semántica del evento (el watchdog de barras stale y el ping gate dependen de que represente
+  procesamiento de estrategia). Una marca de feed-liveness separada es más limpia.
+
+### Consecuencias
+
+- `HealthSnapshot` gana `LastDataReceivedUtc` y `DataFeedStalenessSeconds`, visibles en
+  `heartbeat.json` para la revisión diaria del operador (POLICY 2.4).
+- El auto-restart ya no es sensible al timeframe de las estrategias activas.
+- Tests nuevos en `HealthHeartbeatTrackerTests` cubren `MarkDataFeedAlive` y `MarkLiveModeStart`.
+
+---
 
 ## ADR-041 — Hito D-prev: protocolo de validación broker real Binance USDT-M
 **Fecha:** 2026-06-12

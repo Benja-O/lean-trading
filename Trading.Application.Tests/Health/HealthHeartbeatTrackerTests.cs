@@ -98,6 +98,47 @@ namespace Trading.Application.Tests.Health
         }
 
         [Fact]
+        public void Construction_DataFeedFieldsAreNull_UntilFirstSignal()
+        {
+            var clock = new FakeClock { UtcNow = T1 };
+            var (tracker, _) = Build(clock);
+
+            var snapshot = tracker.Snapshot();
+
+            snapshot.LastDataReceivedUtc.Should().BeNull();
+            snapshot.DataFeedStalenessSeconds.Should().BeNull();
+        }
+
+        [Fact]
+        public void MarkDataFeedAlive_SetsLastDataReceived_IndependentOfBarProcessed()
+        {
+            var clock = new FakeClock { UtcNow = T2 };
+            var (tracker, _) = Build(clock);
+
+            tracker.MarkDataFeedAlive(T1);
+
+            var snapshot = tracker.Snapshot();
+            snapshot.LastDataReceivedUtc.Should().Be(T1);
+            // Staleness computada contra el clock (T2 - T1 = 5 min = 300s).
+            snapshot.DataFeedStalenessSeconds.Should().Be(300);
+            // No toca el tracking de barras de estrategia.
+            snapshot.LastBarProcessedUtc.Should().BeNull();
+        }
+
+        [Fact]
+        public void MarkLiveModeStart_BaselinesBothBarAndDataFeed()
+        {
+            var clock = new FakeClock { UtcNow = T1 };
+            var (tracker, _) = Build(clock);
+
+            tracker.MarkLiveModeStart(T1);
+
+            var snapshot = tracker.Snapshot();
+            snapshot.LastBarProcessedUtc.Should().Be(T1);
+            snapshot.LastDataReceivedUtc.Should().Be(T1);
+        }
+
+        [Fact]
         public void Snapshot_FromMultipleThreadsConcurrently_DoesNotCorruptState()
         {
             var clock = new FakeClock { UtcNow = T1 };

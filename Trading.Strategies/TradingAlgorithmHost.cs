@@ -340,20 +340,21 @@ namespace Trading.Strategies
                             if (_barStalenessGate.IsFresh(DateTime.UtcNow))
                                 _ = _healthchecksPinger.PingAsync(System.Threading.CancellationToken.None);
 
-                            // Auto-restart ante stall persistente del feed WebSocket: si no llega
-                            // ninguna barra en >20 min (supera el período 15m de BTCUSDT, barra más
-                            // frecuente), la re-suscripción post-reconexión falló silenciosamente.
-                            // Exit(1) + NSSM → arranque limpio con socket nuevo.
+                            // Auto-restart ante stall persistente del feed WebSocket: medimos
+                            // liveness del feed por los datos de minuto (LastDataReceivedUtc, cadencia
+                            // ~1min), NO por el cierre de barras de estrategia (cadencia del timeframe,
+                            // p.ej. 1h). Si no llega ningún dato de minuto en >5 min, la re-suscripción
+                            // post-reconexión falló silenciosamente. Exit(1) + NSSM → socket limpio.
                             // null = aún en warm-up; no se toca.
-                            const double feedStallAutoRestartSeconds = 20 * 60;
+                            const double feedStallAutoRestartSeconds = 5 * 60;
                             var feedSnapshot = _healthHeartbeatTracker.Snapshot();
-                            if (feedSnapshot.LastBarProcessedUtc.HasValue)
+                            if (feedSnapshot.LastDataReceivedUtc.HasValue)
                             {
-                                var staleness = (DateTime.UtcNow - feedSnapshot.LastBarProcessedUtc.Value).TotalSeconds;
+                                var staleness = (DateTime.UtcNow - feedSnapshot.LastDataReceivedUtc.Value).TotalSeconds;
                                 if (staleness > feedStallAutoRestartSeconds)
                                 {
                                     _logger.Warning(
-                                        "Auto-restart: feed congelado {StalenessSeconds}s sin barra " +
+                                        "Auto-restart: feed congelado {StalenessSeconds}s sin datos de minuto " +
                                         "(umbral {ThresholdSeconds}s). Terminando proceso — NSSM reconecta con socket limpio.",
                                         (int)staleness, (int)feedStallAutoRestartSeconds);
                                     Environment.Exit(1);
@@ -459,6 +460,12 @@ namespace Trading.Strategies
         public override void OnData(Slice data)
         {
             if (IsWarmingUp) return;
+
+            // Liveness del feed: cada slice live (~1min) refresca la marca que usa el
+            // auto-restart. Wall clock real (ADR-021), no IClock simulado. Independiente
+            // de la cadencia de barras de estrategia (1h), que cerraría muy espaciado.
+            if (LiveMode)
+                _healthHeartbeatTracker.MarkDataFeedAlive(DateTime.UtcNow);
 
             _riskOrchestrator.EvaluateAllMonitors();
             if (_riskOrchestrator.IsKillSwitchActivated) return;
