@@ -15,6 +15,7 @@
 
 | ADR | TÃ­tulo corto | Ãrea |
 |---|---|---|
+| ADR-043 | Clock drift Binance -1021: guard NTP externo como pre-flight, no recvWindow | Operaciones / Infraestructura |
 | ADR-042 | Dead-man's switch: liveness del feed (datos de minuto) en vez de cierre de barras de estrategia | Operaciones / Health |
 | ADR-041 | Hito D-prev: protocolo de validación broker real Binance USDT-M | Operaciones / Infraestructura |
 | ADR-040 | Pipeline de validación de estrategias: M4 → QC IS → QC OOS → Trading.Analytics | Research / Validación |
@@ -53,6 +54,53 @@
 | ADR-003 | `OrderRegistry` vive en `Trading.Application` | Arquitectura |
 | ADR-002 | `RiskPerTradePercentage` falla loud si no estÃ¡ en `strategies.json` | Dominio |
 | ADR-001 | Desacople quirÃºrgico de QuantConnect: dominio Lean-free | Arquitectura |
+
+## ADR-043 — Clock drift Binance -1021: guard NTP externo como pre-flight, no recvWindow
+**Fecha:** 2026-06-14
+**Estado:** Aceptada
+**ADRs relacionados:** ADR-031 (Hito C: race condition Binance, LeanClock UTC), ADR-041 (Hito D-prev)
+
+### Contexto
+
+Durante la validación de conectividad (Hito D-prev), el proceso live abortó en la
+inicialización con `{"code":-1021,"msg":"Timestamp for this request was 1000ms ahead of
+the server's time."}`. El reloj de la máquina de trading estaba ~2s adelantado respecto al
+servidor de Binance USDT-M. Binance rechaza todo request firmado cuyo timestamp esté más de
+1000ms adelantado del server. El drift de ~2s en pocos días indica que el sync nativo de
+Windows no corre con la frecuencia suficiente para esta tolerancia.
+
+### Decisión
+
+El clock drift se trata como un problema **operativo/de infraestructura**, no de código del
+motor. Se agregan dos scripts en `Trading.Research/broker_validation/`:
+
+- `Sync-TradingClock.ps1`: mide el offset local−Binance (compensando RTT) contra
+  `fapi/v1/time` y, si supera 500ms (mitad de la tolerancia de Binance), fuerza `w32tm /resync`.
+  Sirve como **pre-flight** (`-CheckOnly`, sin admin) y como worker de la tarea de fondo.
+- `Install-TradingClockSync.ps1`: configura w32time (peers NTP, polling frecuente) y registra
+  una tarea programada que corre el worker como SYSTEM al inicio y cada 60 min.
+
+Runbook operativo en POLICY 5.5.
+
+### Alternativas descartadas
+
+- **Aumentar `recvWindow` en el brokerage**: NO resuelve el problema. La regla de Binance es
+  `timestamp < serverTime + 1000 && serverTime - timestamp <= recvWindow`. `recvWindow` solo
+  extiende la tolerancia hacia timestamps **atrasados**; un reloj **adelantado** viola la
+  primera condición sin importar `recvWindow`. Además implicaría tocar el adapter de QC (fork).
+- **Corregir el timestamp en el adapter** (restar el offset medido): mete lógica de
+  compensación de reloj en la ruta de firma de requests — frágil y acoplado al brokerage de
+  QC. Mantener el reloj del SO correcto es la responsabilidad correcta y reutilizable.
+- **Dejarlo como paso manual del operador**: el drift es recurrente; un resync manual olvidado
+  vuelve a frenar la corrida. La tarea desatendida elimina la clase de fallo.
+
+### Consecuencias
+
+- El arranque del sistema live depende de que el reloj esté sincronizado; el guard lo verifica.
+- Los scripts son infra operativa (no entran al build ni a los tests del motor).
+- POLICY 5.5 documenta el síntoma, el diagnóstico y la prevención.
+
+---
 
 ## ADR-042 — Dead-man's switch: liveness del feed en vez de cierre de barras de estrategia
 **Fecha:** 2026-06-14

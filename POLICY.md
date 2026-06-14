@@ -239,6 +239,23 @@ Runbooks cortos. La regla: **leerlos antes del incidente**, no durante.
 3. Decidir: ¿es alpha legítimo (raro pero ocurre)?, ¿es bug (más probable)?, ¿es evento de mercado (revisar policy de eventos en sección 2.3)?
 4. Anotar resultado en cuaderno operativo. Si > 3σ se repite con frecuencia, el baseline está mal calibrado.
 
+### 5.5 El proceso no arranca: error -1021 de Binance (timestamp adelantado)
+
+Síntoma en los logs durante la inicialización (antes del warmup):
+`{"code":-1021,"msg":"Timestamp for this request was 1000ms ahead of the server's time."}`
+
+Causa: el reloj de la máquina está adelantado >1000ms respecto al servidor de Binance.
+Binance rechaza esos requests; `recvWindow` no ayuda (solo tolera timestamps atrasados).
+
+1. Medir el drift: `Trading.Research/broker_validation/Sync-TradingClock.ps1 -CheckOnly`
+   (no requiere admin). Reporta el offset local−Binance en ms.
+2. Si supera el umbral, corregir el reloj. Con la tarea programada instalada corre sola;
+   manualmente, en PowerShell **elevado**: `w32tm /resync /force` (o el worker sin `-CheckOnly`).
+3. Confirmar offset < 500ms antes de reabrir F5.
+4. **Prevención (una vez, como admin):** `Install-TradingClockSync.ps1` deja una tarea
+   programada que resincroniza al inicio y cada 60 min como SYSTEM. Es el pre-flight de reloj
+   del sistema live. Ver ADR-043.
+
 ---
 
 ## 6. Política de cambios al sistema en operación
