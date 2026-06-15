@@ -163,6 +163,7 @@ Configuración operativa que NO se commitea al repositorio. Lectura vía `Enviro
 - **Variables de entorno del proceso:** inyectadas via NSSM `AppEnvironmentExtra` (no via `%SystemRoot%\system32\cmd.exe /c set ...`). Formato en la configuración NSSM: `HEALTHCHECKS_PING_URL=https://hc-ping.com/{UUID}`.
 - **Restart automático:** `AppExit Default Restart`. El watchdog en `TradingAlgorithmHost` llama `Environment.Exit(1)` ante stall de feed > 1200s; NSSM re-levanta el proceso automáticamente.
 - **DLL propia a desplegar:** `Trading.Strategies.dll` (y sus dependencias transitivas `Trading.Application.dll`, `Trading.Domain.dll`, etc.) desde `Trading.Strategies/bin/Debug/net10.0/`. Patrón de deploy: stop servicio → backup DLL anterior → copiar DLL nueva → start servicio.
+  - **Desde Hito D (ADR-044/ADR-045):** el fork también diverge en `QuantConnect.dll` (Common: `BinanceOrderProperties.ReduceOnly`) y `QuantConnect.Brokerages.Binance.dll` (`reduceOnly` en `CreateOrderBody`). El atajo incremental "solo Trading.* DLL" ya NO alcanza para esos cambios: hacer `dotnet publish` y copiar el output completo (que incluye esos DLLs), o copiar también esos dos DLLs. Para correr live: config con `environment: live-futures-binance`, `minimal-position-mode: true`, y API key con Futures trading + IP del VPS en whitelist.
 - **Logs del servicio NSSM:** en `C:\Lean\Paper\service-out-{timestamp}.log` (stdout) y `service-err-{timestamp}.log` (stderr). Útiles para diagnosticar fallos de arranque antes de que el JSONL propio esté disponible.
 
 ## 🧪 Testing
