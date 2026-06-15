@@ -58,7 +58,7 @@
 
 ## ADR-044 — Órdenes protectivas SL/TP con reduceOnly en Binance Futures (divergencia del fork)
 **Fecha:** 2026-06-15
-**Estado:** Aceptada — pendiente validación en test supervisado live (Hito D)
+**Estado:** Aceptada — validada en test supervisado live (2026-06-15)
 **ADRs relacionados:** ADR-041 (Hito D-prev), ADR-015 (IRiskMonitor/IRiskAction), ADR-001 (dominio Lean-free)
 
 ### Contexto
@@ -107,10 +107,21 @@ puede abrir nada: Binance la rechaza por no haber posición que reducir. Riesgo 
 - **Divergencia del fork**: `Common/Orders/BinanceOrderProperties.cs` y `BinanceFuturesRestApiClient.cs`
   divergen de upstream Lean. Anotar en futuros merges de upstream.
 - **Validación**: este fork no tiene proyecto de tests del brokerage Binance, y la aceptación de
-  `reduceOnly` por el endpoint condicional/algo **solo se confirma contra el exchange real**. Gate
-  de validación = **test supervisado live de Hito D**: abrir una posición mínima y verificar que
-  las órdenes SL y TP resting en Binance muestren **Reduce-Only = true**, y que al fillear una, la
-  otra no pueda voltear la posición. Hasta pasar ese gate, el ADR queda "pendiente validación".
+  `reduceOnly` por el endpoint condicional/algo solo se confirma contra el exchange real. Gate de
+  validación = test supervisado live de Hito D.
+
+### Resultado de validación (2026-06-15)
+
+Test supervisado ejecutado con el hook temporal `sltp-validation-mode`: entrada Long mínima
+(~0.08 SOL, ~$6) por el camino real del executor. Confirmado en Binance USDT-M:
+- **TP**: orden LIMIT sell @ 82.48 (+10%), **Reduce-Only = Sí**.
+- **SL**: orden STOP_MARKET sell, trigger ≤ 71.23 (−5%), **Reduce-Only = Sí**.
+- El endpoint condicional/algo **aceptó `reduceOnly`** en la SL (salió válida, no Invalid) — era
+  el único punto no verificable offline.
+- Escenario de desconexión: proceso terminado con posición abierta, cierre manual, órdenes
+  sobrantes reduceOnly incapaces de voltear la posición.
+
+Hook `sltp-validation-mode` removido tras la validación. ADR validado.
 
 ---
 
