@@ -167,6 +167,16 @@ namespace QuantConnect.Brokerages.Binance
         {
             var body = base.CreateOrderBody(order);
 
+            // reduceOnly blinda las órdenes protectivas (SL/TP): si el sistema se desconecta y
+            // una pierna fillea, la pierna sobrante no puede abrir/voltear la posición — Binance
+            // la rechaza al no haber posición que reducir. Aplica tanto al endpoint condicional
+            // (STOP_MARKET) como al estándar (LIMIT). Sólo se setea si la propiedad lo pide; el
+            // MarketOrder de entrada va sin reduceOnly (con flat, Binance lo rechazaría).
+            if ((order.Properties as Orders.BinanceOrderProperties)?.ReduceOnly == true)
+            {
+                body["reduceOnly"] = "true";
+            }
+
             if (IsAlgoOrder(order.Type))
             {
                 body.RenameKey("stopPrice", "triggerPrice");

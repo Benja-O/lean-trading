@@ -31,6 +31,14 @@ namespace QuantConnect.Orders
         public bool PostOnly { get; set; }
 
         /// <summary>
+        /// If set, the order can only reduce an existing position, never increase or open one.
+        /// Used for protective orders (stop loss / take profit) so that, if the system is
+        /// disconnected and one leg fills, the remaining resting leg cannot flip the position.
+        /// Note: only applies to Binance USDT-M / COIN-M Futures (CryptoFuture); ignored on Spot.
+        /// </summary>
+        public bool ReduceOnly { get; set; }
+
+        /// <summary>
         /// Returns a new instance clone of this object
         /// </summary>
         public override IOrderProperties Clone()

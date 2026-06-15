@@ -15,6 +15,7 @@
 
 | ADR | TÃ­tulo corto | Ãrea |
 |---|---|---|
+| ADR-044 | Órdenes protectivas SL/TP con `reduceOnly` en Binance Futures (divergencia del fork) | Riesgo / Ejecución |
 | ADR-043 | Clock drift Binance -1021: guard NTP externo como pre-flight, no recvWindow | Operaciones / Infraestructura |
 | ADR-042 | Dead-man's switch: liveness del feed (datos de minuto) en vez de cierre de barras de estrategia | Operaciones / Health |
 | ADR-041 | Hito D-prev: protocolo de validación broker real Binance USDT-M | Operaciones / Infraestructura |
@@ -54,6 +55,64 @@
 | ADR-003 | `OrderRegistry` vive en `Trading.Application` | Arquitectura |
 | ADR-002 | `RiskPerTradePercentage` falla loud si no estÃ¡ en `strategies.json` | Dominio |
 | ADR-001 | Desacople quirÃºrgico de QuantConnect: dominio Lean-free | Arquitectura |
+
+## ADR-044 — Órdenes protectivas SL/TP con reduceOnly en Binance Futures (divergencia del fork)
+**Fecha:** 2026-06-15
+**Estado:** Aceptada — pendiente validación en test supervisado live (Hito D)
+**ADRs relacionados:** ADR-041 (Hito D-prev), ADR-015 (IRiskMonitor/IRiskAction), ADR-001 (dominio Lean-free)
+
+### Contexto
+
+Requisito operativo inquebrantable para Hito D (live con capital real): **las órdenes de stop
+loss y take profit deben colocarse como órdenes nativas en Binance al abrir cualquier posición**,
+de modo que sobrevivan una caída del proceso o de la red — la protección vive en el exchange, no
+en Lean.
+
+Verificación del brokerage de QC (`BinanceFuturesBrokerage`):
+- **Cumple lo nativo**: el SL se manda como `STOP_MARKET` (endpoint condicional/algo, `triggerPrice`,
+  `algoType=CONDITIONAL`) y el TP como `LIMIT`. Ambas descansan en el exchange. ✓
+- **Gap de seguridad**: `CreateOrderBody` NO setea `reduceOnly` ni `closePosition`, y
+  `BinanceOrderProperties` solo exponía `PostOnly`. Con Lean conectado, el `OrderLifecycleService`
+  cancela la pierna opuesta al fillear una (OCO del lado cliente). Pero si Lean se **desconecta**
+  con posición abierta y salta el SL → cierra la posición; el TP queda resting en el exchange → si
+  el precio lo toca, **abre una posición opuesta no deseada y desprotegida**. Exactamente lo que el
+  requisito busca prevenir.
+
+### Decisión
+
+Setear `reduceOnly=true` en las órdenes protectivas SL/TP. Como QC no lo expone, se modifica el
+fork de Lean de forma contenida y property-driven:
+
+1. `Common/Orders/BinanceOrderProperties.cs`: nueva propiedad `bool ReduceOnly`.
+2. `BinanceFuturesRestApiClient.CreateOrderBody`: si la propiedad lo pide, agrega `reduceOnly=true`
+   al body (aplica tanto al camino condicional STOP_MARKET como al LIMIT estándar).
+3. `LeanOrderRouter` (adapter nuestro): pasa `BinanceOrderProperties { ReduceOnly = true }` en
+   `SubmitStopMarketOrder` y `SubmitLimitOrder` — solo protectivas. El `MarketOrder` de entrada
+   va SIN reduceOnly (con posición flat, Binance rechazaría un reduceOnly).
+
+Con esto, si una pierna ya cerró la posición durante una desconexión, la otra al dispararse no
+puede abrir nada: Binance la rechaza por no haber posición que reducir. Riesgo de volteo eliminado.
+
+### Alternativas descartadas
+
+- **`closePosition=true`** (OCO nativo: Binance auto-cancela la otra pierna al cerrar): descartado
+  porque obliga a que el TP sea `TAKE_PROFIT_MARKET` en vez de `LIMIT` → ejecución a mercado al
+  trigger, perdiendo control de precio de salida y el posible maker fee. reduceOnly preserva el TP
+  como límite. Queda como opción futura si se quiere OCO nativo del exchange.
+- **OCO solo del lado cliente** (el comportamiento previo): no sobrevive una desconexión, que es
+  justamente el requisito.
+
+### Consecuencias
+
+- **Divergencia del fork**: `Common/Orders/BinanceOrderProperties.cs` y `BinanceFuturesRestApiClient.cs`
+  divergen de upstream Lean. Anotar en futuros merges de upstream.
+- **Validación**: este fork no tiene proyecto de tests del brokerage Binance, y la aceptación de
+  `reduceOnly` por el endpoint condicional/algo **solo se confirma contra el exchange real**. Gate
+  de validación = **test supervisado live de Hito D**: abrir una posición mínima y verificar que
+  las órdenes SL y TP resting en Binance muestren **Reduce-Only = true**, y que al fillear una, la
+  otra no pueda voltear la posición. Hasta pasar ese gate, el ADR queda "pendiente validación".
+
+---
 
 ## ADR-043 — Clock drift Binance -1021: guard NTP externo como pre-flight, no recvWindow
 **Fecha:** 2026-06-14

@@ -1,4 +1,5 @@
 using QuantConnect.Algorithm;
+using QuantConnect.Orders;
 using Trading.Application.Execution;
 using Trading.Domain.Abstractions;
 using Trading.Domain.ValueObjects;
@@ -46,7 +47,11 @@ namespace Trading.Strategies.Adapters
         {
             string clientTag = _orderRegistry.Register(purpose, executorIdentifier, instrumentId);
             var symbol = _instrumentResolver.Resolve(instrumentId);
-            var orderTicket = _algorithm.StopMarketOrder(symbol, quantity, stopPrice, tag: clientTag);
+            // reduceOnly: orden protectiva nativa en el exchange que sólo puede cerrar la posición,
+            // nunca abrir/voltear si la otra pierna ya cerró durante una desconexión (ADR-044).
+            var orderTicket = _algorithm.StopMarketOrder(
+                symbol, quantity, stopPrice, tag: clientTag,
+                orderProperties: new BinanceOrderProperties { ReduceOnly = true });
             return new LeanOrderHandle(orderTicket);
         }
 
@@ -56,7 +61,11 @@ namespace Trading.Strategies.Adapters
         {
             string clientTag = _orderRegistry.Register(purpose, executorIdentifier, instrumentId);
             var symbol = _instrumentResolver.Resolve(instrumentId);
-            var orderTicket = _algorithm.LimitOrder(symbol, quantity, limitPrice, tag: clientTag);
+            // reduceOnly: ídem SubmitStopMarketOrder — la protectiva TP no puede voltear la
+            // posición si la SL ya cerró durante una desconexión (ADR-044).
+            var orderTicket = _algorithm.LimitOrder(
+                symbol, quantity, limitPrice, tag: clientTag,
+                orderProperties: new BinanceOrderProperties { ReduceOnly = true });
             return new LeanOrderHandle(orderTicket);
         }
 
