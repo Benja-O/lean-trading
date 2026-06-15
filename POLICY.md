@@ -80,6 +80,9 @@ En ventanas de **±30 minutos del wall clock real** de eventos macro relevantes,
 - Las acciones de la columna central son **manuales por ahora**. Los síntomas se detectan vía monitoreo (heartbeat, ping externo) o inspección del operador.
 - La automatización de "anomalías de infraestructura" no está planificada como hito específico. Se evalúa caso por caso si algún síntoma recurrente justifica un monitor dedicado.
 
+**Limitación de entorno conocida — flapping del WebSocket auxiliar (observado 2026-06-15, Hito D-prev):**
+En la máquina de desarrollo actual, el WebSocket `/public/ws` de Binance (QuoteBar + MarginInterestRate, la conexión de mayor tráfico) se desconecta y reconecta cada 30-90s. Los feeds críticos —trades (`/market/ws`, consume la consolidación de barras) y órdenes (`/private/ws`)— se mantienen estables, por lo que **no afecta señales ni ejecución**. La causa es la red local: la misma que bloquea NTP (UDP 123, ver ADR-043) corta la conexión de mayor ancho de banda. **No es un bug del sistema.** El dead-man's switch no se ve afectado porque mide liveness del feed de minuto (ADR-042), no esta conexión. **Resolución definitiva: migrar el hosting a un VPS estable con IP fija cerca de una región de Binance** antes de operar con tamaño real — elimina de raíz este flapping, el drift de reloj y la fragilidad del whitelist de IP. Hasta entonces, el flapping en los logs es ruido esperado.
+
 ---
 
 ## 3. Umbrales por estrategia
@@ -406,8 +409,8 @@ P(Sharpe<0)=0%. Resultado extraordinario: OOS supera IS, señal robusta fuera de
 durante pánico (BSR colapsa < 1 en crashes). Long-only.
 
 ```
-Estado: pre-paper (pendiente Hito D-prev — validación broker real Binance)
-Fecha inicio paper: pendiente
+Estado: paper (activa desde 2026-06-15)
+Fecha inicio paper: 2026-06-15
 Fecha inicio live: pendiente (mínimo 50 trades paper O 30 días, el que llegue después)
 Trades acumulados en vivo: 0
 
@@ -442,8 +445,8 @@ P(Sharpe<0)=1%.
 durante crashes donde dominan vendedores actúa como filtro natural. Long-only.
 
 ```
-Estado: pre-paper (pendiente Hito D-prev — validación broker real Binance)
-Fecha inicio paper: pendiente
+Estado: paper (activa desde 2026-06-15)
+Fecha inicio paper: 2026-06-15
 Fecha inicio live: pendiente (mínimo 50 trades paper O 30 días, el que llegue después)
 Trades acumulados en vivo: 0
 

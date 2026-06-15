@@ -177,9 +177,9 @@ barras de estrategia:
 ---
 
 ## ADR-041 — Hito D-prev: protocolo de validación broker real Binance USDT-M
-**Fecha:** 2026-06-12
-**Estado:** Aceptada
-**ADRs relacionados:** ADR-031 (Hito C: paper trading), ADR-030 (Bypass ValidateSubscription Binance)
+**Fecha:** 2026-06-12 (ejecutado y cerrado 2026-06-15)
+**Estado:** Ejecutada — Hito D-prev completado
+**ADRs relacionados:** ADR-031 (Hito C: paper trading), ADR-030 (Bypass ValidateSubscription Binance), ADR-042 (dead-man's switch feed-liveness), ADR-043 (clock guard -1021)
 
 ### Contexto
 
@@ -254,13 +254,30 @@ La reconciliación `reconcile.ps1` captura esta diferencia.
 
 ### Consecuencias
 
-- `TradingAlgorithmHost` tiene un método `PlaceBrokerValidationOrderIfRequested()` en
-  `OnWarmupFinished()` que coloca la orden de prueba cuando `BROKER_VALIDATION_MODE=1`.
-  **Este método debe eliminarse tras completar Hito D-prev.**
 - `config.json` tiene el environment `live-futures-binance` listo para activar.
 - `Trading.Research/broker_validation/reconcile.ps1` ejecuta la reconciliación de balance.
-- POLICY.md secciones 7.4 y 7.5 están en estado `pre-paper`, se promoverán a `paper`
-  tras completar este checklist.
+
+### Resultado de ejecución (2026-06-15)
+
+El protocolo se ejecutó completo. La orden de prueba se colocó con `broker-validation-mode: true`
+(0.09 SOL, notional ~$6.65) y **filleó correctamente**: `FillPrice 73.87, OrderFee 0.00332415 USDT`,
+BrokerId 220782487914. La posición se cerró manualmente; balance reconciliado en 5661.48 USDT
+(discrepancia << 0.5%). Tras validar, se removió el hook `PlaceBrokerValidationOrderIfRequested()`
+y su llamada en `OnWarmupFinished()`; las estrategias 7.4/7.5 pasaron a `paper` en POLICY.
+
+Durante la ejecución se encontraron y resolvieron tres bloqueos de configuración de cuenta/entorno,
+ninguno de código de trading:
+
+1. **`-1021` (timestamp adelantado)**: drift de reloj de la máquina > 1000ms. Resuelto con el guard
+   NTP + fallback a server time de Binance (ADR-043).
+2. **`-2015` (Invalid API-key/IP/permissions)**: la API key tenía lectura pero no trading de futuros.
+   Resuelto habilitando "Enable Futures" en la key.
+3. **`-4061` (position side does not match)**: la cuenta estaba en Hedge Mode; el brokerage de QC
+   solo opera One-way Mode (sin referencias a `positionSide`/`dualSidePosition` en su código).
+   Resuelto cambiando la cuenta a One-way Mode.
+
+También se observó el flapping del WebSocket auxiliar `/public/ws` (documentado como limitación de
+entorno en POLICY 2.4): no afecta trades ni órdenes; se resuelve definitivamente migrando a VPS.
 
 ---
 

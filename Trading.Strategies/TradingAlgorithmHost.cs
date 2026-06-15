@@ -410,51 +410,6 @@ namespace Trading.Strategies
             // al comparar DateTime.UtcNow contra un timestamp histórico del último bar.
             if (LiveMode)
                 _healthHeartbeatTracker.MarkLiveModeStart(DateTime.UtcNow);
-            PlaceBrokerValidationOrderIfRequested();
-        }
-
-        // Hook D-prev: coloca UNA orden de ~$6 en SOLUSDT para verificar conectividad real del broker.
-        // Activar: poner "broker-validation-mode": true en config.json (a nivel raíz).
-        // Eliminar este método tras completar el checklist de Hito D-prev (ADR-041).
-        //
-        // Filtros reales Binance USDT-M SOLUSDT (consultados 2026-06-12):
-        //   LOT_SIZE  minQty=0.01  stepSize=0.01  (quantityPrecision=2)
-        //   MIN_NOTIONAL  $5
-        private void PlaceBrokerValidationOrderIfRequested()
-        {
-            if (!LiveMode) return;
-            if (!QuantConnect.Configuration.Config.GetBool("broker-validation-mode")) return;
-
-            const decimal targetNotional = 6m;
-            const decimal minNotional    = 5m;    // MIN_NOTIONAL Binance USDT-M SOLUSDT
-            const decimal stepSize       = 0.01m; // LOT_SIZE stepSize SOLUSDT
-
-            var instrumentId = new InstrumentId("SOLUSDT");
-            var symbol       = _instrumentResolver.Resolve(instrumentId);
-            decimal price    = Securities[symbol].Price;
-
-            if (price <= 0)
-            {
-                _logger.Warning(
-                    "D-prev — broker-validation-mode: precio SOLUSDT no disponible, abortando orden de prueba.");
-                return;
-            }
-
-            // Ceil al step más cercano garantiza que el notional no caiga bajo el target
-            decimal rawQty  = targetNotional / price;
-            decimal quantity = Math.Ceiling(rawQty / stepSize) * stepSize;
-
-            // Doble check contra el MIN_NOTIONAL del exchange
-            if (quantity * price < minNotional)
-                quantity = Math.Ceiling(minNotional / price / stepSize) * stepSize;
-
-            _logger.Warning(
-                "D-prev — broker-validation-mode activo: colocando orden de prueba {Quantity} SOL (~${Notional:F2} USDT) " +
-                "en Binance USDT-M. Verificar fill en Binance Web y cerrar posición manualmente si SL/TP no la cierra. " +
-                "Poner broker-validation-mode: false en config.json tras confirmar Hito D-prev completado.",
-                quantity, quantity * price);
-
-            _orderRouter.SubmitMarketOrder(instrumentId, quantity, OrderPurpose.Entry, "broker-validation-d-prev");
         }
 
         public override void OnData(Slice data)
