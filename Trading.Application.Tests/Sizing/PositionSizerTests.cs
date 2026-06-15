@@ -22,6 +22,9 @@ namespace Trading.Application.Tests.Sizing
         private PositionSizer BuildSizer()
             => new(_portfolioState, _instrumentMetadata, _logger);
 
+        private PositionSizer BuildMinimalSizer()
+            => new(_portfolioState, _instrumentMetadata, _logger, minimalPositionMode: true);
+
         private StrategyExecutor BuildExecutor()
         {
             var definition = new StrategyDefinition
@@ -53,6 +56,68 @@ namespace Trading.Application.Tests.Sizing
 
             Assert.True(result.IsSuccess);
             Assert.True(result.Value > 0m);
+        }
+
+        // ===== CalculateQuantity — minimal-position-mode =====
+
+        [Fact]
+        public void CalculateQuantity_MinimalMode_SizesToMinNotionalCeiledToLot()
+        {
+            _portfolioState.TotalPortfolioValue = 100_000m;
+            _instrumentMetadata.SetLotSize(_btcUsdt, 0.001m);
+            _instrumentMetadata.SetMinimumNotional(_btcUsdt, 100m);
+
+            var result = BuildMinimalSizer().CalculateQuantity(BuildExecutor(), price: 66_600m);
+
+            // ceil(100 / 66600 / 0.001) * 0.001 = ceil(1.5015) * 0.001 = 0.002
+            Assert.True(result.IsSuccess);
+            Assert.Equal(0.002m, result.Value);
+            Assert.True(result.Value * 66_600m > 100m, "el notional debe superar estrictamente el mínimo");
+        }
+
+        [Fact]
+        public void CalculateQuantity_MinimalMode_IgnoresPortfolioValueAndRiskPercent()
+        {
+            // Portfolio gigante: el modo risk% daría una cantidad enorme; el modo mínimo no.
+            _portfolioState.TotalPortfolioValue = 10_000_000m;
+            _instrumentMetadata.SetLotSize(_btcUsdt, 0.001m);
+            _instrumentMetadata.SetMinimumNotional(_btcUsdt, 100m);
+
+            var minimal = BuildMinimalSizer().CalculateQuantity(BuildExecutor(), price: 66_600m);
+            var riskBased = BuildSizer().CalculateQuantity(BuildExecutor(), price: 66_600m);
+
+            Assert.True(minimal.IsSuccess);
+            Assert.Equal(0.002m, minimal.Value);
+            Assert.True(riskBased.Value > minimal.Value, "el modo mínimo debe ser mucho menor que el risk-based");
+        }
+
+        [Fact]
+        public void CalculateQuantity_MinimalMode_WhenCeilLandsExactlyOnMinimum_BumpsOneLot()
+        {
+            _portfolioState.TotalPortfolioValue = 100_000m;
+            _instrumentMetadata.SetLotSize(_btcUsdt, 0.1m);
+            _instrumentMetadata.SetMinimumNotional(_btcUsdt, 10m);
+
+            // 10 / 100 / 0.1 = 1 (exacto) -> 0.1 -> notional 10 == mínimo -> bump a 0.2
+            var result = BuildMinimalSizer().CalculateQuantity(BuildExecutor(), price: 100m);
+
+            Assert.True(result.IsSuccess);
+            Assert.Equal(0.2m, result.Value);
+        }
+
+        [Fact]
+        public void CalculateQuantity_MinimalMode_WithNullMinNotional_UsesFloorOfFive()
+        {
+            _portfolioState.TotalPortfolioValue = 100_000m;
+            _instrumentMetadata.SetLotSize(_btcUsdt, 0.01m);
+            // sin SetMinimumNotional -> GetMinimumNotional devuelve null -> floor 5
+
+            var result = BuildMinimalSizer().CalculateQuantity(BuildExecutor(), price: 74m);
+
+            // ceil(5 / 74 / 0.01) * 0.01 = ceil(6.756) * 0.01 = 0.07
+            Assert.True(result.IsSuccess);
+            Assert.Equal(0.07m, result.Value);
+            Assert.True(result.Value * 74m > 5m);
         }
 
         [Theory]

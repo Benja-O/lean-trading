@@ -15,6 +15,7 @@
 
 | ADR | TÃ­tulo corto | Ãrea |
 |---|---|---|
+| ADR-045 | minimal-position-mode + min notional real en SPDB para futures Binance | Ejecución / Datos |
 | ADR-044 | Órdenes protectivas SL/TP con `reduceOnly` en Binance Futures (divergencia del fork) | Riesgo / Ejecución |
 | ADR-043 | Clock drift Binance -1021: guard NTP externo como pre-flight, no recvWindow | Operaciones / Infraestructura |
 | ADR-042 | Dead-man's switch: liveness del feed (datos de minuto) en vez de cierre de barras de estrategia | Operaciones / Health |
@@ -55,6 +56,61 @@
 | ADR-003 | `OrderRegistry` vive en `Trading.Application` | Arquitectura |
 | ADR-002 | `RiskPerTradePercentage` falla loud si no estÃ¡ en `strategies.json` | Dominio |
 | ADR-001 | Desacople quirÃºrgico de QuantConnect: dominio Lean-free | Arquitectura |
+
+## ADR-045 — minimal-position-mode + override de min notional en el adapter
+**Fecha:** 2026-06-15
+**Estado:** Aceptada
+**ADRs relacionados:** ADR-044 (SL/TP reduceOnly), ADR-001 (dominio Lean-free), ADR-002 (RiskPerTradePercentage)
+
+### Contexto
+
+Hito D — item #2: para el shakedown live se quiere que las estrategias abran posiciones del
+**tamaño mínimo admitido por Binance**, no las ~$1.130/posición que da el risk% del 1% sobre el
+balance actual. Así se ejercita el ciclo real (entrada → SL/TP → time-exit → reconexiones) con
+capital despreciable.
+
+Al implementarlo se encontró un gap de datos: el SPDB (`symbol-properties-database.csv`) **no
+tiene `minimum_order_size`** para los símbolos `cryptofuture` de Binance (BTCUSDT, ETHUSDT,
+SOLUSDT) — las filas terminan en el `market_ticker`. Por eso `GetMinimumNotional` devolvía `null`
+y `PositionSizer.ValidateNotional` caía a un floor defensivo de $5 para todos. El min notional
+real de BTCUSDT-PERP es $100 y el de ETHUSDT-PERP $20, así que el sizing mínimo contra el floor de
+$5 habría sido rechazado por el exchange para BTC/ETH.
+
+### Decisión
+
+1. **Override de min notional en `LeanInstrumentMetadataAdapter`** (capa adapter/infra): un mapa
+   versionado `{ BTCUSDT=100, ETHUSDT=20, SOLUSDT=5 }`. `GetMinimumNotional` devuelve el valor del
+   SPDB si existe y cae al override si es `null`. El adapter es Lean-aware por definición, así que
+   conocer params de exchange ahí no viola el layering (Application/Domain siguen Lean-free).
+2. **minimal-position-mode**: flag de config (`"minimal-position-mode": true`, solo live, default
+   false). Cuando está activo, `PositionSizer.CalculateQuantity` fija el tamaño en el min notional
+   del símbolo (ceil al lot size; suma un lote si el ceil cae exactamente en el mínimo, porque
+   `ValidateNotional` usa desigualdad estricta) en vez de calcular por risk%.
+
+El resto del sistema (SL/TP, time-exit, monitores de riesgo) opera igual, a escala mínima.
+
+### Alternativas descartadas
+
+- **Poblar el SPDB (`Data/symbol-properties/...csv`)**: era el lugar "natural" del dato, pero
+  `Data/` está **gitignored** — no se versiona ni se deploya por git, así que una edición local no
+  llegaría al VPS, generando inconsistencia local/VPS. El override en el adapter es versionado y se
+  deploya con el build. (Trade-off: `BinanceBrokerageModel.CanSubmitOrder` sigue leyendo el SPDB
+  directo y mantiene su floor permisivo, pero es inofensivo: nuestro `PositionSizer` dimensiona
+  correctamente sobre el mínimo y **Binance enforcea su min notional server-side** de todos modos.)
+- **Hardcodear los min notionals en Application o config.json**: viola el layering — Application
+  debe ser Lean-free y no conocer params de exchange. El adapter (infra) es el lugar correcto.
+- **Cuenta diminuta para forzar tamaños chicos vía risk%**: el sizing por risk% podría caer bajo el
+  min notional de forma inconsistente por símbolo (rechazos), y no da un tamaño mínimo controlado.
+
+### Consecuencias
+
+- El override vive en el código (versionado, deployable). Si se agregan símbolos nuevos al modo
+  mínimo, sumar su min notional al mapa del adapter.
+- `minimal-position-mode` es un modo de shakedown; **desactivar para operar con sizing real**.
+- `CanSubmitOrder` no enforcea el min notional (lee el SPDB, que sigue null); aceptable porque
+  el sizer dimensiona bien y Binance rechaza server-side cualquier orden bajo el mínimo.
+
+---
 
 ## ADR-044 — Órdenes protectivas SL/TP con reduceOnly en Binance Futures (divergencia del fork)
 **Fecha:** 2026-06-15

@@ -119,7 +119,16 @@ namespace Trading.Strategies
             _riskOrchestrator = new RiskOrchestrator(
                 new IRiskMonitor[] { _drawdownMonitor, _consecutiveLossesMonitor },
                 riskAction, coolingOffTracker, _clock, _logger, domainEventBus);
-            _positionSizer = new PositionSizer(_portfolioState, _instrumentMetadata, _logger);
+            // minimal-position-mode (Hito D): si está activo, el sizer fija cada posición en el
+            // mínimo notional admitido por el exchange en vez de calcular por risk%. Solo aplica
+            // en live (el backtest mide performance, no plomería). Default false.
+            bool minimalPositionMode = LiveMode &&
+                QuantConnect.Configuration.Config.GetBool("minimal-position-mode");
+            if (minimalPositionMode)
+                _logger.Warning(
+                    "minimal-position-mode ACTIVO: las posiciones se fijan al min notional del exchange " +
+                    "(no por risk%). Modo de shakedown live — desactivar para operar con sizing real.");
+            _positionSizer = new PositionSizer(_portfolioState, _instrumentMetadata, _logger, minimalPositionMode);
 
             // ===== Configuración del entorno de trading =====
             SetAccountCurrency("USDT");
