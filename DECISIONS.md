@@ -75,8 +75,11 @@ El clock drift se trata como un problema **operativo/de infraestructura**, no de
 motor. Se agregan dos scripts en `Trading.Research/broker_validation/`:
 
 - `Sync-TradingClock.ps1`: mide el offset local−Binance (compensando RTT) contra
-  `fapi/v1/time` y, si supera 500ms (mitad de la tolerancia de Binance), fuerza `w32tm /resync`.
-  Sirve como **pre-flight** (`-CheckOnly`, sin admin) y como worker de la tarea de fondo.
+  `fapi/v1/time` y, si supera 500ms (mitad de la tolerancia de Binance), corrige el reloj.
+  Primero intenta `w32tm /resync` (NTP); si tras el resync el offset sigue fuera de tolerancia
+  —típico cuando la red bloquea UDP 123— hace **fallback seteando el reloj del SO directamente
+  al server time de Binance** vía `Set-Date` (HTTPS, que sí está abierto). Sirve como
+  **pre-flight** (`-CheckOnly`, sin admin) y como worker de la tarea de fondo.
 - `Install-TradingClockSync.ps1`: configura w32time (peers NTP, polling frecuente) y registra
   una tarea programada que corre el worker como SYSTEM al inicio y cada 60 min.
 
@@ -90,7 +93,12 @@ Runbook operativo en POLICY 5.5.
   primera condición sin importar `recvWindow`. Además implicaría tocar el adapter de QC (fork).
 - **Corregir el timestamp en el adapter** (restar el offset medido): mete lógica de
   compensación de reloj en la ruta de firma de requests — frágil y acoplado al brokerage de
-  QC. Mantener el reloj del SO correcto es la responsabilidad correcta y reutilizable.
+  QC. Mantener el reloj del SO correcto es la responsabilidad correcta y reutilizable. El
+  fallback de set directo alinea el **reloj del SO** (no el timestamp del adapter) al server
+  time de Binance, que es la misma referencia contra la que el exchange valida.
+- **Depender solo de NTP (`w32tm /resync`)**: insuficiente cuando la red bloquea UDP 123 — se
+  observó que el resync no corregía el drift de ~1.8s. Por eso el guard cae a set directo por
+  HTTPS, que usa el mismo canal (443) ya abierto para tradear.
 - **Dejarlo como paso manual del operador**: el drift es recurrente; un resync manual olvidado
   vuelve a frenar la corrida. La tarea desatendida elimina la clase de fallo.
 
