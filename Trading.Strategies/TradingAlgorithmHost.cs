@@ -410,6 +410,56 @@ namespace Trading.Strategies
             // al comparar DateTime.UtcNow contra un timestamp histórico del último bar.
             if (LiveMode)
                 _healthHeartbeatTracker.MarkLiveModeStart(DateTime.UtcNow);
+            PlaceSlTpValidationEntryIfRequested();
+        }
+
+        // Hook Hito D: fuerza UNA entrada mínima en SOLUSDT por el camino REAL del executor,
+        // para que OrderLifecycleService adjunte SL/TP nativos en Binance con reduceOnly=true
+        // (ADR-044). A diferencia del hook de D-prev, NO usa un executor sintético: rutea por
+        // un executor registrado para que se disparen las protectivas. Validación: verificar en
+        // Binance que las órdenes SL y TP resting muestren Reduce-Only=true, y el escenario de
+        // desconexión (matar proceso, cerrar manual, confirmar que la pierna sobrante no voltea).
+        // Activar: "sltp-validation-mode": true en config.json. Eliminar tras validar Hito D.
+        private void PlaceSlTpValidationEntryIfRequested()
+        {
+            if (!LiveMode) return;
+            if (!QuantConnect.Configuration.Config.GetBool("sltp-validation-mode")) return;
+
+            // SOLUSDT: el menor min notional (~$5) de los tres símbolos. Tomamos el primer
+            // executor registrado para ese símbolo (cualquiera sirve: aporta sus RiskParameters
+            // SL=5%/TP=10% para los brackets).
+            var executor = _strategyExecutors.FirstOrDefault(e => e.InstrumentId.Ticker == "SOLUSDT");
+            if (executor == null)
+            {
+                _logger.Warning("Hito D — sltp-validation-mode: no hay executor para SOLUSDT, abortando.");
+                return;
+            }
+
+            const decimal targetNotional = 6m;
+            const decimal minNotional    = 5m;    // MIN_NOTIONAL Binance USDT-M SOLUSDT
+            const decimal stepSize       = 0.01m; // LOT_SIZE stepSize SOLUSDT
+
+            var symbol = _instrumentResolver.Resolve(executor.InstrumentId);
+            decimal price = Securities[symbol].Price;
+            if (price <= 0)
+            {
+                _logger.Warning("Hito D — sltp-validation-mode: precio SOLUSDT no disponible, abortando.");
+                return;
+            }
+
+            decimal quantity = Math.Ceiling(targetNotional / price / stepSize) * stepSize;
+            if (quantity * price < minNotional)
+                quantity = Math.Ceiling(minNotional / price / stepSize) * stepSize;
+
+            decimal notional = decimal.Round(quantity * price, 2);
+            _logger.Warning(
+                "Hito D — sltp-validation-mode: forzando entrada Long {Quantity} SOL (~{Notional} USDT) por " +
+                "executor '{Executor}'. OrderLifecycleService adjuntará SL/TP nativos con reduceOnly. " +
+                "Verificar Reduce-Only=true en las órdenes resting en Binance y luego el escenario de desconexión.",
+                quantity, notional, executor.ExecutorIdentifier);
+
+            executor.EntryOrderHandle = _orderRouter.SubmitMarketOrder(
+                executor.InstrumentId, quantity, OrderPurpose.Entry, executor.ExecutorIdentifier);
         }
 
         public override void OnData(Slice data)
