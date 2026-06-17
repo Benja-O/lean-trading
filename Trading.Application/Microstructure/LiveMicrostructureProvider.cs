@@ -92,6 +92,36 @@ namespace Trading.Application.Microstructure
             return bar;
         }
 
+        /// <summary>
+        /// Pre-carga una barra ya computada (desde disco o backfill REST) en el dict en vivo.
+        /// Actualiza _cvdRunning con el CVD de la barra para que el próximo Compute lo use como seed.
+        /// Llamar antes de SetWarmUp(), en orden cronológico para que _cvdRunning quede en el último valor.
+        /// </summary>
+        public void AddBar(MicrostructureBar bar)
+        {
+            if (bar is null) throw new ArgumentNullException(nameof(bar));
+
+            if (!_live.TryGetValue(bar.InstrumentId, out var byTime))
+            {
+                byTime = new Dictionary<DateTime, MicrostructureBar>();
+                _live[bar.InstrumentId] = byTime;
+            }
+
+            var key = DateTime.SpecifyKind(bar.BarUtc, DateTimeKind.Utc);
+            byTime[key] = bar;
+            _cvdRunning[bar.InstrumentId] = bar.Cvd;
+        }
+
+        /// <summary>
+        /// Retorna el CVD acumulado corriente para el instrumento, o 0 si no hay seed.
+        /// Usado por BinanceAggTradeBackfiller para continuar el CVD desde el último punto conocido.
+        /// </summary>
+        public double GetCvdRunning(InstrumentId instrumentId)
+        {
+            if (instrumentId is null) throw new ArgumentNullException(nameof(instrumentId));
+            return _cvdRunning.TryGetValue(instrumentId, out var cvd) ? cvd : 0.0;
+        }
+
         /// <inheritdoc/>
         public MicrostructureBar? GetBar(InstrumentId instrumentId, DateTime barUtc)
         {

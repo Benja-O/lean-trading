@@ -77,6 +77,7 @@ namespace Trading.Strategies
         // Pipeline de microestructura en vivo (solo LiveMode)
         private LiveAggTradeAccumulator _aggTradeAccumulator;
         private LiveMicrostructureProvider _liveProvider;
+        private PersistentMicrostructureStore _persistentStore;
 
         // Servicios de Application
         private OrderRegistry _orderRegistry;
@@ -220,8 +221,59 @@ namespace Trading.Strategies
             if (LiveMode)
             {
                 _liveProvider = new LiveMicrostructureProvider(microstructureRegistry, _logger);
+
+                // Seed CVD desde el último bar del CSV histórico (base inicial si no hay datos en disco).
                 foreach (var symbolTicker in symbolsToLoad)
                     _liveProvider.SeedCvdFromHistory(new InstrumentId(symbolTicker));
+
+                // Cargar barras de las últimas 72h desde disco (sobreescribe el seed del CSV con CVD real).
+                string liveFeaturesDir = System.IO.Path.Combine(System.AppContext.BaseDirectory, "microstructure-live");
+                _persistentStore = new PersistentMicrostructureStore(liveFeaturesDir);
+                foreach (var symbolTicker in symbolsToLoad)
+                {
+                    var instrumentId = new InstrumentId(symbolTicker);
+                    var recentBars   = _persistentStore.LoadRecent(instrumentId, hours: 72);
+                    foreach (var bar in recentBars)
+                        _liveProvider.AddBar(bar);
+                    if (recentBars.Count > 0)
+                        _logger.Info(
+                            "MicrostructureStore: {Count} barras recientes cargadas para {Ticker} (hasta {LastBar:yyyy-MM-dd HH:mm} UTC).",
+                            recentBars.Count, symbolTicker, recentBars[recentBars.Count - 1].BarUtc);
+                }
+
+                // Backfill del gap (última barra en disco → ahora) vía aggTrades REST de Binance.
+                // Garantiza paridad exacta con el pipeline en vivo: mismo AggTradeBucket +
+                // MicrostructureFeatureComputer, mismo denominador aggTrade (no individual trades).
+                string fapiUrl  = QuantConnect.Configuration.Config.Get("binance-fapi-url", "https://fapi.binance.com");
+                var backfiller   = new BinanceAggTradeBackfiller(_httpClient, fapiUrl);
+                var gapEnd       = FloorToHour(DateTime.UtcNow); // barra actual aún no cerró
+                foreach (var symbolTicker in symbolsToLoad)
+                {
+                    var instrumentId = new InstrumentId(symbolTicker);
+                    var lastBarUtc   = _persistentStore.GetLastBarUtc(instrumentId);
+                    var gapStart     = lastBarUtc.HasValue
+                        ? lastBarUtc.Value.AddHours(1)
+                        : DateTime.UtcNow.AddHours(-52); // primera vez: 52h (> WarmUpBars máximo)
+
+                    if (gapStart < gapEnd)
+                    {
+                        double cvdSeed     = _liveProvider.GetCvdRunning(instrumentId);
+                        var backfilled     = backfiller.Backfill(instrumentId, symbolTicker, gapStart, gapEnd, cvdSeed);
+                        foreach (var bar in backfilled)
+                        {
+                            _liveProvider.AddBar(bar);
+                            _persistentStore.Append(bar);
+                        }
+                        _logger.Info(
+                            "MicrostructureBackfill [{Ticker}]: {Count} barras desde {From:yyyy-MM-dd HH:mm} hasta {To:yyyy-MM-dd HH:mm} UTC.",
+                            symbolTicker, backfilled.Count, gapStart, gapEnd);
+                    }
+                }
+
+                // Trim: conservar solo los últimos 7 días (rolling window).
+                foreach (var symbolTicker in symbolsToLoad)
+                    _persistentStore.TrimOlderThan(new InstrumentId(symbolTicker), DateTime.UtcNow.AddDays(-7));
+
                 _aggTradeAccumulator = new LiveAggTradeAccumulator();
                 microstructureProvider = _liveProvider;
             }
@@ -301,7 +353,11 @@ namespace Trading.Strategies
                         {
                             var bucket = _aggTradeAccumulator.TakeBucket(instrumentId, marketBar.TimestampUtc);
                             if (bucket != null)
-                                _liveProvider.ComputeAndAdd(instrumentId, marketBar.TimestampUtc, bucket);
+                            {
+                                var computedBar = _liveProvider.ComputeAndAdd(instrumentId, marketBar.TimestampUtc, bucket);
+                                if (computedBar != null)
+                                    _persistentStore?.Append(computedBar);
+                            }
                             else
                                 _logger.Warning(
                                     "LiveMicrostructure [{Ticker}] {BarUtc:yyyy-MM-dd HH:mm} UTC: sin aggTrades en esta barra — estrategias microestructurales retornarán Flat.",
@@ -513,6 +569,9 @@ namespace Trading.Strategies
             _structuredLogSink?.Dispose();
             _httpClient?.Dispose();
         }
+
+        private static DateTime FloorToHour(DateTime utc) =>
+            new DateTime(utc.Year, utc.Month, utc.Day, utc.Hour, 0, 0, DateTimeKind.Utc);
 
         private static IReadOnlySet<InstrumentId> ExtractInstrumentsRequiringRegime(
             Trading.Domain.Models.RootConfig rootConfiguration)
