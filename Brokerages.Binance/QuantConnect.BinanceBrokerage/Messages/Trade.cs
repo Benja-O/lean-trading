@@ -31,6 +31,13 @@ namespace QuantConnect.Brokerages.Binance.Messages
 
         [JsonProperty("q")]
         public decimal Quantity { get; private set; }
+
+        /// <summary>
+        /// Binance aggTrade field "m": true = buyer is maker (seller is aggressive).
+        /// false = buyer is aggressive taker. Used to classify buy/sell volume for microstructure features.
+        /// </summary>
+        [JsonProperty("m")]
+        public bool IsBuyerMaker { get; private set; }
     }
 
 #pragma warning restore 1591

@@ -15,6 +15,7 @@
 
 | ADR | TÃ­tulo corto | Ãrea |
 |---|---|---|
+| ADR-046 | Pipeline de features microestructurales en vivo (HITO-D-feat) | Estrategias / Infraestructura |
 | ADR-045 | minimal-position-mode + min notional real en SPDB para futures Binance | Ejecución / Datos |
 | ADR-044 | Órdenes protectivas SL/TP con `reduceOnly` en Binance Futures (divergencia del fork) | Riesgo / Ejecución |
 | ADR-043 | Clock drift Binance -1021: guard NTP externo como pre-flight, no recvWindow | Operaciones / Infraestructura |
@@ -56,6 +57,48 @@
 | ADR-003 | `OrderRegistry` vive en `Trading.Application` | Arquitectura |
 | ADR-002 | `RiskPerTradePercentage` falla loud si no estÃ¡ en `strategies.json` | Dominio |
 | ADR-001 | Desacople quirÃºrgico de QuantConnect: dominio Lean-free | Arquitectura |
+
+## ADR-046 — Pipeline de features microestructurales en vivo (HITO-D-feat)
+**Fecha:** 2026-06-17
+**Estado:** Aceptada
+
+### Contexto
+Las estrategias aprobadas en Hito G (`CvdSellExhaustionStrategy`, `TradeSizeInstitutionalStrategy`) consumen features de microestructura derivadas de aggTrades de Binance (OFI, CVD, arrival rate, mean trade size, buy/sell ratio, price return). En backtest e IS/OOS, estas features venían de un CSV histórico estático cargado por `MicrostructureRegistry.Load()` en `Initialize()`. En vivo, la barra 1h actual nunca está en el CSV → `GetBar()` devuelve `null` → las estrategias retornan `Flat` → el sistema no tradea.
+
+El problema raíz: `is_buyer_maker` (campo `"m"` del WebSocket aggTrade de Binance) es necesario para clasificar buy vs sell volume. El código original de Lean Binance (`Trade.cs`, `EmitTradeTick`) lo descartaba silenciosamente.
+
+### Decisión
+
+**1. Lean mínimo (3 archivos, ~10 líneas):** capturar `is_buyer_maker` del WebSocket.
+- `Messages/Trade.cs`: añadir `[JsonProperty("m")] public bool IsBuyerMaker`.
+- `BinanceBrokerage.Messaging.cs → EmitTradeTick`: recibir `isBuyerMaker` y codificarlo en `Tick.SaleCondition` como `"BUY"` o `"SELL"` (campo string existente, vacío para crypto).
+
+**2. `AggTradeBucket` (Trading.Application):** acumula aggTrades de una barra 1h (price, qty, is_buyer_maker). Lean-free — solo tipos primitivos.
+
+**3. `MicrostructureFeatureComputer` (Trading.Application, static):** replica exacta de `_agg_1h()` de `download_aggtrades.py`. Garantiza paridad matemática con el CSV offline.
+
+**4. `LiveMicrostructureProvider` (Trading.Application):** implementa `IMicrostructureProvider`. Combina: (a) cómputo en vivo via `ComputeAndAdd()`, (b) fallback al `MicrostructureRegistry` CSV para warmup y barras históricas. CVD acumulativo seeded desde el último valor del CSV (`GetLastCvd()`).
+
+**5. `LiveAggTradeAccumulator` (Trading.Strategies):** adaptador Lean-aware. Recibe `Tick` de QC, lee `SaleCondition` para el lado, y acumula por bucket 1h.
+
+**6. Wiring en `TradingAlgorithmHost`:**
+- Live: `Resolution.Tick` en `AddCryptoFuture` + `TickConsolidator(timeframeSpan)` (produce `TradeBar` desde ticks). Backtest: `Resolution.Minute` + `TradeBarConsolidator` sin cambios.
+- `OnData()`: routing de ticks al acumulador (solo live, post-warmup).
+- `DataConsolidated` handler: `TakeBucket()` → `ComputeAndAdd()` ANTES de `ProcessBar()`, garantizando que `GetBar()` ya tiene el dato cuando la estrategia evalúa señal.
+
+### Alternativas consideradas
+- **A: REST API polling al cierre de cada barra.** HTTP en camino crítico de señal. Descartada por latencia y dependencia externa en runtime.
+- **B: WebSocket propio independiente de QC.** Mayor control pero lifecycle propio (reconnect, heartbeat). Descartada por complejidad operativa.
+- **C: Actualización diaria del CSV (lag 24h).** Pierde un día entero de señales. Inaceptable para estrategias 1h.
+- **D (elegida): Lean mínimo + TickConsolidator.** Captura el dato en la fuente (WebSocket), mínima modificación a Lean, sin dependencias externas adicionales. La información siempre estuvo disponible en el WebSocket; solo se descartaba.
+
+### Consecuencias
+- Las estrategias microestructurales señalizan en vivo por primera vez.
+- Paridad live/backtest garantizada por `MicrostructureFeatureComputerParityTests` (8 casos que validan las fórmulas contra los cálculos esperados del Python).
+- Primera barra post-warmup puede ser parcial (ticks desde que termina el warmup, no desde el inicio de la hora). Las estrategias están en su propio warmup (`WarmUpBars`) en ese período → retornan Flat de todos modos.
+- `SaleCondition` de `Tick` se reutiliza como carrier para el side — no es su semántica original en equity, pero es el campo más cercano disponible sin modificar el schema de `Tick` de Lean.
+
+---
 
 ## ADR-045 — minimal-position-mode + override de min notional en el adapter
 **Fecha:** 2026-06-15

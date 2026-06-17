@@ -190,7 +190,8 @@ namespace QuantConnect.Brokerages.Binance
                                 _symbolMapper.GetLeanSymbol(trade.Symbol, GetSupportedSecurityType(), MarketName),
                                 Time.UnixMillisecondTimeStampToDateTime(trade.Time),
                                 trade.Price,
-                                trade.Quantity);
+                                trade.Quantity,
+                                trade.IsBuyerMaker);
                             break;
                         case "bookTicker":
                             // futures stream the event type but spot doesn't, that's why we have the next 'else if'
@@ -241,7 +242,7 @@ namespace QuantConnect.Brokerages.Binance
             }
         }
 
-        private void EmitTradeTick(Symbol symbol, DateTime time, decimal price, decimal quantity)
+        private void EmitTradeTick(Symbol symbol, DateTime time, decimal price, decimal quantity, bool isBuyerMaker = false)
         {
             var tick = new Tick
             {
@@ -249,7 +250,12 @@ namespace QuantConnect.Brokerages.Binance
                 Value = price,
                 Quantity = Math.Abs(quantity),
                 Time = time,
-                TickType = TickType.Trade
+                TickType = TickType.Trade,
+                // Encode aggTrade side so downstream consumers (e.g. LiveAggTradeAccumulator) can
+                // classify buy/sell volume without re-querying the exchange.
+                // "BUY"  → buyer is aggressive taker  (is_buyer_maker = false)
+                // "SELL" → seller is aggressive taker (is_buyer_maker = true)
+                SaleCondition = isBuyerMaker ? "SELL" : "BUY"
             };
 
             lock (TickLocker)

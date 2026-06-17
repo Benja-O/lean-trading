@@ -24,6 +24,7 @@ using Trading.Domain.Abstractions.Regimes;
 using Trading.Domain.ValueObjects;
 using Trading.Strategies.Adapters;
 using Trading.Strategies.Infrastructure;
+using Trading.Strategies.Microstructure;
 using Trading.Strategies.Regimes;
 
 namespace Trading.Strategies
@@ -72,6 +73,10 @@ namespace Trading.Strategies
         private HttpClient _httpClient;
         private HealthchecksIoPinger _healthchecksPinger;
         private BarStalenessGate _barStalenessGate;
+
+        // Pipeline de microestructura en vivo (solo LiveMode)
+        private LiveAggTradeAccumulator _aggTradeAccumulator;
+        private LiveMicrostructureProvider _liveProvider;
 
         // Servicios de Application
         private OrderRegistry _orderRegistry;
@@ -159,9 +164,13 @@ namespace Trading.Strategies
                 }
             }
 
+            // Live: Resolution.Tick para recibir aggTrades individuales con is_buyer_maker
+            // (SaleCondition "BUY"/"SELL" codificado por EmitTradeTick, ADR-046).
+            // Backtest: Resolution.Minute — el CSV histórico cubre los features; no necesitamos ticks.
+            var dataResolution = LiveMode ? Resolution.Tick : Resolution.Minute;
             foreach (var symbolTicker in symbolsToLoad)
             {
-                var cryptoAsset = AddCryptoFuture(symbolTicker, Resolution.Minute, Market.Binance);
+                var cryptoAsset = AddCryptoFuture(symbolTicker, dataResolution, Market.Binance);
                 cryptoAsset.SetFeeModel(new ConstantFeeModel(0.001m, "USDT"));
                 cryptoAsset.SetSlippageModel(new ConstantSlippageModel(0.001m));
                 _instrumentResolver.Register(cryptoAsset.Symbol);
@@ -190,10 +199,10 @@ namespace Trading.Strategies
             }
             var regimeRegistry = new MarketRegimeRegistry(regimeClassifiers, _clock, _logger);
 
-            // ===== Features microestructurales (E-INFRA-2) =====
-            // Carga opcional: si el CSV no existe para un símbolo, el registry devuelve null y las
-            // estrategias OHLCV-only (EmaCrossStrategy) no se ven afectadas. Solo las estrategias
-            // microestructurales (Hito E) degradan a Flat cuando el proveedor retorna null.
+            // ===== Features microestructurales (E-INFRA-2 / HITO-D-feat ADR-046) =====
+            // El CSV histórico se carga siempre: sirve de fuente para el warmup (backtest y live)
+            // y de fallback histórico en live. Si el CSV no existe para un símbolo, las estrategias
+            // OHLCV-only no se ven afectadas; las microestructurales degradan a Flat (null).
             var microstructureRegistry = new MicrostructureRegistry(_logger);
             string microstructureDir = rootConfiguration.MicrostructureDataPath
                 ?? System.IO.Path.Combine(System.AppContext.BaseDirectory, "microstructure");
@@ -202,6 +211,19 @@ namespace Trading.Strategies
                 string csvPath = System.IO.Path.Combine(
                     microstructureDir, $"{symbolTicker}_1h_features.csv");
                 microstructureRegistry.Load(new InstrumentId(symbolTicker), csvPath);
+            }
+
+            // En live: pipeline de cómputo en tiempo real a partir de aggTrades (Resolution.Tick).
+            // LiveMicrostructureProvider prioriza datos en vivo y cae al CSV para barras del warmup.
+            // En backtest: el CSV cubre todo el período; no se necesita pipeline en tiempo real.
+            IMicrostructureProvider microstructureProvider = microstructureRegistry;
+            if (LiveMode)
+            {
+                _liveProvider = new LiveMicrostructureProvider(microstructureRegistry, _logger);
+                foreach (var symbolTicker in symbolsToLoad)
+                    _liveProvider.SeedCvdFromHistory(new InstrumentId(symbolTicker));
+                _aggTradeAccumulator = new LiveAggTradeAccumulator();
+                microstructureProvider = _liveProvider;
             }
 
             // ===== Construcción de executors =====
@@ -221,12 +243,16 @@ namespace Trading.Strategies
                     var instrumentId = new InstrumentId(symbolTicker);
                     var symbol = _instrumentResolver.Resolve(instrumentId);
 
-                    var tradeBarConsolidator = new TradeBarConsolidator(timeframeSpan);
+                    // Live: TickConsolidator acepta Tick y produce TradeBar (aggTrades → OHLCV 1h).
+                    // Backtest: TradeBarConsolidator acepta TradeBar de minuto → OHLCV 1h.
+                    IDataConsolidator tradeBarConsolidator = LiveMode
+                        ? (IDataConsolidator)new TickConsolidator(timeframeSpan)
+                        : new TradeBarConsolidator(timeframeSpan);
                     var localStrategyExecutors = new List<StrategyExecutor>();
 
                     foreach (var strategyDefinition in strategyGroup)
                     {
-                        var strategy = StrategyFactory.Create(strategyDefinition.StrategyName, microstructureRegistry);
+                        var strategy = StrategyFactory.Create(strategyDefinition.StrategyName, microstructureProvider);
 
                         var riskParameters = RiskParameters.FromPercentages(
                             stopLossPercentage: strategyDefinition.StopLossPercentage,
@@ -265,6 +291,23 @@ namespace Trading.Strategies
                     {
                         var marketBar = MarketBarMapper.ToMarketBar(
                             (TradeBar)tradeBarData, _instrumentResolver);
+
+                        // Live post-warmup: computar features desde aggTrades acumulados ANTES de
+                        // evaluar señales. El bucket contiene ticks de [barUtc, barUtc+1h).
+                        // DataConsolidated dispara antes de OnData (orden QC), por lo que el tick
+                        // que cierra la barra ya fue procesado por el consolidador pero aún no llegó
+                        // al accumulator — el bucket es exactamente [barStart, barEnd).
+                        if (_aggTradeAccumulator != null && _liveProvider != null && !IsWarmingUp)
+                        {
+                            var bucket = _aggTradeAccumulator.TakeBucket(instrumentId, marketBar.TimestampUtc);
+                            if (bucket != null)
+                                _liveProvider.ComputeAndAdd(instrumentId, marketBar.TimestampUtc, bucket);
+                            else
+                                _logger.Warning(
+                                    "LiveMicrostructure [{Ticker}] {BarUtc:yyyy-MM-dd HH:mm} UTC: sin aggTrades en esta barra — estrategias microestructurales retornarán Flat.",
+                                    instrumentId.Ticker, marketBar.TimestampUtc);
+                        }
+
                         _barProcessingService.ProcessBar(marketBar, localStrategyExecutors, IsWarmingUp);
                     };
 
@@ -425,11 +468,25 @@ namespace Trading.Strategies
         {
             if (IsWarmingUp) return;
 
-            // Liveness del feed: cada slice live (~1min) refresca la marca que usa el
-            // auto-restart. Wall clock real (ADR-021), no IClock simulado. Independiente
-            // de la cadencia de barras de estrategia (1h), que cerraría muy espaciado.
+            // Liveness del feed: cada slice live (~aggTrade) refresca la marca que usa el
+            // auto-restart. Wall clock real (ADR-021), no IClock simulado.
             if (LiveMode)
                 _healthHeartbeatTracker.MarkDataFeedAlive(DateTime.UtcNow);
+
+            // Pipeline de microestructura (ADR-046): acumular aggTrades por barra 1h.
+            // Solo en live post-warmup; en backtest los features vienen del CSV histórico.
+            // OnData se invoca DESPUÉS de que los consolidadores actualizan (orden QC),
+            // por lo que el tick que cierra una barra ya disparó DataConsolidated antes
+            // de llegar aquí — el bucket queda limpio para la barra siguiente.
+            if (_aggTradeAccumulator != null && data.Ticks != null)
+            {
+                foreach (var kvp in data.Ticks)
+                {
+                    var instrumentId = _instrumentResolver.Resolve(kvp.Key);
+                    foreach (var tick in kvp.Value)
+                        _aggTradeAccumulator.OnTick(instrumentId, tick);
+                }
+            }
 
             _riskOrchestrator.EvaluateAllMonitors();
             if (_riskOrchestrator.IsKillSwitchActivated) return;

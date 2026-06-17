@@ -90,6 +90,25 @@ namespace Trading.Application.Microstructure
 
         public bool HasDataFor(InstrumentId instrumentId) => _data.ContainsKey(instrumentId);
 
+        /// <summary>
+        /// Devuelve el CVD acumulado de la última barra histórica del instrumento.
+        /// Usado para sembrar el CVD running del LiveMicrostructureProvider al arrancar en live.
+        /// Retorna 0.0 si no hay datos cargados.
+        /// </summary>
+        public double GetLastCvd(InstrumentId instrumentId)
+        {
+            if (instrumentId is null) return 0.0;
+            if (!_data.TryGetValue(instrumentId, out var index) || index.Count == 0) return 0.0;
+
+            MicrostructureBar? latest = null;
+            foreach (var bar in index.Values)
+            {
+                if (latest is null || bar.BarUtc > latest.BarUtc)
+                    latest = bar;
+            }
+            return latest?.Cvd ?? 0.0;
+        }
+
         // ── Parsing ──────────────────────────────────────────────────────────────
 
         // Columnas del CSV (índices 0-based):
