@@ -95,6 +95,10 @@ namespace Trading.Strategies.Microstructure
                 }
 
                 current = current.AddHours(1);
+
+                // Rate limiting: Binance Futures limita a 2400 weight/min; aggTrades cuesta
+                // 20 weight/request → máximo 120 req/min. 400 ms = 150 req/min → margen seguro.
+                System.Threading.Thread.Sleep(400);
             }
 
             return results;
