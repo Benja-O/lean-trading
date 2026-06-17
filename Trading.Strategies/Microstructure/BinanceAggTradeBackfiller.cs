@@ -87,18 +87,21 @@ namespace Trading.Strategies.Microstructure
                 }
                 catch (Exception ex)
                 {
-                    // Fallo parcial: loggear y continuar. Las horas no cubiertas quedan
-                    // en blanco; GetBar() caerá al CSV histórico para esas barras.
                     Console.Error.WriteLine(
                         $"[BinanceAggTradeBackfiller] Error al backfillear {binanceSymbol} {current:yyyy-MM-dd HH:mm} UTC: {ex.Message}");
-                    // No relanzar: el startup no debe fallar por indisponibilidad de la API.
+
+                    // 418 = IP baneada por Binance. Más requests solo extienden el ban.
+                    // Abortar inmediatamente; el warmup usará los bars ya acumulados.
+                    if (ex.Message.Contains("418"))
+                        return results;
                 }
 
                 current = current.AddHours(1);
 
                 // Rate limiting: Binance Futures limita a 2400 weight/min; aggTrades cuesta
-                // 20 weight/request → máximo 120 req/min. 400 ms = 150 req/min → margen seguro.
-                System.Threading.Thread.Sleep(400);
+                // 20 weight/request → máximo 85 req/min. 700ms ≈ 85 req/min = 1700 weight/min,
+                // dejando margen para los calls del brokerage (listen key, balance, etc.).
+                System.Threading.Thread.Sleep(700);
             }
 
             return results;
