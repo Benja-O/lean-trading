@@ -15,6 +15,7 @@
 
 | ADR | TÃ­tulo corto | Ãrea |
 |---|---|---|
+| ADR-047 | Warmup autosuficiente: aggTrades REST backfill + persistencia rolling 7d | Estrategias / Infraestructura |
 | ADR-046 | Pipeline de features microestructurales en vivo (HITO-D-feat) | Estrategias / Infraestructura |
 | ADR-045 | minimal-position-mode + min notional real en SPDB para futures Binance | Ejecución / Datos |
 | ADR-044 | Órdenes protectivas SL/TP con `reduceOnly` en Binance Futures (divergencia del fork) | Riesgo / Ejecución |
@@ -57,6 +58,52 @@
 | ADR-003 | `OrderRegistry` vive en `Trading.Application` | Arquitectura |
 | ADR-002 | `RiskPerTradePercentage` falla loud si no estÃ¡ en `strategies.json` | Dominio |
 | ADR-001 | Desacople quirÃºrgico de QuantConnect: dominio Lean-free | Arquitectura |
+
+## ADR-047 — Warmup autosuficiente: aggTrades REST backfill + persistencia rolling 7d
+**Fecha:** 2026-06-17
+**Estado:** Aceptada
+**ADRs relacionados:** ADR-046 (pipeline live aggTrades)
+
+### Contexto
+Con ADR-046, el warmup de estrategias microestructurales en vivo dependía de un CSV histórico estático (`microstructure/{ticker}_1h_features.csv`). Ese CSV envejece: si el gap entre la última fila del CSV y el momento de reinicio supera las 50h (WarmUpBars de `CvdSellExhaustion`), `GetBar()` retorna `null` para las barras de warmup → las estrategias no completan su warmup → no señalizan.
+
+Operativamente: actualizar los CSVs antes de cada reinicio requiere correr `download_aggtrades.py` manualmente (~5 min), subir ~30 MB al VPS, y no escala a un sistema desatendido.
+
+Problema adicional con la alternativa de klines REST (`/fapi/v1/klines`): el campo "Number of trades" (índice 8) cuenta trades **individuales**, no aggTrades. El script Python de referencia usa conteo de **aggTrades** para `arrival_rate` y `mean_trade_size`. El denominador distinto introduce un sesgo sistemático en el percentil de `TradeSizeInstitutionalStrategy` — la estrategia con mejor OOS Sharpe (4.186).
+
+### Decisión
+
+Eliminar la dependencia del CSV estático para el warmup mediante dos componentes:
+
+**1. `PersistentMicrostructureStore` (Trading.Application):**
+Persiste cada barra 1h computada en vivo en `{AppDir}/microstructure-live/{ticker}_live.csv`. Append-only en operación; reescritura solo al hacer trim. Rolling window de 7 días (168 barras × 3 símbolos). Tamaño permanente: ~25 KB total.
+
+**2. `BinanceAggTradeBackfiller` (Trading.Strategies):**
+En `Initialize()` (solo LiveMode), calcula el gap = [última barra en disco, hora actual) y descarga aggTrades vía `/fapi/v1/aggTrades` de Binance Futures. Para cada ventana 1h: pagina con `fromId` si hay >1000 aggTrades, acumula en `AggTradeBucket`, computa con `MicrostructureFeatureComputer`. Paridad exacta con el pipeline en vivo: mismo denominador aggTrade (no individual trades). Tolerante a fallos de API: errores HTTP no crashean `Initialize()`.
+
+**Secuencia en Initialize() (LiveMode):**
+1. Seed CVD desde último bar del CSV histórico (respaldo si disco vacío).
+2. Cargar últimas 72h desde disco → `_live` dict + actualiza `_cvdRunning`.
+3. Backfill gap REST → `_live` + append a disco.
+4. Trim disco >7d.
+5. `SetWarmUp()` → warmup cubre el rango pedido desde `_live`.
+
+**Primer arranque:** backfill de 52h (~3 requests/símbolo para horas quietas, más para BTC peak). Startup de ~1-5 minutos (aceptable; ocurre una sola vez).
+**Reinicios subsecuentes:** gap típico de horas → segundos de startup.
+
+### Alternativas consideradas
+- **klines REST (`/fapi/v1/klines`):** 1 request por símbolo, startup en <1s. Descartada por sesgo sistemático en `arrival_rate`/`mean_trade_size` (individual trades vs aggTrades). Aceptable para `CvdSellExhaustion`, inaceptable para `TradeSizeInstitutional`.
+- **Actualizar CSV manualmente pre-reinicio:** 5min + 30MB transfer. No escala; dependencia operativa manual.
+- **Esperar 50h de WebSocket en vivo:** inaceptable — el sistema no señaliza por dos días tras cada reinicio.
+- **Persistir aggTrades crudos:** storage elevado (GBs/año). Innecesario: solo los features computados (8 doubles/barra) tienen valor permanente.
+
+### Consecuencias
+- El sistema es autosuficiente para warmup en cualquier reinicio, sin gestión manual de archivos.
+- Los CSVs históricos (`microstructure/*.csv`) siguen cargándose como fallback adicional durante el primer arranque sin disco, pero ya no son críticos en operación continua.
+- Storage en VPS: máximo 25 KB permanente (vs 30 MB CSV × 3).
+- Startup penalizado solo en el primer arranque o tras gaps largos (>7d sin correr).
+
+---
 
 ## ADR-046 — Pipeline de features microestructurales en vivo (HITO-D-feat)
 **Fecha:** 2026-06-17
