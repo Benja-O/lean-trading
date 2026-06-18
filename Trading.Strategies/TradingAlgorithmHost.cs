@@ -74,10 +74,12 @@ namespace Trading.Strategies
         private HealthchecksIoPinger _healthchecksPinger;
         private BarStalenessGate _barStalenessGate;
 
-        // Pipeline de microestructura en vivo (solo LiveMode)
+        // Pipeline de microestructura en vivo (solo LiveMode).
+        // El Recorder (proceso independiente) escribe a disco; el host solo lee en Initialize().
         private LiveAggTradeAccumulator _aggTradeAccumulator;
-        private LiveMicrostructureProvider _liveProvider;
-        private PersistentMicrostructureStore _persistentStore;
+        // Proveedor por timeframe: un LiveMicrostructureProvider por cada timeframe activo.
+        // El proveedor correcto se captura en el closure de cada DataConsolidated.
+        private Dictionary<string, LiveMicrostructureProvider> _liveProviderByTimeframe;
 
         // Servicios de Application
         private OrderRegistry _orderRegistry;
@@ -214,46 +216,52 @@ namespace Trading.Strategies
                 microstructureRegistry.Load(new InstrumentId(symbolTicker), csvPath);
             }
 
-            // En live: pipeline de cómputo en tiempo real a partir de aggTrades (Resolution.Tick).
-            // LiveMicrostructureProvider prioriza datos en vivo y cae al CSV para barras del warmup.
-            // En backtest: el CSV cubre todo el período; no se necesita pipeline en tiempo real.
-            IMicrostructureProvider microstructureProvider = microstructureRegistry;
+            // En live: el Recorder (proceso independiente siempre encendido) escribe las barras
+            // de microestructura a {ticker}_{timeframe}_live.csv. El host solo lee ese store en
+            // Initialize() para cubrir el warmup, y luego sigue computando la barra en curso en
+            // memoria con aggTrades del WebSocket live. Nunca escribe a disco (ADR-048).
+            // En backtest: el CSV histórico cubre todo el período; no se necesita pipeline en vivo.
+            _liveProviderByTimeframe = new Dictionary<string, LiveMicrostructureProvider>();
+            string liveFeaturesDir = System.IO.Path.Combine(System.AppContext.BaseDirectory, "microstructure-live");
+
             if (LiveMode)
             {
-                _liveProvider = new LiveMicrostructureProvider(microstructureRegistry, _logger);
-
-                // Seed CVD desde el último bar del CSV histórico (base inicial si no hay datos en disco).
-                foreach (var symbolTicker in symbolsToLoad)
-                    _liveProvider.SeedCvdFromHistory(new InstrumentId(symbolTicker));
-
-                // Cargar barras de las últimas 72h desde disco (sobreescribe el seed del CSV con CVD real).
-                string liveFeaturesDir = System.IO.Path.Combine(System.AppContext.BaseDirectory, "microstructure-live");
-                _persistentStore = new PersistentMicrostructureStore(liveFeaturesDir);
-                foreach (var symbolTicker in symbolsToLoad)
+                // Un LiveMicrostructureProvider por timeframe activo en strategies.json.
+                // El proveedor de 1h usa el MicrostructureRegistry (CSV histórico) como fallback
+                // para barras anteriores al rolling window del Recorder (7 días).
+                // Timeframes distintos de 1h usan un registry vacío (sin CSV histórico disponible).
+                foreach (var timeframeKey in rootConfiguration.Timeframes.Keys)
                 {
-                    var instrumentId = new InstrumentId(symbolTicker);
-                    var recentBars   = _persistentStore.LoadRecent(instrumentId, hours: 72);
-                    foreach (var bar in recentBars)
-                        _liveProvider.AddBar(bar);
-                    if (recentBars.Count > 0)
-                        _logger.Info(
-                            "MicrostructureStore: {Count} barras recientes cargadas para {Ticker} (hasta {LastBar:yyyy-MM-dd HH:mm} UTC).",
-                            recentBars.Count, symbolTicker, recentBars[recentBars.Count - 1].BarUtc);
+                    // Para 1h: fallback al CSV histórico de Research. Para otros: registry vacío.
+                    var fallback = string.Equals(timeframeKey, "1h", StringComparison.OrdinalIgnoreCase)
+                        ? microstructureRegistry
+                        : new MicrostructureRegistry(_logger);
+
+                    var provider = new LiveMicrostructureProvider(fallback, _logger);
+
+                    // Seed CVD desde el último bar del CSV histórico (punto de partida si el store
+                    // en disco no cubre el período completo).
+                    foreach (var symbolTicker in symbolsToLoad)
+                        provider.SeedCvdFromHistory(new InstrumentId(symbolTicker));
+
+                    // Cargar barras recientes desde el store del Recorder (fuente primaria).
+                    var store = new PersistentMicrostructureStore(liveFeaturesDir, timeframeKey);
+                    foreach (var symbolTicker in symbolsToLoad)
+                    {
+                        var instrumentId = new InstrumentId(symbolTicker);
+                        var recentBars   = store.LoadRecent(instrumentId, hours: 72);
+                        foreach (var bar in recentBars)
+                            provider.AddBar(bar);
+                        if (recentBars.Count > 0)
+                            _logger.Info(
+                                "MicrostructureStore [{TF}]: {Count} barras cargadas para {Ticker} (hasta {LastBar:yyyy-MM-dd HH:mm} UTC).",
+                                timeframeKey, recentBars.Count, symbolTicker, recentBars[recentBars.Count - 1].BarUtc);
+                    }
+
+                    _liveProviderByTimeframe[timeframeKey] = provider;
                 }
 
-                // NOTA: el backfill REST (BinanceAggTradeBackfiller) fue eliminado del startup.
-                // Hacer requests REST a Binance durante Initialize() compite con el brokerage
-                // (CreateListenKey, GetCashBalance) y puede provocar ban de IP -1003, que impide
-                // cualquier operación de trading. El warmup se cubre desde disco (LoadRecent arriba);
-                // si no hay datos en disco, las estrategias retornan Flat hasta acumular barras vivas.
-                // Ver DEUDA-3 en ROADMAP.md para el diseño de backfill seguro a futuro.
-
-                // Trim: conservar solo los últimos 7 días (rolling window).
-                foreach (var symbolTicker in symbolsToLoad)
-                    _persistentStore.TrimOlderThan(new InstrumentId(symbolTicker), DateTime.UtcNow.AddDays(-7));
-
                 _aggTradeAccumulator = new LiveAggTradeAccumulator();
-                microstructureProvider = _liveProvider;
             }
 
             // ===== Construcción de executors =====
@@ -263,6 +271,14 @@ namespace Trading.Strategies
             {
                 string timeframe = timeframeNode.Key;
                 TimeSpan timeframeSpan = TimeframeHelper.GetTimeSpan(timeframe);
+
+                // Proveedor efectivo para este timeframe:
+                //   Live    → LiveMicrostructureProvider específico del timeframe (lee del Recorder).
+                //   Backtest → MicrostructureRegistry (CSV histórico cargado arriba).
+                IMicrostructureProvider effectiveProvider = LiveMode
+                    && _liveProviderByTimeframe.TryGetValue(timeframe, out var tfProvider)
+                        ? tfProvider
+                        : microstructureRegistry;
 
                 var strategiesBySymbol = timeframeNode.Value.Strategies
                     .GroupBy(strategy => strategy.Symbol);
@@ -282,7 +298,7 @@ namespace Trading.Strategies
 
                     foreach (var strategyDefinition in strategyGroup)
                     {
-                        var strategy = StrategyFactory.Create(strategyDefinition.StrategyName, microstructureProvider);
+                        var strategy = StrategyFactory.Create(strategyDefinition.StrategyName, effectiveProvider);
 
                         var riskParameters = RiskParameters.FromPercentages(
                             stopLossPercentage: strategyDefinition.StopLossPercentage,
@@ -317,29 +333,31 @@ namespace Trading.Strategies
                             new StrategyRegimeCompatibility(strategyExecutor.ExecutorIdentifier, allowedRegimes);
                     }
 
+                    // Capturar el proveedor de este timeframe en el closure (ADR-048).
+                    // El Recorder (proceso externo) es el único escritor a disco; el host
+                    // solo computa en memoria para que GetBar() resuelva en la barra en curso.
+                    var closureProvider = effectiveProvider as LiveMicrostructureProvider;
+
                     tradeBarConsolidator.DataConsolidated += (sender, tradeBarData) =>
                     {
                         var marketBar = MarketBarMapper.ToMarketBar(
                             (TradeBar)tradeBarData, _instrumentResolver);
 
                         // Live post-warmup: computar features desde aggTrades acumulados ANTES de
-                        // evaluar señales. El bucket contiene ticks de [barUtc, barUtc+1h).
+                        // evaluar señales. El bucket contiene ticks de [barUtc, barUtc+TF).
                         // DataConsolidated dispara antes de OnData (orden QC), por lo que el tick
                         // que cierra la barra ya fue procesado por el consolidador pero aún no llegó
                         // al accumulator — el bucket es exactamente [barStart, barEnd).
-                        if (_aggTradeAccumulator != null && _liveProvider != null && !IsWarmingUp)
+                        // No se escribe a disco: el Recorder es el único escritor del store.
+                        if (_aggTradeAccumulator != null && closureProvider != null && !IsWarmingUp)
                         {
                             var bucket = _aggTradeAccumulator.TakeBucket(instrumentId, marketBar.TimestampUtc);
                             if (bucket != null)
-                            {
-                                var computedBar = _liveProvider.ComputeAndAdd(instrumentId, marketBar.TimestampUtc, bucket);
-                                if (computedBar != null)
-                                    _persistentStore?.Append(computedBar);
-                            }
+                                closureProvider.ComputeAndAdd(instrumentId, marketBar.TimestampUtc, bucket);
                             else
                                 _logger.Warning(
-                                    "LiveMicrostructure [{Ticker}] {BarUtc:yyyy-MM-dd HH:mm} UTC: sin aggTrades en esta barra — estrategias microestructurales retornarán Flat.",
-                                    instrumentId.Ticker, marketBar.TimestampUtc);
+                                    "LiveMicrostructure [{Ticker}/{TF}] {BarUtc:yyyy-MM-dd HH:mm} UTC: sin aggTrades — estrategias retornarán Flat.",
+                                    instrumentId.Ticker, timeframe, marketBar.TimestampUtc);
                         }
 
                         _barProcessingService.ProcessBar(marketBar, localStrategyExecutors, IsWarmingUp);

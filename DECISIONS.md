@@ -15,7 +15,8 @@
 
 | ADR | TÃ­tulo corto | Ãrea |
 |---|---|---|
-| ADR-047 | Warmup autosuficiente: aggTrades REST backfill + persistencia rolling 7d | Estrategias / Infraestructura |
+| ADR-048 | Grabador continuo de microestructura: data plane desacoplado del execution plane | Estrategias / Infraestructura |
+| ADR-047 | ~~Warmup autosuficiente: aggTrades REST backfill + persistencia rolling 7d~~ (**Supersedida por ADR-048**) | Estrategias / Infraestructura |
 | ADR-046 | Pipeline de features microestructurales en vivo (HITO-D-feat) | Estrategias / Infraestructura |
 | ADR-045 | minimal-position-mode + min notional real en SPDB para futures Binance | Ejecución / Datos |
 | ADR-044 | Órdenes protectivas SL/TP con `reduceOnly` en Binance Futures (divergencia del fork) | Riesgo / Ejecución |
@@ -59,9 +60,57 @@
 | ADR-002 | `RiskPerTradePercentage` falla loud si no estÃ¡ en `strategies.json` | Dominio |
 | ADR-001 | Desacople quirÃºrgico de QuantConnect: dominio Lean-free | Arquitectura |
 
+## ADR-048 — Grabador continuo de microestructura: data plane desacoplado del execution plane
+**Fecha:** 2026-06-18
+**Estado:** Aceptada
+**ADRs relacionados:** ADR-047 (supersedida), ADR-046 (pipeline live aggTrades)
+
+### Contexto
+ADR-047 introdujo `BinanceAggTradeBackfiller` para cubrir el warmup desde el endpoint REST `/fapi/v1/aggTrades` en cada `Initialize()`. En operación resultó insostenible: 20 weight por request, 156 requests para 52h × 3 símbolos → ban de IP (418 / -1003). El ban compite con `CreateListenKey()` del brokerage, crasheando el algoritmo completo. Intentos de mitigación (sleep 400ms → 700ms → abort en 418) fallaron o dejaron al sistema con warmup incompleto.
+
+Causa raíz: la **captura de features está acoplada al ciclo de vida del algoritmo de trading**. Las features solo se computan cuando Lean corre; si Lean se cae, se pierde historia, y hay que reconstruirla desde el venue donde también se opera — frágil y con conflicto de recursos.
+
+### Decisión
+Separar el **data plane** del **execution plane** mediante un proceso independiente:
+
+**`Trading.Recorder` (proyecto nuevo, console app):**
+- Suscribe el **WebSocket público** `wss://fstream.binance.com/stream?streams={tickers}@aggTrade` (sin API key, sin riesgo de ban, sin competir con el brokerage).
+- Acumula aggTrades en `TimeframeAggregator` por cada par (símbolo, timeframe) configurado en `strategies.json`.
+- Al cerrar cada ventana: `MicrostructureFeatureComputer.Compute()` → `PersistentMicrostructureStore.Append()`. Mismo golden source que el pipeline live.
+- Se despliega como servicio siempre encendido (systemd / Windows Service) en el VPS.
+- Reconexión automática con backoff exponencial.
+
+**Cambios en `Trading.Strategies`:**
+- `TradingAlgorithmHost`: el host pasa a ser **puro consumidor**. En `Initialize()` lee las barras recientes del store por timeframe; **no escribe a disco**. Un proveedor `LiveMicrostructureProvider` por timeframe activo carga su store `{ticker}_{timeframe}_live.csv`.
+- `BinanceAggTradeBackfiller`: descartado del rol de backfill en vivo. El store del Recorder llena el gap.
+
+**`PersistentMicrostructureStore`:**
+- Ahora recibe `timeframe` en el constructor. Nombre de archivo: `{ticker}_{timeframe}_live.csv` (antes `{ticker}_live.csv`).
+- Migración: renombrar archivos existentes a `*_1h_live.csv` (script manual, un paso único).
+
+**Siembra de activos nuevos (`BinanceVisionSeeder`, clase nueva en `Trading.Recorder/Seeding`):**
+- Descarga archivos diarios ZIP desde `https://data.binance.vision/data/futures/um/daily/aggTrades/{TICKER}/` (hasta T-1).
+- Sin límite de peticiones, sin riesgo de ban (depósito estático S3/CDN).
+- Paridad exacta con el stream live: mismo campo `is_buyer_maker`, mismo `AggTradeBucket` + `MicrostructureFeatureComputer`.
+- Reemplaza definitivamente el rol de siembra que tenía `BinanceAggTradeBackfiller`.
+
+### Alternativas consideradas
+- **klines REST en el arranque (parche rápido):** 2 weight por request, sin riesgo de ban. Descartada porque el campo `number_of_trades` cuenta trades individuales (no aggTrades) → sesgo sistemático en `mean_trade_size` → percentil de `TradeSizeInstitutional` distorsionado por ~24h tras cada arranque. Aceptable para CvdSellExhaustion, inaceptable para TradeSizeInstitutional.
+- **aggTrades REST con rate limiter mejorado:** solucionaría el ban, pero no el conflicto de recursos con el brokerage durante `Initialize()`. Tampoco resuelve el acoplamiento data/execution que es la causa raíz.
+
+### Consecuencias
+- Un reinicio de Lean no genera gap de features: el Recorder nunca paró.
+- El endpoint REST `/fapi/v1/aggTrades` ya no se usa en ningún camino de código de producción.
+- Nuevo proceso en el VPS (systemd unit o Windows Service). Monitoreo requerido (ver POLICY.md).
+- `DEUDA-3` (rate limiter global para el backfiller) queda cerrada: ya no aplica.
+- Storage: kilobytes/activo incluso con timeframes sub-horarios (5m = 288 filas/día × 100 bytes = 28 KB/día/activo).
+- Alta de activos nuevos: siembra offline una vez con `BinanceVisionSeeder` (desde `data.binance.vision`) + habilitar al Recorder → Lean arranca con warmup completo.
+
+---
+
 ## ADR-047 — Warmup autosuficiente: aggTrades REST backfill + persistencia rolling 7d
 **Fecha:** 2026-06-17
-**Estado:** Aceptada
+**Estado:** ~~Aceptada~~ **Supersedida por ADR-048 (2026-06-18)**
 **ADRs relacionados:** ADR-046 (pipeline live aggTrades)
 
 ### Contexto

@@ -17,7 +17,7 @@ namespace Trading.Application.Tests.Microstructure
         public PersistentMicrostructureStoreTests()
         {
             _tempDir = Path.Combine(Path.GetTempPath(), $"ms_store_test_{Guid.NewGuid():N}");
-            _store   = new PersistentMicrostructureStore(_tempDir);
+            _store   = new PersistentMicrostructureStore(_tempDir, "1h");
         }
 
         public void Dispose() => Directory.Delete(_tempDir, recursive: true);

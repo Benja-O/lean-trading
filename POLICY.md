@@ -75,6 +75,38 @@ En ventanas de **±30 minutos del wall clock real** de eventos macro relevantes,
 | Divergencia entre estado interno del sistema y portfolio real del broker | Stop manual del sistema, reconciliación, no operar hasta resolver | Inspección manual |
 | Latencia anómala sostenida del exchange (>5s en órdenes que típicamente son <1s) | Evaluar si el broker está degradado; considerar pause manual | Inspección manual |
 | > 5% de órdenes rechazadas por el broker en 1 hora | Stop manual, investigar | Inspección manual |
+| CSV `{ticker}_{timeframe}_live.csv` no se actualiza (última barra > timeframe × 3) | Verificar proceso `Trading.Recorder`; revisar logs del grabador; reiniciar si caído | Inspección periódica (ver runbook Grabador) |
+
+### 2.5 Runbook — Grabador continuo de microestructura (`Trading.Recorder`)
+
+El grabador es un proceso independiente, siempre encendido, que escribe las barras de microestructura al directorio `microstructure-live/`. Es el **único escritor** de los archivos `{ticker}_{timeframe}_live.csv`. Lean solo lee esos archivos en `Initialize()`.
+
+**Arranque del grabador:**
+```
+dotnet Trading.Recorder.dll
+# Variables de entorno opcionales:
+RECORDER_STRATEGIES_JSON=/ruta/strategies.json
+RECORDER_STORAGE_DIR=/ruta/microstructure-live
+RECORDER_RETENTION_DAYS=7
+RECORDER_WS_URL=wss://fstream.binance.com   # default
+```
+
+**Monitoreo:**
+- El grabador imprime por stdout una línea por cada barra cerrada: `[Recorder] BTCUSDT/1h 2026-06-18 10:00 UTC | OFI=0.1234 CVD∆=1500 MTS=0.0412`
+- Si el proceso está caído o el WebSocket se desconectó sin reconectar, los archivos CSV dejan de actualizarse. Síntoma en Lean al reiniciar: barras cargadas solo hasta la hora de caída del grabador.
+- Umbral de alerta: última barra del CSV más antigua que `ahora − 3 × timeframe` indica que el grabador no está funcionando.
+
+**Alta de un activo nuevo:**
+1. Agregar el símbolo y timeframe a `strategies.json` en la sección correspondiente.
+2. (Opcional, recomendado) Ejecutar `BinanceVisionSeeder` para sembrar historia hasta T-1:
+   ```
+   # Ejemplo vía script/programa que instancie BinanceVisionSeeder
+   # fromDate: fecha de inicio deseada; toDate: hoy (datos hasta T-1)
+   ```
+3. Reiniciar el grabador para que suscriba el nuevo símbolo.
+4. Habilitar la estrategia en `strategies.json` cuando el store tenga ≥ WarmUpBars barras. Sin siembra previa: esperar ~2 días de acumulación (período de observación).
+
+**Reconexión automática:** el grabador reconecta con backoff exponencial (1s → 2s → 4s … → 60s máx) ante desconexiones del WebSocket. Barras perdidas durante la desconexión no se recuperan (sin datos → ventana omitida); Lean usará `null` de `GetBar()` para esas barras si se reinicia justo después.
 
 **Notas:**
 - Las acciones de la columna central son **manuales por ahora**. Los síntomas se detectan vía monitoreo (heartbeat, ping externo) o inspección del operador.

@@ -276,6 +276,14 @@ F:\Lean\data\results\analytics\validation-{estrategia}-{YYYYMMDD}.md
 
 ---
 
+## 📁 Convenciones de archivos — store de microestructura
+
+El store de microestructura usa la convención `{ticker}_{timeframe}_live.csv` (p.ej. `BTCUSDT_1h_live.csv`, `ETHUSDT_5m_live.csv`). Un `PersistentMicrostructureStore` recibe el `timeframe` en su constructor y lo incorpora en el nombre de archivo.
+
+**Regla de escritura única:** el grabador (`Trading.Recorder`) es el **único proceso que escribe** a estos archivos. Lean (`TradingAlgorithmHost`) los lee en `Initialize()` y luego computa en memoria sin persistir. Nunca añadir llamadas a `PersistentMicrostructureStore.Append()` en el host.
+
+---
+
 ## 🚫 Anti-patrones Prohibidos (Cheat Sheet)
 
 Listado explícito de cosas que **nunca** deben aparecer en código de este proyecto:

@@ -11,29 +11,31 @@ namespace Trading.Application.Microstructure
     /// <summary>
     /// Almacén local de features microestructurales computadas en vivo.
     ///
-    /// Persiste cada barra 1h cerrada en un CSV por símbolo ({ticker}_live.csv) dentro
-    /// de un directorio configurable. En cada reinicio del sistema, carga las últimas
-    /// N horas desde disco para cubrir el warmup de estrategias sin depender del CSV
-    /// histórico ni de un backfill REST completo.
+    /// Persiste cada barra cerrada en un CSV por (símbolo, timeframe) con nombre
+    /// {ticker}_{timeframe}_live.csv dentro de un directorio configurable. El Recorder
+    /// es el único escritor; Lean solo lee en Initialize().
     ///
     /// Diseño de almacenamiento:
-    ///   - Una fila = una barra 1h cerrada para un símbolo.
-    ///   - Rolling window de 7 días (máximo): TrimOlderThan() reescribe el archivo
-    ///     eliminando filas antiguas. El archivo nunca supera ~170 filas × ~150 bytes ≈ 25 KB.
+    ///   - Una fila = una barra cerrada para un símbolo en el timeframe dado.
+    ///   - Rolling window configurable: TrimOlderThan() reescribe el archivo
+    ///     eliminando filas antiguas. Incluso con timeframes sub-horarios (5m = 288 filas/día)
+    ///     el almacenamiento es de kilobytes por activo.
     ///   - Append-only en operación normal; reescritura solo en trim.
     ///
-    /// Thread safety: no thread-safe. El caller (TradingAlgorithmHost) opera
-    /// en el hilo del algoritmo QC, que es single-threaded.
+    /// Thread safety: no thread-safe. Una instancia por timeframe; cada instancia opera
+    /// en el hilo de su dueño (Recorder o Lean, nunca ambos a la vez).
     /// </summary>
     public sealed class PersistentMicrostructureStore
     {
         private const string Header = "bar_utc,ofi,cvd_delta,cvd,arrival_rate,mean_trade_size,buy_sell_ratio,price_return";
 
         private readonly string _directory;
+        private readonly string _timeframe;
 
-        public PersistentMicrostructureStore(string directory)
+        public PersistentMicrostructureStore(string directory, string timeframe)
         {
-            _directory = directory ?? throw new ArgumentNullException(nameof(directory));
+            _directory = directory  ?? throw new ArgumentNullException(nameof(directory));
+            _timeframe = timeframe  ?? throw new ArgumentNullException(nameof(timeframe));
             Directory.CreateDirectory(directory);
         }
 
@@ -122,7 +124,7 @@ namespace Trading.Application.Microstructure
         }
 
         private string FilePath(InstrumentId instrumentId) =>
-            Path.Combine(_directory, $"{instrumentId.Ticker}_live.csv");
+            Path.Combine(_directory, $"{instrumentId.Ticker}_{_timeframe}_live.csv");
 
         private static string FormatLine(MicrostructureBar bar) =>
             string.Create(CultureInfo.InvariantCulture, $"{bar.BarUtc:yyyy-MM-ddTHH:mm:ssZ},{bar.Ofi:R},{bar.CvdDelta:R},{bar.Cvd:R},{bar.ArrivalRate:R},{bar.MeanTradeSize:R},{bar.BuySellRatio:R},{bar.PriceReturn:R}");
