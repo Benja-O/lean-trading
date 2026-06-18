@@ -146,7 +146,13 @@ Configuración operativa que NO se commitea al repositorio. Lectura vía `Enviro
 
 | Variable | Obligatoria | Default si ausente | Formato esperado | Componente |
 |---|---|---|---|---|
-| `HEALTHCHECKS_PING_URL` | No | Ping deshabilitado, loguea Warning una sola vez al arranque | `https://hc-ping.com/{UUID}` o `https://healthchecks.io/{UUID}` | `HealthchecksIoPinger` |
+| `HEALTHCHECKS_PING_URL` | No | Ping deshabilitado, loguea Warning una sola vez al arranque | `https://hc-ping.com/{UUID}` o `https://healthchecks.io/{UUID}` | `HealthchecksIoPinger` (LeanPaper/LeanLive) |
+| `MICROSTRUCTURE_STORE_DIR` | No | `{AppContext.BaseDirectory}\microstructure-live` | Ruta absoluta, ej. `C:\Lean\MicrostructureStore` | `TradingAlgorithmHost` (lectura) |
+| `RECORDER_STORAGE_DIR` | No | `{AppContext.BaseDirectory}\microstructure-live` | Ruta absoluta — debe coincidir con `MICROSTRUCTURE_STORE_DIR` | `Trading.Recorder` (escritura) |
+| `RECORDER_STRATEGIES_JSON` | No | `{AppContext.BaseDirectory}\strategies.json` | Ruta absoluta al archivo strategies.json | `Trading.Recorder` |
+| `RECORDER_RETENTION_DAYS` | No | `7` | Entero positivo | `Trading.Recorder` |
+| `RECORDER_WS_URL` | No | `wss://fstream.binance.com` | URL base del WebSocket de Binance Futures | `Trading.Recorder` |
+| `RECORDER_HEALTHCHECKS_URL` | No | Ping deshabilitado | `https://hc-ping.com/{UUID}` | `HealthchecksIoPinger` (LeanRecorder) |
 
 **Reglas operativas:**
 
@@ -164,9 +170,21 @@ Configuración operativa que NO se commitea al repositorio. Lectura vía `Enviro
 
 **Modelo de deployment VPS (desde Hito C, 2026-06-03):**
 
+Estructura de directorios en el VPS — cada servicio es dueño de su carpeta; el store compartido vive al mismo nivel:
+
+```
+C:\Lean\
+  Paper\                 ← LeanPaper:    binarios, config.json, logs\, data\
+  Live\                  ← LeanLive:     binarios, config.json, logs\, data\
+  Recorder\              ← LeanRecorder: binarios, strategies.json, logs\
+  MicrostructureStore\   ← Compartido:   escritura = LeanRecorder, lectura = LeanPaper + LeanLive
+```
+
+> **Regla de ownership:** `MicrostructureStore\` no pertenece a ningún proceso Lean. Solo el Recorder escribe ahí. Nunca poner el store dentro de `Paper\` ni de `Live\`.
+
 - **OS:** Windows Server.
-- **Gestor de servicio:** NSSM (`nssm.exe`). Servicio llamado `LeanPaper`.
-- **Directorio del binario:** `C:\Lean\Paper\`. El ejecutable principal es `QuantConnect.Lean.Launcher.exe`.
+- **Gestor de servicio:** NSSM (`nssm.exe`). Servicios: `LeanPaper`, `LeanLive`, `LeanRecorder`.
+- **Directorio del binario (LeanPaper):** `C:\Lean\Paper\`. El ejecutable principal es `QuantConnect.Lean.Launcher.exe`.
 - **Variables de entorno del proceso:** inyectadas via NSSM `AppEnvironmentExtra` (no via `%SystemRoot%\system32\cmd.exe /c set ...`). Formato en la configuración NSSM: `HEALTHCHECKS_PING_URL=https://hc-ping.com/{UUID}`.
 - **Restart automático:** `AppExit Default Restart`. El watchdog en `TradingAlgorithmHost` llama `Environment.Exit(1)` ante stall de feed > 1200s; NSSM re-levanta el proceso automáticamente.
 - **DLL propia a desplegar:** `Trading.Strategies.dll` (y sus dependencias transitivas `Trading.Application.dll`, `Trading.Domain.dll`, etc.) desde `Trading.Strategies/bin/Debug/net10.0/`. Patrón de deploy: stop servicio → backup DLL anterior → copiar DLL nueva → start servicio.

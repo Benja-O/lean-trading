@@ -223,7 +223,8 @@ namespace Trading.Strategies
             // memoria con aggTrades del WebSocket live. Nunca escribe a disco (ADR-048).
             // En backtest: el CSV histórico cubre todo el período; no se necesita pipeline en vivo.
             _liveProviderByTimeframe = new Dictionary<string, LiveMicrostructureProvider>();
-            string liveFeaturesDir = System.IO.Path.Combine(System.AppContext.BaseDirectory, "microstructure-live");
+            string liveFeaturesDir = System.Environment.GetEnvironmentVariable("MICROSTRUCTURE_STORE_DIR")
+                ?? System.IO.Path.Combine(System.AppContext.BaseDirectory, "microstructure-live");
 
             if (LiveMode)
             {
