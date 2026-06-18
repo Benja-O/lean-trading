@@ -209,6 +209,12 @@ introduce un allocator que asigne capital nominal a cada executor con
 visión coherente de la cuenta total. Trabajo arquitectónico no trivial.
 **Bloqueantes:** ninguno. Decisión del operador sobre cuándo abordarlo.
 
+#### ⬜ DEUDA-3 — Backfiller aggTrades: rate limiter global + warmupHours por estrategia
+**Estado:** pendiente, no bloqueante para el portfolio actual (3 símbolos).
+**Descripción:** `BinanceAggTradeBackfiller` usa un sleep fijo de 700ms entre requests. Con N símbolos en el portfolio, el tiempo de startup crece como N × 52h × 700ms (lineal). Además, la ventana de backfill es hardcodeada a 52h (máximo de `CvdSellExhaustion`), sin considerar qué estrategia consume qué símbolo ni cuántos WarmUpBars requiere. Con el portfolio actual (3 símbolos), el primer arranque tarda ~2 min y los restantes son segundos. Con 10+ símbolos, el diseño no escala.
+**Fix requerido:** (a) Rate limiter global compartido entre todos los símbolos (token bucket, no sleep fijo); (b) `warmupHours` calculado por símbolo como `max(WarmUpBars)` de las estrategias que consumen ese símbolo; (c) cap de tiempo total de startup configurable. El `PersistentMicrostructureStore` ya resuelve el 95% del problema en reinicios — la deuda aplica solo al primer arranque de cada símbolo nuevo.
+**Bloqueantes:** ninguno. Abordarlo cuando el portfolio supere 5 símbolos con aggTrades.
+
 #### ⬜ DEUDA-2 — `OrderListHash` no determinista
 **Estado:** pendiente, no bloqueante.
 **Descripción:** Ver detalle en `DECISIONS.md` (DEUDA-2). El campo
