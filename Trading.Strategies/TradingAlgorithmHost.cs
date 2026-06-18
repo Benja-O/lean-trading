@@ -241,35 +241,12 @@ namespace Trading.Strategies
                             recentBars.Count, symbolTicker, recentBars[recentBars.Count - 1].BarUtc);
                 }
 
-                // Backfill del gap (última barra en disco → ahora) vía aggTrades REST de Binance.
-                // Garantiza paridad exacta con el pipeline en vivo: mismo AggTradeBucket +
-                // MicrostructureFeatureComputer, mismo denominador aggTrade (no individual trades).
-                string fapiUrl  = QuantConnect.Configuration.Config.Get("binance-fapi-url", "https://fapi.binance.com");
-                var backfiller   = new BinanceAggTradeBackfiller(_httpClient, fapiUrl);
-                var gapEnd       = FloorToHour(DateTime.UtcNow); // barra actual aún no cerró
-                foreach (var symbolTicker in symbolsToLoad)
-                {
-                    var instrumentId = new InstrumentId(symbolTicker);
-                    var lastBarUtc   = _persistentStore.GetLastBarUtc(instrumentId);
-                    var gapStart     = lastBarUtc.HasValue
-                        ? lastBarUtc.Value.AddHours(1)
-                        : DateTime.UtcNow.AddHours(-12); // primera vez: 12h — Binance garantiza datos recientes;
-                                                        // 52h causaba 40+ requests vacíos → IP ban escalado.
-
-                    if (gapStart < gapEnd)
-                    {
-                        double cvdSeed     = _liveProvider.GetCvdRunning(instrumentId);
-                        var backfilled     = backfiller.Backfill(instrumentId, symbolTicker, gapStart, gapEnd, cvdSeed);
-                        foreach (var bar in backfilled)
-                        {
-                            _liveProvider.AddBar(bar);
-                            _persistentStore.Append(bar);
-                        }
-                        _logger.Info(
-                            "MicrostructureBackfill [{Ticker}]: {Count} barras desde {From:yyyy-MM-dd HH:mm} hasta {To:yyyy-MM-dd HH:mm} UTC.",
-                            symbolTicker, backfilled.Count, gapStart, gapEnd);
-                    }
-                }
+                // NOTA: el backfill REST (BinanceAggTradeBackfiller) fue eliminado del startup.
+                // Hacer requests REST a Binance durante Initialize() compite con el brokerage
+                // (CreateListenKey, GetCashBalance) y puede provocar ban de IP -1003, que impide
+                // cualquier operación de trading. El warmup se cubre desde disco (LoadRecent arriba);
+                // si no hay datos en disco, las estrategias retornan Flat hasta acumular barras vivas.
+                // Ver DEUDA-3 en ROADMAP.md para el diseño de backfill seguro a futuro.
 
                 // Trim: conservar solo los últimos 7 días (rolling window).
                 foreach (var symbolTicker in symbolsToLoad)
