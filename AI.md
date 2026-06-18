@@ -155,6 +155,13 @@ Configuración operativa que NO se commitea al repositorio. Lectura vía `Enviro
 - Si una variable es obligatoria y no está definida, el componente debe fallar fast con excepción descriptiva al boot. Hoy no hay variables obligatorias.
 - Cuando se introduzca una variable nueva, agregar fila a la tabla arriba en el mismo refactor que la introduce.
 
+**Convención de rutas de publish local — OBLIGATORIO:**
+
+> Toda salida de `dotnet publish` va en `f:\DesarrolloTrading\QuantConnect\Lean\publish\{NombreProyecto}\`.
+> Ejemplos: `publish\recorder\`, `publish\lean-launcher\`. Nunca en otra ruta.
+> Comando estándar: `dotnet publish {proyecto}.csproj -c Release -r win-x64 --self-contained true -p:ErrorOnDuplicatePublishOutputFiles=false -o f:\DesarrolloTrading\QuantConnect\Lean\publish\{NombreProyecto}`.
+> La carpeta `publish\` está en `.gitignore`; nunca commitear artefactos de publish.
+
 **Modelo de deployment VPS (desde Hito C, 2026-06-03):**
 
 - **OS:** Windows Server.
