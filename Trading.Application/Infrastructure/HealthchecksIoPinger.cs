@@ -5,12 +5,13 @@ using System.Threading;
 using System.Threading.Tasks;
 using Trading.Domain.Abstractions;
 
-namespace Trading.Strategies.Adapters
+namespace Trading.Application.Infrastructure
 {
     /// <summary>
     /// Envía un GET al endpoint de Healthchecks.io como dead-man's switch.
-    /// Throttle interno: máximo un ping cada 5 minutos (wall clock del backtest/live).
+    /// Throttle interno: máximo un ping cada 5 minutos (wall clock).
     /// Nunca lanza excepción al caller. Thread-safe: _lastPingUtc es volátil.
+    /// Usable desde cualquier proceso (.NET console, Lean, etc.) — no depende de QuantConnect.
     /// </summary>
     public sealed class HealthchecksIoPinger
     {

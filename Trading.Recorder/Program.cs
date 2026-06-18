@@ -2,11 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using Trading.Application.Infrastructure;
 using Trading.Application.Microstructure;
 using Trading.Domain.ValueObjects;
 using Trading.Recorder;
+using Trading.Recorder.Adapters;
 using Trading.Recorder.Seeding;
 
 // ── Configuración ────────────────────────────────────────────────────────────
@@ -23,11 +26,18 @@ int retentionDays = int.TryParse(Environment.GetEnvironmentVariable("RECORDER_RE
 string wsBaseUrl = Environment.GetEnvironmentVariable("RECORDER_WS_URL")
     ?? "wss://fstream.binance.com";
 
+string? healthchecksUrl = Environment.GetEnvironmentVariable("RECORDER_HEALTHCHECKS_URL");
+
 Console.WriteLine($"[Recorder] strategies.json : {strategiesJsonPath}");
 Console.WriteLine($"[Recorder] storageDir      : {storageDir}");
 Console.WriteLine($"[Recorder] retentionDays   : {retentionDays}");
 
 var config = RecorderConfig.FromStrategiesJson(strategiesJsonPath, storageDir, retentionDays);
+
+// ── Healthchecks.io (dead-man's switch) ──────────────────────────────────────
+var logger  = new ConsoleLogger();
+var clock   = new SystemClock();
+var pinger  = new HealthchecksIoPinger(healthchecksUrl, new HttpClient(), clock, logger);
 
 // ── Stores por timeframe (uno por timeframe único) ───────────────────────────
 var storeByTimeframe = config.Streams
@@ -44,8 +54,9 @@ foreach (var (symbol, timeframe) in config.Streams)
 Console.WriteLine($"[Recorder] Trim inicial: barras anteriores a {trimCutoff:yyyy-MM-dd HH:mm} UTC eliminadas.");
 
 // ── Agregadores por (símbolo, timeframe) ─────────────────────────────────────
-// Clave: symbol (mayúsculas).
 var aggregatorsBySymbol = new Dictionary<string, List<TimeframeAggregator>>(StringComparer.OrdinalIgnoreCase);
+
+using var cts = new CancellationTokenSource();
 
 foreach (var (symbol, timeframe) in config.Streams)
 {
@@ -64,6 +75,9 @@ foreach (var (symbol, timeframe) in config.Streams)
         Console.WriteLine(
             $"[Recorder] {id.Ticker}/{timeframe} {barUtc:yyyy-MM-dd HH:mm} UTC | " +
             $"OFI={bar.Ofi:F4} CVD∆={bar.CvdDelta:F0} MTS={bar.MeanTradeSize:F4}");
+
+        // Dead-man's switch: ping por cada barra cerrada (throttle interno 5 min).
+        _ = pinger.PingAsync(cts.Token);
     };
 
     if (!aggregatorsBySymbol.TryGetValue(symbol, out var list))
@@ -78,7 +92,6 @@ foreach (var (symbol, timeframe) in config.Streams)
 }
 
 // ── Stream names para el WebSocket ───────────────────────────────────────────
-// Binance exige nombres en minúsculas: "btcusdt@aggTrade"
 var streamNames = aggregatorsBySymbol.Keys
     .Select(sym => $"{sym.ToLowerInvariant()}@aggTrade")
     .ToList();
@@ -86,7 +99,6 @@ var streamNames = aggregatorsBySymbol.Keys
 Console.WriteLine($"[Recorder] Streams: {string.Join(", ", streamNames)}");
 
 // ── Apagado limpio ───────────────────────────────────────────────────────────
-using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) =>
 {
     e.Cancel = true;

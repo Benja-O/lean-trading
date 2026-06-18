@@ -17,6 +17,7 @@
     <Content Include="..\Trading.Strategies\strategies.json">
       <Link>strategies.json</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
   </ItemGroup>
 

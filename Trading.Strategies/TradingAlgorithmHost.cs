@@ -15,6 +15,7 @@ using System.Net.Http;
 using Trading.Application.Eventing;
 using Trading.Application.Execution;
 using Trading.Application.Health;
+using Trading.Application.Infrastructure;
 using Trading.Application.Microstructure;
 using Trading.Application.Regimes;
 using Trading.Application.Risk;
