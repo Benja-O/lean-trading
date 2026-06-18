@@ -253,7 +253,8 @@ namespace Trading.Strategies
                     var lastBarUtc   = _persistentStore.GetLastBarUtc(instrumentId);
                     var gapStart     = lastBarUtc.HasValue
                         ? lastBarUtc.Value.AddHours(1)
-                        : DateTime.UtcNow.AddHours(-52); // primera vez: 52h (> WarmUpBars máximo)
+                        : DateTime.UtcNow.AddHours(-12); // primera vez: 12h — Binance garantiza datos recientes;
+                                                        // 52h causaba 40+ requests vacíos → IP ban escalado.
 
                     if (gapStart < gapEnd)
                     {

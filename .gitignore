@@ -1,4 +1,9 @@
-﻿# OS Files
+﻿# Deploy artifacts (output de dotnet publish y paquetes de deploy al VPS)
+publish-live/
+deploy-delta/
+deploy-delta.zip
+
+# OS Files
 .DS_Store
 
 # Object files
