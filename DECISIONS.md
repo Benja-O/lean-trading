@@ -15,6 +15,7 @@
 
 | ADR | TÃ­tulo corto | Ãrea |
 |---|---|---|
+| ADR-049 | Recorder bloqueado por proxy del VPS: bypass de proxy + túnel sobre REST polling | Recorder / Infraestructura |
 | ADR-048 | Grabador continuo de microestructura: data plane desacoplado del execution plane | Estrategias / Infraestructura |
 | ADR-047 | ~~Warmup autosuficiente: aggTrades REST backfill + persistencia rolling 7d~~ (**Supersedida por ADR-048**) | Estrategias / Infraestructura |
 | ADR-046 | Pipeline de features microestructurales en vivo (HITO-D-feat) | Estrategias / Infraestructura |
@@ -59,6 +60,32 @@
 | ADR-003 | `OrderRegistry` vive en `Trading.Application` | Arquitectura |
 | ADR-002 | `RiskPerTradePercentage` falla loud si no estÃ¡ en `strategies.json` | Dominio |
 | ADR-001 | Desacople quirÃºrgico de QuantConnect: dominio Lean-free | Arquitectura |
+
+## ADR-049 — Recorder bloqueado por proxy del VPS: bypass de proxy + túnel sobre REST polling
+**Fecha:** 2026-06-19
+**Estado:** Parcial — bypass de proxy aceptado e implementado; túnel WireGuard propuesto, pendiente de validar la probe en el VPS.
+
+### Contexto
+`Trading.Recorder` necesita aggTrades en tiempo real de Binance Futures (BTCUSDT, ETHUSDT, SOLUSDT) para materializar barras de microestructura en `MicrostructureStore`. En el VPS, la conexión WebSocket a `wss://fstream.binance.com` establece TCP+TLS, el handshake completa y el SUBSCRIBE sale, pero `ReceiveAsync` queda bloqueado indefinidamente: ningún frame inbound llega. REST HTTPS sí funciona en el mismo VPS.
+
+Diagnóstico: el handshake TLS y el upgrade WebSocket son bidireccionales — para que `ConnectAsync` no falle, el VPS recibió bytes inbound. Por lo tanto la hipótesis "el firewall silencia el inbound" es inconsistente con la evidencia. La explicación coherente con todos los hechos (REST anda, handshake anda, streaming mudo) es un **proxy HTTP intermediario que bufferiza respuestas en streaming**: completa el CONNECT/TLS extremo a extremo pero retiene los frames de una respuesta push de larga duración. `ClientWebSocket` en Windows adopta por defecto el proxy de sistema (`HttpClient.DefaultProxy` / WinINET) sin que el código lo configure explícitamente.
+
+### Decisión
+1. **Probe (implementada):** `SystemWebSocketAdapter` hace `Options.Proxy = null` por defecto (conexión directa, sin proxy de sistema) y fija `KeepAliveInterval`. Configurable vía `RECORDER_WS_USE_SYSTEM_PROXY`. Es diagnóstica y potencialmente curativa: si el VPS permite salida directa 443, el WS deja de pasar por el proxy que bufferiza. Si la salida directa está bloqueada, `ConnectAsync` falla con una señal clara (distinta del cuelgue mudo), confirmando que el proxy es obligatorio.
+2. **Solución de fondo si la probe falla (propuesta):** túnel WireGuard desde el VPS a un nodo de salida con red limpia; el recorder sigue hablando WS a fstream sin cambios de código, el store queda local en el VPS, el warmup de Lean sigue instantáneo. El nodo de salida es un relay stateless.
+
+### Alternativas consideradas
+- **A: REST polling de `/fapi/v1/aggTrades` cada ~2s.** Descartada como destino. El weight de rate-limit es **por IP**; en `LeanLive` (broker real, misma IP del VPS) la colocación de órdenes consume ese mismo presupuesto. El polling del data-plane competiría con la ejecución del execution-plane, acoplando dos planos que el diseño separa deliberadamente (ver ADR-048). Además tiene techo de escala duro: el weight crece lineal con la cantidad de símbolos. Queda solo como modo degradado de emergencia.
+- **B: Mover el recorder a otra máquina + sync del store al VPS.** Descartada frente a C. Parte el data-plane en dos hosts, mete una dependencia de red en el path de warmup y mantiene para siempre una superficie de sincronización. La máquina de desarrollo encendida como fuente de datos 24/7 es peor práctica que A.
+- **C (elegida como solución de fondo): túnel a nodo de salida.** Cero cambio de código en el recorder, store local, warmup instantáneo, plano de datos como unidad lógica única. Costo: un nodo relay y que el VPS permita salida UDP (o WireGuard sobre 443) hacia él — go/no-go a validar.
+
+### Consecuencias
+- El recorder ya no pasa por el proxy de sistema del VPS por defecto. Variable nueva `RECORDER_WS_USE_SYSTEM_PROXY` documentada en `AI.md`.
+- Si la probe resuelve el bloqueo, no se necesita infra adicional y el ítem del túnel se cierra como "no requerido".
+- Si la probe falla, el túnel queda como trabajo de infra/ops pendiente de aprobación; este ADR pasaría a "Aceptada" al ejecutarlo.
+- Deuda técnica conocida: el modo degradado A (REST polling) no está implementado; si se necesitara como contingencia, requiere un adaptador `ITradeFeed` separado y un manejo robusto de `fromId` (cursor durable por símbolo, drenaje de backlog, invalidación de barras ante gaps grandes).
+
+---
 
 ## ADR-048 — Grabador continuo de microestructura: data plane desacoplado del execution plane
 **Fecha:** 2026-06-18
