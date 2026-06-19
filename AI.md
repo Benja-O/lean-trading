@@ -152,6 +152,7 @@ Configuración operativa que NO se commitea al repositorio. Lectura vía `Enviro
 | `RECORDER_STRATEGIES_JSON` | No | `{AppContext.BaseDirectory}\strategies.json` | Ruta absoluta al archivo strategies.json | `Trading.Recorder` |
 | `RECORDER_RETENTION_DAYS` | No | `7` | Entero positivo | `Trading.Recorder` |
 | `RECORDER_WS_URL` | No | `wss://fstream.binance.com` | URL base del WebSocket de Binance Futures | `Trading.Recorder` |
+| `RECORDER_WS_USE_SYSTEM_PROXY` | No | `false` (bypass — conexión directa) | `true`/`1` para usar el proxy de sistema del VPS | `SystemWebSocketAdapter` (Recorder) |
 | `RECORDER_HEALTHCHECKS_URL` | No | Ping deshabilitado | `https://hc-ping.com/{UUID}` | `HealthchecksIoPinger` (LeanRecorder) |
 
 **Reglas operativas:**

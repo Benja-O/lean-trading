@@ -153,27 +153,44 @@ namespace Trading.Recorder
 
     internal sealed class SystemWebSocketAdapter : IWebSocketAdapter
     {
-        private readonly ClientWebSocket _ws = new();
+        private readonly ClientWebSocket _webSocket = new();
 
-        public WebSocketState State => _ws.State;
+        /// <param name="useSystemProxy">
+        /// Si es <c>false</c> (default), se hace bypass del proxy de sistema del VPS
+        /// (<c>Options.Proxy = null</c>). Un proxy HTTP que hace CONNECT completa el
+        /// handshake TLS pero puede bufferizar la respuesta en streaming del WebSocket,
+        /// dejando <c>ReceiveAsync</c> bloqueado sin recibir frames pese a que el SUBSCRIBE
+        /// salió. La conexión directa evita ese buffering. Se deja configurable por si el
+        /// VPS exige el proxy para alcanzar la red externa.
+        /// </param>
+        public SystemWebSocketAdapter(bool useSystemProxy = false)
+        {
+            if (!useSystemProxy)
+            {
+                _webSocket.Options.Proxy = null;
+            }
+            _webSocket.Options.KeepAliveInterval = TimeSpan.FromSeconds(30);
+        }
+
+        public WebSocketState State => _webSocket.State;
 
         public Task ConnectAsync(Uri uri, CancellationToken ct) =>
-            _ws.ConnectAsync(uri, ct);
+            _webSocket.ConnectAsync(uri, ct);
 
         public Task<WebSocketReceiveResult> ReceiveAsync(byte[] buffer, CancellationToken ct) =>
-            _ws.ReceiveAsync(new ArraySegment<byte>(buffer), ct);
+            _webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), ct);
 
         public Task SendAsync(byte[] buffer, WebSocketMessageType messageType, bool endOfMessage, CancellationToken ct) =>
-            _ws.SendAsync(new ArraySegment<byte>(buffer), messageType, endOfMessage, ct);
+            _webSocket.SendAsync(new ArraySegment<byte>(buffer), messageType, endOfMessage, ct);
 
         public async ValueTask DisposeAsync()
         {
-            if (_ws.State == WebSocketState.Open)
+            if (_webSocket.State == WebSocketState.Open)
             {
-                try { await _ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, CancellationToken.None); }
+                try { await _webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, CancellationToken.None); }
                 catch { }
             }
-            _ws.Dispose();
+            _webSocket.Dispose();
         }
     }
 }

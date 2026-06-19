@@ -26,11 +26,18 @@ int retentionDays = int.TryParse(Environment.GetEnvironmentVariable("RECORDER_RE
 string wsBaseUrl = Environment.GetEnvironmentVariable("RECORDER_WS_URL")
     ?? "wss://fstream.binance.com";
 
+// Por defecto se hace bypass del proxy de sistema del VPS (ver SystemWebSocketAdapter).
+// Poner en "true"/"1" solo si el VPS exige el proxy para alcanzar la red externa.
+string? wsProxyRaw = Environment.GetEnvironmentVariable("RECORDER_WS_USE_SYSTEM_PROXY");
+bool useSystemProxy = string.Equals(wsProxyRaw, "true", StringComparison.OrdinalIgnoreCase)
+                   || wsProxyRaw == "1";
+
 string? healthchecksUrl = Environment.GetEnvironmentVariable("RECORDER_HEALTHCHECKS_URL");
 
 Console.WriteLine($"[Recorder] strategies.json : {strategiesJsonPath}");
 Console.WriteLine($"[Recorder] storageDir      : {storageDir}");
 Console.WriteLine($"[Recorder] retentionDays   : {retentionDays}");
+Console.WriteLine($"[Recorder] WS proxy mode   : {(useSystemProxy ? "system proxy" : "bypass (direct)")}");
 
 var config = RecorderConfig.FromStrategiesJson(strategiesJsonPath, storageDir, retentionDays);
 
@@ -115,7 +122,8 @@ var wsClient = new BinanceAggTradeWebSocketClient(
         foreach (var agg in aggregators)
             agg.OnTrade(price, qty, isBuyerMaker, tradeTimeMs);
     },
-    baseUrl: wsBaseUrl);
+    baseUrl: wsBaseUrl,
+    wsFactory: () => new SystemWebSocketAdapter(useSystemProxy));
 
 Console.WriteLine("[Recorder] Iniciando WebSocket...");
 await wsClient.RunAsync(cts.Token);
