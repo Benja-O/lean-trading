@@ -1,0 +1,115 @@
+{
+  // ===================================================================
+  // TEMPLATE DE CONFIGURACIÓN PARA VPS — LIVE con capital real (mínimo)
+  // Estrategias de microestructura en minimal-position-mode permanente.
+  // ADR-050 (live-mínimo permanente), ADR-041 (broker real), ADR-044/045
+  // (reduceOnly + min notional), ADR-043 (clock guard -1021).
+  //
+  // Uso: copiar este archivo a C:\Lean\Live\, renombrarlo a config.json,
+  // y completar los campos marcados con PLACEHOLDER_*. Restringir permisos
+  // del archivo resultante al usuario del servicio NSSM (LeanLive) únicamente.
+  // NUNCA commitear este archivo con secretos reales.
+  //
+  // ⚠️ ESTO ES CAPITAL REAL (aunque mínimo). Verificar antes de arrancar:
+  //   1. Reloj sincronizado (Sync-TradingClock.ps1 -CheckOnly, offset <500ms).
+  //   2. Recorder vivo y store con >=50 barras/símbolo recientes.
+  //   3. API key con permiso de Futures TRADING (no solo lectura) + IP del
+  //      VPS en whitelist. Cuenta en One-way Mode (no Hedge → evita -4061).
+  // ===================================================================
+
+  "environment": "live-futures-binance",
+
+  "algorithm-type-name": "Trading.Strategies.TradingAlgorithmHost",
+  "algorithm-language": "CSharp",
+  "algorithm-location": "Trading.Strategies.dll",
+
+  // data-folder: crear directorio vacío ./data/ en el VPS.
+  // En live el feed viene de Binance (BrokerageHistoryProvider);
+  // la carpeta se necesita para que LocalDiskMapFileProvider no falle.
+  // Para crypto futures los map/factor files no existen → errores no fatales.
+  "data-folder": "./data/",
+  "results-destination-folder": "",
+  "trade-list-destination": "",
+  "transaction-log": "",
+  "cache-location": "cache",
+
+  "log-handler": "QuantConnect.Logging.CompositeLogHandler",
+  "messaging-handler": "QuantConnect.Messaging.Messaging",
+  "job-queue-handler": "QuantConnect.Queues.JobQueue",
+  "api-handler": "QuantConnect.Api.Api",
+  "map-file-provider": "QuantConnect.Data.Auxiliary.LocalDiskMapFileProvider",
+  "factor-file-provider": "QuantConnect.Data.Auxiliary.LocalDiskFactorFileProvider",
+  "data-provider": "QuantConnect.Lean.Engine.DataFeeds.DefaultDataProvider",
+  "data-channel-provider": "DataChannelProvider",
+  "object-store": "QuantConnect.Lean.Engine.Storage.LocalObjectStore",
+  "data-aggregator": "QuantConnect.Lean.Engine.DataFeeds.AggregationManager",
+
+  "job-user-id": "0",
+  "api-access-token": "",
+  "job-organization-id": "",
+
+  "show-missing-data-logs": false,
+  "maximum-warmup-history-days-look-back": 5,
+  "force-exchange-always-open": false,
+  "debugging": false,
+
+  // ===================================================================
+  // SIZING — minimal-position-mode (ADR-045/ADR-050)
+  // Clave top-level leída por TradingAlgorithmHost vía Config.GetBool,
+  // gateada por LiveMode. Cuando es true, el PositionSizer fija cada
+  // posición en el min notional del exchange (BTC=100/ETH=20/SOL=5 USD)
+  // en vez de dimensionar por RiskPerTradePercentage.
+  // PERMANENTE para este plano (ADR-050). NO va en strategies.json: ahí
+  // se ignora en silencio y el sizer volvería a dimensionar por risk%.
+  // ===================================================================
+  "minimal-position-mode": true,
+
+  // ===================================================================
+  // CREDENCIALES DE BINANCE — COMPLETAR EN EL VPS
+  // Generar API key en Binance USDT-M con permiso de FUTURES TRADING
+  // (lectura + trading; SIN retiro). Restringir por IP del VPS (whitelist).
+  // La cuenta debe estar en One-way Mode (no Hedge) — ver ADR-041 (-4061).
+  // ===================================================================
+  "binance-api-key": "PLACEHOLDER_BINANCE_API_KEY",
+  "binance-api-secret": "PLACEHOLDER_BINANCE_API_SECRET",
+  "binance-fapi-url": "https://fapi.binance.com",
+  "binance-fwebsocket-url": "wss://fstream.binance.com/ws",
+
+  "live-cash-balance": "",
+  "live-holdings": "[]",
+
+  "environments": {
+
+    // ----- LIVE futures Binance USDT-M: datos REALES, fills REALES -----
+    // Brokerage real → exige BrokerageTransactionHandler (no Backtesting).
+    "live-futures-binance": {
+      "live-mode": true,
+      "live-mode-brokerage": "BinanceFuturesBrokerage",
+      "data-queue-handler": [ "BinanceFuturesBrokerage" ],
+      "setup-handler": "QuantConnect.Lean.Engine.Setup.BrokerageSetupHandler",
+      "result-handler": "QuantConnect.Lean.Engine.Results.LiveTradingResultHandler",
+      "data-feed-handler": "QuantConnect.Lean.Engine.DataFeeds.LiveTradingDataFeed",
+      "real-time-handler": "QuantConnect.Lean.Engine.RealTime.LiveTradingRealTimeHandler",
+      "transaction-handler": "QuantConnect.Lean.Engine.TransactionHandlers.BrokerageTransactionHandler",
+      "history-provider": [ "BrokerageHistoryProvider", "SubscriptionDataReaderHistoryProvider" ]
+    }
+  }
+
+  // ===================================================================
+  // NOTAS DE DEPLOY (no son config; recordatorio operativo)
+  // -------------------------------------------------------------------
+  // - strategies.json: copiar junto a este config. Contiene SOLO las 2
+  //   estrategias de microestructura × BTC/ETH/SOL 1h (SL5/TP10/Risk1,
+  //   MaxBars 8 y 6). Su campo "MicrostructureDataPath" apunta a una ruta
+  //   F:\ de la PC dev (fallback CSV histórico): en el VPS no existe, lo
+  //   cual es INOFENSIVO — MicrostructureRegistry.Load degrada con gracia
+  //   y el warmup viene del store del Recorder (fuente primaria). Opcional:
+  //   blanquear ese campo en el strategies.json del VPS para evitar warnings.
+  // - Env vars del servicio NSSM (LeanLive) vía AppEnvironmentExtra (todas
+  //   juntas; AppEnvironmentExtra reemplaza el entorno completo):
+  //     MICROSTRUCTURE_STORE_DIR=C:\Lean\MicrostructureStore   (= el del Recorder)
+  //     HEALTHCHECKS_PING_URL=https://hc-ping.com/<UUID-LeanLive>  (UUID propio)
+  //   Las API keys de Binance van en ESTE config.json, no en env vars.
+  // - NSSM: AppExit Default Restart (watchdog dead-man's switch reinicia).
+  // ===================================================================
+}
