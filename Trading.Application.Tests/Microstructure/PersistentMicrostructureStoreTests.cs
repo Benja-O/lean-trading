@@ -30,7 +30,9 @@ namespace Trading.Application.Tests.Microstructure
                 meanTradeSize: 0.0423, buySellRatio: 1.023, priceReturn: 0.00123);
 
             _store.Append(bar);
-            var loaded = _store.LoadRecent(Btc, hours: 72);
+            // Ventana amplia: el test verifica roundtrip de campos, no el filtrado temporal.
+            // (Con hours fijo dependería del wall-clock — prohibido por AI.md.)
+            var loaded = _store.LoadRecent(Btc, hours: 24 * 3650);
 
             loaded.Should().HaveCount(1);
             var r = loaded[0];
@@ -107,7 +109,8 @@ namespace Trading.Application.Tests.Microstructure
             var bar = Bar(new DateTime(2026, 6, 17, 12, 0, 0, DateTimeKind.Utc), buySellRatio: double.NaN);
             _store.Append(bar);
 
-            var loaded = _store.LoadRecent(Btc, hours: 72);
+            // Ventana amplia (ver nota arriba): roundtrip de NaN, no filtrado temporal.
+            var loaded = _store.LoadRecent(Btc, hours: 24 * 3650);
             loaded.Should().HaveCount(1);
             double.IsNaN(loaded[0].BuySellRatio).Should().BeTrue();
         }
