@@ -69,7 +69,7 @@ namespace Trading.Recorder.Seeding
         /// <param name="cvdSeed">CVD acumulado al inicio del período.</param>
         /// <param name="ct">Token de cancelación.</param>
         /// <returns>Lista de barras computadas y persistidas (en orden cronológico).</returns>
-        public async Task<IReadOnlyList<MicrostructureBar>> SeedAsync(
+        public async Task<SeedResult> SeedAsync(
             InstrumentId instrumentId,
             string timeframe,
             PersistentMicrostructureStore store,
@@ -85,6 +85,7 @@ namespace Trading.Recorder.Seeding
             var aggregators = new Dictionary<DateTime, AggTradeBucket>();
             var result = new List<MicrostructureBar>();
             double cvdRunning = cvdSeed;
+            long? lastAggregateTradeId = null;
 
             for (var date = fromDate; date < toDate; date = date.AddDays(1))
             {
@@ -121,6 +122,10 @@ namespace Trading.Recorder.Seeding
                         aggregators[windowStart] = bucket;
                     }
                     bucket.Add(row.Price, row.Quantity, row.IsBuyerMaker);
+
+                    // Mayor aggId visto: puente con el feed REST en vivo (cursor fromId).
+                    if (lastAggregateTradeId is null || row.AggregateTradeId > lastAggregateTradeId)
+                        lastAggregateTradeId = row.AggregateTradeId;
                 }
             }
 
@@ -143,9 +148,9 @@ namespace Trading.Recorder.Seeding
 
             Console.WriteLine(
                 $"[Seeder] {instrumentId.Ticker}/{timeframe}: {result.Count} barras sembradas " +
-                $"({fromDate} → {toDate.AddDays(-1)}).");
+                $"({fromDate} → {toDate.AddDays(-1)}). Último aggId={lastAggregateTradeId?.ToString() ?? "—"}.");
 
-            return result;
+            return new SeedResult(result, lastAggregateTradeId);
         }
 
         // ── privado ──────────────────────────────────────────────────────────
@@ -201,6 +206,7 @@ namespace Trading.Recorder.Seeding
                 var parts = line.Split(',');
                 if (parts.Length < 7) return null;
 
+                long aggregateTradeId = long.Parse(parts[0], CultureInfo.InvariantCulture);
                 decimal price    = decimal.Parse(parts[1], CultureInfo.InvariantCulture);
                 decimal quantity = decimal.Parse(parts[2], CultureInfo.InvariantCulture);
                 long transactMs  = long.Parse(parts[5], CultureInfo.InvariantCulture);
@@ -208,7 +214,7 @@ namespace Trading.Recorder.Seeding
                 bool isBuyerMaker = string.Equals(parts[6].Trim(), "True", StringComparison.OrdinalIgnoreCase)
                                  || string.Equals(parts[6].Trim(), "true", StringComparison.OrdinalIgnoreCase);
 
-                return new AggTradeRow(price, quantity, transactMs, isBuyerMaker);
+                return new AggTradeRow(aggregateTradeId, price, quantity, transactMs, isBuyerMaker);
             }
             catch
             {
@@ -217,9 +223,19 @@ namespace Trading.Recorder.Seeding
         }
 
         private readonly record struct AggTradeRow(
+            long AggregateTradeId,
             decimal Price,
             decimal Quantity,
             long TransactTime,
             bool IsBuyerMaker);
     }
+
+    /// <summary>
+    /// Resultado de una siembra: las barras computadas y persistidas, y el mayor
+    /// <c>aggId</c> visto en los archivos de Vision (null si no se sembró nada). Ese aggId es
+    /// el puente con el feed REST en vivo: el cursor <c>fromId</c> arranca justo después.
+    /// </summary>
+    public readonly record struct SeedResult(
+        IReadOnlyList<MicrostructureBar> Bars,
+        long? LastAggregateTradeId);
 }

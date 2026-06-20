@@ -91,7 +91,7 @@ namespace Trading.Recorder.Tests
             });
 
             var seeder = MakeSeeder(new Dictionary<string, Stream> { [url] = zip });
-            var bars   = await seeder.SeedAsync(Btc, "1h", _store, date, date.AddDays(1), cvdSeed: 0.0);
+            var (bars, lastAggregateTradeId) = await seeder.SeedAsync(Btc, "1h", _store, date, date.AddDays(1), cvdSeed: 0.0);
 
             bars.Should().HaveCount(1);
             var bar = bars[0];
@@ -100,6 +100,7 @@ namespace Trading.Recorder.Tests
             bar.Cvd.Should().BeApproximately(1.5, 1e-9);
             bar.ArrivalRate.Should().BeApproximately(2, 1e-9);
             bar.MeanTradeSize.Should().BeApproximately(2.5 / 2.0, 1e-9);
+            lastAggregateTradeId.Should().Be(2); // 2 trades en el zip, aggId 1 y 2
         }
 
         [Fact]
@@ -112,7 +113,7 @@ namespace Trading.Recorder.Tests
             var zip = BuildZip(new[] { (100m, 1.0m, ToMs(hour), false) });
 
             var seeder = MakeSeeder(new Dictionary<string, Stream> { [url] = zip });
-            var bars   = await seeder.SeedAsync(Btc, "1h", _store, date, date.AddDays(1), cvdSeed: 500.0);
+            var (bars, _) = await seeder.SeedAsync(Btc, "1h", _store, date, date.AddDays(1), cvdSeed: 500.0);
 
             bars[0].Cvd.Should().BeApproximately(501.0, 1e-9);
         }
@@ -124,9 +125,10 @@ namespace Trading.Recorder.Tests
             var date = new DateOnly(2026, 6, 17);
             var seeder = MakeSeeder(new Dictionary<string, Stream>());
 
-            var bars = await seeder.SeedAsync(Btc, "1h", _store, date, date.AddDays(1));
+            var (bars, lastAggregateTradeId) = await seeder.SeedAsync(Btc, "1h", _store, date, date.AddDays(1));
 
             bars.Should().BeEmpty();
+            lastAggregateTradeId.Should().BeNull();
         }
 
         [Fact]
@@ -162,7 +164,7 @@ namespace Trading.Recorder.Tests
 
             var store5m = new PersistentMicrostructureStore(_tempDir, "5m");
             var seeder  = MakeSeeder(new Dictionary<string, Stream> { [url] = zip });
-            var bars    = await seeder.SeedAsync(Btc, "5m", store5m, date, date.AddDays(1));
+            var (bars, _) = await seeder.SeedAsync(Btc, "5m", store5m, date, date.AddDays(1));
 
             bars.Should().HaveCount(2);
             bars[0].BarUtc.Should().Be(t0);

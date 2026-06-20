@@ -45,6 +45,14 @@ int restPollSeconds = int.TryParse(Environment.GetEnvironmentVariable("RECORDER_
     ? rps
     : 10;
 
+// Gap-fill desde data.binance.vision al arrancar (ADR-049): el store arranca con historia
+// inmediata en vez de esperar días. Activo por default; "false"/"0" lo desactiva.
+string? seedRaw = Environment.GetEnvironmentVariable("RECORDER_SEED_ON_STARTUP");
+bool seedOnStartup = !string.Equals(seedRaw, "false", StringComparison.OrdinalIgnoreCase) && seedRaw != "0";
+int seedDays = int.TryParse(Environment.GetEnvironmentVariable("RECORDER_SEED_DAYS"), out int sdv) && sdv > 0
+    ? sdv
+    : retentionDays;
+
 string? healthchecksUrl = Environment.GetEnvironmentVariable("RECORDER_HEALTHCHECKS_URL");
 
 Console.WriteLine($"[Recorder] strategies.json : {strategiesJsonPath}");
@@ -65,6 +73,11 @@ var storeByTimeframe = config.Streams
     .Distinct()
     .ToDictionary(tf => tf, tf => new PersistentMicrostructureStore(storageDir, tf));
 
+// Cursor del feed REST (compartido: el puente de siembra lo adelanta, el feed lo consume).
+var cursorStore = new FileAggTradeCursorStore(storageDir);
+
+using var cts = new CancellationTokenSource();
+
 // ── Trim inicial (rolling window) ────────────────────────────────────────────
 var trimCutoff = DateTime.UtcNow.AddDays(-retentionDays);
 foreach (var (symbol, timeframe) in config.Streams)
@@ -73,19 +86,35 @@ foreach (var (symbol, timeframe) in config.Streams)
 }
 Console.WriteLine($"[Recorder] Trim inicial: barras anteriores a {trimCutoff:yyyy-MM-dd HH:mm} UTC eliminadas.");
 
+// ── Gap-fill desde Vision (ADR-049): historia inmediata + puente al feed en vivo ─────
+if (seedOnStartup)
+{
+    Console.WriteLine($"[Recorder] Gap-fill desde Vision (seedDays={seedDays})...");
+    var startupSeeder = new StartupSeeder(new BinanceVisionSeeder(new HttpClient()), cursorStore);
+    await startupSeeder.SeedGapsAsync(
+        config.Streams,
+        storeByTimeframe,
+        DateOnly.FromDateTime(DateTime.UtcNow),
+        seedDays,
+        cts.Token);
+}
+else
+{
+    Console.WriteLine("[Recorder] Gap-fill desde Vision deshabilitado (RECORDER_SEED_ON_STARTUP=false).");
+}
+
 // ── Agregadores por (símbolo, timeframe) ─────────────────────────────────────
 var aggregatorsBySymbol = new Dictionary<string, List<TimeframeAggregator>>(StringComparer.OrdinalIgnoreCase);
-
-using var cts = new CancellationTokenSource();
 
 foreach (var (symbol, timeframe) in config.Streams)
 {
     var instrumentId = new InstrumentId(symbol);
     var store        = storeByTimeframe[timeframe];
 
-    // Semilla de CVD: último Cvd persistido en disco para este (símbolo, timeframe).
-    var recentBars = store.LoadRecent(instrumentId, hours: 24);
-    double cvdSeed = recentBars.Count > 0 ? recentBars[recentBars.Count - 1].Cvd : 0.0;
+    // Semilla de CVD: último Cvd persistido en disco (tras el gap-fill, la última barra
+    // sembrada). GetLastBar no depende del reloj, así que toma la última aunque sea de ayer.
+    var lastBar    = store.GetLastBar(instrumentId);
+    double cvdSeed = lastBar?.Cvd ?? 0.0;
 
     var aggregator = new TimeframeAggregator(instrumentId, timeframe, cvdSeed);
 
@@ -108,7 +137,8 @@ foreach (var (symbol, timeframe) in config.Streams)
     list.Add(aggregator);
 
     Console.WriteLine(
-        $"[Recorder] Agregador {symbol}/{timeframe} — CVD seed={cvdSeed:F4} ({recentBars.Count} barras recientes)");
+        $"[Recorder] Agregador {symbol}/{timeframe} — CVD seed={cvdSeed:F4} " +
+        $"(ultima barra {(lastBar is null ? "ninguna" : lastBar.BarUtc.ToString("yyyy-MM-dd HH:mm"))})");
 }
 
 // ── Símbolos a grabar ─────────────────────────────────────────────────────────
@@ -147,7 +177,6 @@ if (feedMode == "ws")
 else
 {
     var aggTradesApi = new BinanceFuturesAggTradesApi(new HttpClient(), restBaseUrl);
-    var cursorStore  = new FileAggTradeCursorStore(storageDir);
     feed = new BinanceAggTradeRestFeed(
         symbols,
         onTrade,

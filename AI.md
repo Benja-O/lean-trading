@@ -156,6 +156,8 @@ Configuración operativa que NO se commitea al repositorio. Lectura vía `Enviro
 | `RECORDER_FEED` | No | `rest` | `rest` (REST polling de aggTrades) o `ws` (WebSocket) | `Trading.Recorder` (selección de `ITradeFeed`) |
 | `RECORDER_REST_URL` | No | `https://fapi.binance.com` | URL base del REST de Binance Futures | `BinanceFuturesAggTradesApi` (Recorder) |
 | `RECORDER_REST_POLL_SECONDS` | No | `10` | Entero positivo — cadencia de polling por ciclo | `BinanceAggTradeRestFeed` (Recorder) |
+| `RECORDER_SEED_ON_STARTUP` | No | `true` | `false`/`0` desactiva el gap-fill desde Vision al arrancar | `StartupSeeder` (Recorder) |
+| `RECORDER_SEED_DAYS` | No | `= RECORDER_RETENTION_DAYS` | Entero positivo — días a sembrar si el store está vacío | `StartupSeeder` (Recorder) |
 | `RECORDER_HEALTHCHECKS_URL` | No | Ping deshabilitado | `https://hc-ping.com/{UUID}` | `HealthchecksIoPinger` (LeanRecorder) |
 
 **Reglas operativas:**

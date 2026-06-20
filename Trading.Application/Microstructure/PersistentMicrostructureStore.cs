@@ -70,14 +70,21 @@ namespace Trading.Application.Microstructure
         /// Retorna el BarUtc de la última barra almacenada, o null si el archivo no existe / está vacío.
         /// Usado para calcular el gap a backfillear en cada reinicio.
         /// </summary>
-        public DateTime? GetLastBarUtc(InstrumentId instrumentId)
+        public DateTime? GetLastBarUtc(InstrumentId instrumentId) =>
+            GetLastBar(instrumentId)?.BarUtc;
+
+        /// <summary>
+        /// Retorna la última barra almacenada (incluye Cvd para sembrar el acumulado), o null si
+        /// el archivo no existe / está vacío. No depende del reloj (lee la última línea de datos).
+        /// </summary>
+        public MicrostructureBar? GetLastBar(InstrumentId instrumentId)
         {
             if (instrumentId is null) throw new ArgumentNullException(nameof(instrumentId));
 
             var file = FilePath(instrumentId);
             if (!File.Exists(file)) return null;
 
-            string lastDataLine = null;
+            string? lastDataLine = null;
             foreach (var line in File.ReadLines(file))
             {
                 if (!string.IsNullOrWhiteSpace(line) &&
@@ -85,7 +92,7 @@ namespace Trading.Application.Microstructure
                     lastDataLine = line;
             }
 
-            return lastDataLine is null ? null : ParseLine(instrumentId, lastDataLine)?.BarUtc;
+            return lastDataLine is null ? null : ParseLine(instrumentId, lastDataLine);
         }
 
         /// <summary>

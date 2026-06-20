@@ -84,6 +84,8 @@ El recorder obtiene aggTrades por **REST polling de `/fapi/v1/aggTrades` por `fr
 - **`BinanceAggTradeRestFeed` (REST, default):** cursor `fromId` persistido por símbolo (`FileAggTradeCursorStore`, escritura atómica), `limit=1000`, **drenaje** en picos (repoll hasta página <1000), **idempotencia** por `aggId`, **backoff** ante 429/418 respetando `Retry-After` (evita el ban escalado), y **salto al presente con log ante gap grande** (no fabrica dato; la historia faltante se re-siembra con `BinanceVisionSeeder`).
 - **`BinanceAggTradeWebSocketClient` (WS):** se conserva detrás del puerto para redes donde fstream sí entregue push — no es dead code. El `TradeHandler` no cambia.
 
+**Arranque con historia inmediata (gap-fill + puente):** al iniciar, `StartupSeeder` rellena el hueco del store desde `data.binance.vision` (hasta T-1) y deja el cursor REST en el último `aggId` sembrado; el feed en vivo drena desde justo después, **sin gaps y con CVD continuo**. Un deploy en frío arranca con historia inmediata (no hay que esperar días). Configurable con `RECORDER_SEED_ON_STARTUP` (default on) y `RECORDER_SEED_DAYS` (default = `retentionDays`). Esto **automatiza el alta de activos** que ADR-048 dejaba como paso manual ("siembra offline una vez").
+
 El dato REST es idéntico en contenido al del stream WS (mismos aggregate trades por `fromId`, sin gaps); solo cambia la latencia, irrelevante para barras cerradas de 1h.
 
 ### Alternativas consideradas
@@ -95,7 +97,9 @@ El dato REST es idéntico en contenido al del stream WS (mismos aggregate trades
 - **REST polling (elegida).** Funciona desde el VPS (probado), instrumento correcto, mismo dato sin gaps, sin infra nueva, independiente de red/runtime. Contra: consume weight de rate-limit por IP compartido con LeanLive — mitigado con cadencia conservadora (ver techo de escala).
 
 ### Consecuencias
-- Feed seleccionable por `RECORDER_FEED` (default `rest`). Env vars nuevas en AI.md: `RECORDER_FEED`, `RECORDER_REST_URL`, `RECORDER_REST_POLL_SECONDS`. `RECORDER_WS_USE_SYSTEM_PROXY` (commit b4fab48) se conserva: inocuo y válido para el adapter WS.
+- Feed seleccionable por `RECORDER_FEED` (default `rest`). Env vars nuevas en AI.md: `RECORDER_FEED`, `RECORDER_REST_URL`, `RECORDER_REST_POLL_SECONDS`, `RECORDER_SEED_ON_STARTUP`, `RECORDER_SEED_DAYS`. `RECORDER_WS_USE_SYSTEM_PROXY` (commit b4fab48) se conserva: inocuo y válido para el adapter WS.
+- Alta de activos / deploy en frío: ya **no** requiere paso manual de siembra (supera la consecuencia de ADR-048 línea 149); el gap-fill de arranque lo hace solo.
+- Validación end-to-end real OK: gap-fill de Vision (24 barras/símbolo del día T-1) → puente de cursor → REST drena el día actual contiguo, CVD continuo a través del empalme.
 - **Techo de escala (rate-limit):** `aggTrades` pesa 20, límite 2400/min por IP, sin endpoint batch (peso lineal con símbolos). A 3 símbolos es trivial (~120-240/min). A ~20 símbolos con cadencia 20-30s ronda ~1000-1300/min — sobrevive sin ban respetando 429, pero consume ~mitad del budget compartido con LeanLive. Techo duro ~25-30 símbolos. Camino de escala en ROADMAP (RECORDER-1): IP de egreso propia para el recorder al superar ~15 símbolos, desacoplando del execution-plane.
 - Tests: 4 nuevos en `Trading.Recorder.Tests` (cold start, drenaje multipágina por fromId, idempotencia, backoff por rate-limit). Smoke test real OK contra fapi (cold start de 3 símbolos + drenaje + cursores avanzando).
 - El `BinanceVisionSeeder` sigue como herramienta de siembra histórica (ADR-048); el REST feed es el camino en vivo.
