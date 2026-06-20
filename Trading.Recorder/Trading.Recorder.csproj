@@ -14,6 +14,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Trading.Recorder.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Content Include="..\Trading.Strategies\strategies.json">
       <Link>strategies.json</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

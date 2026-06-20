@@ -15,7 +15,7 @@
 
 | ADR | TÃ­tulo corto | Ãrea |
 |---|---|---|
-| ADR-049 | Recorder bloqueado por proxy del VPS: bypass de proxy + túnel sobre REST polling | Recorder / Infraestructura |
+| ADR-049 | Recorder: feed REST polling de aggTrades (el WS de Binance Futures no entrega push) | Recorder / Infraestructura |
 | ADR-048 | Grabador continuo de microestructura: data plane desacoplado del execution plane | Estrategias / Infraestructura |
 | ADR-047 | ~~Warmup autosuficiente: aggTrades REST backfill + persistencia rolling 7d~~ (**Supersedida por ADR-048**) | Estrategias / Infraestructura |
 | ADR-046 | Pipeline de features microestructurales en vivo (HITO-D-feat) | Estrategias / Infraestructura |
@@ -61,29 +61,44 @@
 | ADR-002 | `RiskPerTradePercentage` falla loud si no estÃ¡ en `strategies.json` | Dominio |
 | ADR-001 | Desacople quirÃºrgico de QuantConnect: dominio Lean-free | Arquitectura |
 
-## ADR-049 — Recorder bloqueado por proxy del VPS: bypass de proxy + túnel sobre REST polling
+## ADR-049 — Recorder: feed REST polling de aggTrades (el WS de Binance Futures no entrega push a ninguna red/cliente del proyecto)
 **Fecha:** 2026-06-19
-**Estado:** Parcial — bypass de proxy aceptado e implementado; túnel WireGuard propuesto, pendiente de validar la probe en el VPS.
+**Estado:** Aceptada — implementada (`ITradeFeed` + `BinanceAggTradeRestFeed`, REST por default).
+
+> Reemplaza el enfoque inicial de este ADR (bypass de proxy + túnel WireGuard), que partía de un diagnóstico equivocado. Las hipótesis de proxy y de geo-bloqueo fueron **falsadas empíricamente** (ver Contexto); se conservan abajo como alternativas descartadas.
 
 ### Contexto
-`Trading.Recorder` necesita aggTrades en tiempo real de Binance Futures (BTCUSDT, ETHUSDT, SOLUSDT) para materializar barras de microestructura en `MicrostructureStore`. En el VPS, la conexión WebSocket a `wss://fstream.binance.com` establece TCP+TLS, el handshake completa y el SUBSCRIBE sale, pero `ReceiveAsync` queda bloqueado indefinidamente: ningún frame inbound llega. REST HTTPS sí funciona en el mismo VPS.
+`Trading.Recorder` necesita aggTrades en tiempo real de Binance Futures (BTCUSDT, ETHUSDT, SOLUSDT) para materializar barras de microestructura en `MicrostructureStore`. El WebSocket a `wss://fstream.binance.com` conecta, completa TLS, manda el ACK del SUBSCRIBE, y después **no entrega ningún frame de datos** con el socket `Open`.
 
-Diagnóstico: el handshake TLS y el upgrade WebSocket son bidireccionales — para que `ConnectAsync` no falle, el VPS recibió bytes inbound. Por lo tanto la hipótesis "el firewall silencia el inbound" es inconsistente con la evidencia. La explicación coherente con todos los hechos (REST anda, handshake anda, streaming mudo) es un **proxy HTTP intermediario que bufferiza respuestas en streaming**: completa el CONNECT/TLS extremo a extremo pero retiene los frames de una respuesta push de larga duración. `ClientWebSocket` en Windows adopta por defecto el proxy de sistema (`HttpClient.DefaultProxy` / WinINET) sin que el código lo configure explícitamente.
+Diagnóstico empírico, descartando hipótesis una por una:
+- **No es proxy/firewall:** el VPS no tiene proxy de sistema (WinHTTP "Direct access", `ProxyEnable=0`). El bypass `Options.Proxy=null` (commit b4fab48) no cambió nada.
+- **No es inbound bloqueado:** el ACK `{"result":null,"id":1}` llega — es un frame inbound de Binance.
+- **No es geo:** reproducido idéntico en VPS (Alemania) **y** PC dev (Argentina); además el trading real de futures se ejecutó OK desde el VPS (orden 0.09 SOL filleada, Hito D-prev) → Binance no restringe futures por IP ni por cuenta.
+- **No es el runtime ni el código:** falla igual con .NET Framework (PowerShell), .NET 10 (recorder) y Python (`websocket-client`).
+- **Spot WS sí funciona** en las mismas máquinas/clientes (122-140 aggTrades en 12s); **futures REST sí funciona** (`/fapi/v1/aggTrades`, `time`).
+
+Conclusión: el **push del WS de Binance Futures no se entrega a las redes/clientes del proyecto**, mientras spot WS, futures REST y el trading de futures funcionan. La causa exacta (un middlebox que descarta el flujo server-initiated de fstream) no se pudo aislar y es irrelevante para la decisión: es irreparable desde el cliente y no depende de la ubicación.
 
 ### Decisión
-1. **Probe (implementada):** `SystemWebSocketAdapter` hace `Options.Proxy = null` por defecto (conexión directa, sin proxy de sistema) y fija `KeepAliveInterval`. Configurable vía `RECORDER_WS_USE_SYSTEM_PROXY`. Es diagnóstica y potencialmente curativa: si el VPS permite salida directa 443, el WS deja de pasar por el proxy que bufferiza. Si la salida directa está bloqueada, `ConnectAsync` falla con una señal clara (distinta del cuelgue mudo), confirmando que el proxy es obligatorio.
-2. **Solución de fondo si la probe falla (propuesta):** túnel WireGuard desde el VPS a un nodo de salida con red limpia; el recorder sigue hablando WS a fstream sin cambios de código, el store queda local en el VPS, el warmup de Lean sigue instantáneo. El nodo de salida es un relay stateless.
+El recorder obtiene aggTrades por **REST polling de `/fapi/v1/aggTrades` por `fromId`**, no por WebSocket. Se introduce el puerto `ITradeFeed` con dos adapters seleccionables por env var `RECORDER_FEED` (default `rest`):
+- **`BinanceAggTradeRestFeed` (REST, default):** cursor `fromId` persistido por símbolo (`FileAggTradeCursorStore`, escritura atómica), `limit=1000`, **drenaje** en picos (repoll hasta página <1000), **idempotencia** por `aggId`, **backoff** ante 429/418 respetando `Retry-After` (evita el ban escalado), y **salto al presente con log ante gap grande** (no fabrica dato; la historia faltante se re-siembra con `BinanceVisionSeeder`).
+- **`BinanceAggTradeWebSocketClient` (WS):** se conserva detrás del puerto para redes donde fstream sí entregue push — no es dead code. El `TradeHandler` no cambia.
+
+El dato REST es idéntico en contenido al del stream WS (mismos aggregate trades por `fromId`, sin gaps); solo cambia la latencia, irrelevante para barras cerradas de 1h.
 
 ### Alternativas consideradas
-- **A: REST polling de `/fapi/v1/aggTrades` cada ~2s.** Descartada como destino. El weight de rate-limit es **por IP**; en `LeanLive` (broker real, misma IP del VPS) la colocación de órdenes consume ese mismo presupuesto. El polling del data-plane competiría con la ejecución del execution-plane, acoplando dos planos que el diseño separa deliberadamente (ver ADR-048). Además tiene techo de escala duro: el weight crece lineal con la cantidad de símbolos. Queda solo como modo degradado de emergencia.
-- **B: Mover el recorder a otra máquina + sync del store al VPS.** Descartada frente a C. Parte el data-plane en dos hosts, mete una dependencia de red en el path de warmup y mantiene para siempre una superficie de sincronización. La máquina de desarrollo encendida como fuente de datos 24/7 es peor práctica que A.
-- **C (elegida como solución de fondo): túnel a nodo de salida.** Cero cambio de código en el recorder, store local, warmup instantáneo, plano de datos como unidad lógica única. Costo: un nodo relay y que el VPS permita salida UDP (o WireGuard sobre 443) hacia él — go/no-go a validar.
+- **WS nativo (status quo).** Inviable: no entrega push a ninguna red/cliente del proyecto (ver Contexto).
+- **Bypass de proxy de sistema (enfoque inicial de este ADR).** Descartada: no hay proxy configurado; el bypass no cambió el comportamiento.
+- **Túnel WireGuard a nodo de salida (enfoque inicial de este ADR).** Descartada: se apoyaba en que el bloqueo fuera geográfico; al fallar idéntico en Argentina, reubicar el egreso no cambia nada.
+- **Mover el recorder a la PC dev + sync del store.** Descartada: la PC dev tampoco recibe el push de fstream; además parte el data-plane en dos hosts.
+- **Cambiar a Spot-Margin (el WS de spot funciona).** Descartada: cambia el instrumento operado. Las estrategias activas se validaron sobre microestructura de **futures** (M4→IS→OOS→MC); spot es otro mercado y estas estrategias (CVD / trade-size) son las más sensibles a esa diferencia. Migrar invalidaría toda la validación, exigiría re-correr el pipeline (con riesgo de perder el edge) y rehacer el stack de ejecución (brokerage spot/margin, borrow para shorts, fees ~2×). Spot-Margin solo como línea de research nueva, nunca como workaround de transporte.
+- **REST polling (elegida).** Funciona desde el VPS (probado), instrumento correcto, mismo dato sin gaps, sin infra nueva, independiente de red/runtime. Contra: consume weight de rate-limit por IP compartido con LeanLive — mitigado con cadencia conservadora (ver techo de escala).
 
 ### Consecuencias
-- El recorder ya no pasa por el proxy de sistema del VPS por defecto. Variable nueva `RECORDER_WS_USE_SYSTEM_PROXY` documentada en `AI.md`.
-- Si la probe resuelve el bloqueo, no se necesita infra adicional y el ítem del túnel se cierra como "no requerido".
-- Si la probe falla, el túnel queda como trabajo de infra/ops pendiente de aprobación; este ADR pasaría a "Aceptada" al ejecutarlo.
-- Deuda técnica conocida: el modo degradado A (REST polling) no está implementado; si se necesitara como contingencia, requiere un adaptador `ITradeFeed` separado y un manejo robusto de `fromId` (cursor durable por símbolo, drenaje de backlog, invalidación de barras ante gaps grandes).
+- Feed seleccionable por `RECORDER_FEED` (default `rest`). Env vars nuevas en AI.md: `RECORDER_FEED`, `RECORDER_REST_URL`, `RECORDER_REST_POLL_SECONDS`. `RECORDER_WS_USE_SYSTEM_PROXY` (commit b4fab48) se conserva: inocuo y válido para el adapter WS.
+- **Techo de escala (rate-limit):** `aggTrades` pesa 20, límite 2400/min por IP, sin endpoint batch (peso lineal con símbolos). A 3 símbolos es trivial (~120-240/min). A ~20 símbolos con cadencia 20-30s ronda ~1000-1300/min — sobrevive sin ban respetando 429, pero consume ~mitad del budget compartido con LeanLive. Techo duro ~25-30 símbolos. Camino de escala en ROADMAP (RECORDER-1): IP de egreso propia para el recorder al superar ~15 símbolos, desacoplando del execution-plane.
+- Tests: 4 nuevos en `Trading.Recorder.Tests` (cold start, drenaje multipágina por fromId, idempotencia, backoff por rate-limit). Smoke test real OK contra fapi (cold start de 3 símbolos + drenaje + cursores avanzando).
+- El `BinanceVisionSeeder` sigue como herramienta de siembra histórica (ADR-048); el REST feed es el camino en vivo.
 
 ---
 

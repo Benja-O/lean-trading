@@ -23,10 +23,8 @@ namespace Trading.Recorder
     /// Thread safety: RunAsync corre en el hilo del caller y llama a OnTrade
     /// sincrónicamente desde ese mismo hilo.
     /// </summary>
-    public sealed class BinanceAggTradeWebSocketClient
+    public sealed class BinanceAggTradeWebSocketClient : ITradeFeed
     {
-        public delegate void TradeHandler(string symbol, decimal price, decimal qty, bool isBuyerMaker, long tradeTimeMs);
-
         private readonly IReadOnlyList<string> _streamNames;
         private readonly TradeHandler _onTrade;
         private readonly string _baseUrl;

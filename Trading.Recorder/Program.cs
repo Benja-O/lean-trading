@@ -10,6 +10,7 @@ using Trading.Application.Microstructure;
 using Trading.Domain.ValueObjects;
 using Trading.Recorder;
 using Trading.Recorder.Adapters;
+using Trading.Recorder.Feed;
 using Trading.Recorder.Seeding;
 
 // ── Configuración ────────────────────────────────────────────────────────────
@@ -32,12 +33,24 @@ string? wsProxyRaw = Environment.GetEnvironmentVariable("RECORDER_WS_USE_SYSTEM_
 bool useSystemProxy = string.Equals(wsProxyRaw, "true", StringComparison.OrdinalIgnoreCase)
                    || wsProxyRaw == "1";
 
+// Transporte del feed: "rest" (default — el WS de fstream no entrega push a las redes del
+// proyecto, ver ADR-049) o "ws" (válido en redes donde fstream sí entrega).
+string feedMode = (Environment.GetEnvironmentVariable("RECORDER_FEED") ?? "rest")
+    .Trim().ToLowerInvariant();
+
+string restBaseUrl = Environment.GetEnvironmentVariable("RECORDER_REST_URL")
+    ?? "https://fapi.binance.com";
+
+int restPollSeconds = int.TryParse(Environment.GetEnvironmentVariable("RECORDER_REST_POLL_SECONDS"), out int rps) && rps > 0
+    ? rps
+    : 10;
+
 string? healthchecksUrl = Environment.GetEnvironmentVariable("RECORDER_HEALTHCHECKS_URL");
 
 Console.WriteLine($"[Recorder] strategies.json : {strategiesJsonPath}");
 Console.WriteLine($"[Recorder] storageDir      : {storageDir}");
 Console.WriteLine($"[Recorder] retentionDays   : {retentionDays}");
-Console.WriteLine($"[Recorder] WS proxy mode   : {(useSystemProxy ? "system proxy" : "bypass (direct)")}");
+Console.WriteLine($"[Recorder] feed            : {feedMode}");
 
 var config = RecorderConfig.FromStrategiesJson(strategiesJsonPath, storageDir, retentionDays);
 
@@ -98,12 +111,18 @@ foreach (var (symbol, timeframe) in config.Streams)
         $"[Recorder] Agregador {symbol}/{timeframe} — CVD seed={cvdSeed:F4} ({recentBars.Count} barras recientes)");
 }
 
-// ── Stream names para el WebSocket ───────────────────────────────────────────
-var streamNames = aggregatorsBySymbol.Keys
-    .Select(sym => $"{sym.ToLowerInvariant()}@aggTrade")
-    .ToList();
+// ── Símbolos a grabar ─────────────────────────────────────────────────────────
+var symbols = aggregatorsBySymbol.Keys.ToList();
+Console.WriteLine($"[Recorder] Simbolos: {string.Join(", ", symbols)}");
 
-Console.WriteLine($"[Recorder] Streams: {string.Join(", ", streamNames)}");
+// Despacho de cada trade a los agregadores del símbolo. Firma estable (TradeHandler),
+// idéntica para el adapter WS y el REST.
+TradeHandler onTrade = (symbol, price, qty, isBuyerMaker, tradeTimeMs) =>
+{
+    if (!aggregatorsBySymbol.TryGetValue(symbol, out var aggregators)) return;
+    foreach (var agg in aggregators)
+        agg.OnTrade(price, qty, isBuyerMaker, tradeTimeMs);
+};
 
 // ── Apagado limpio ───────────────────────────────────────────────────────────
 Console.CancelKeyPress += (_, e) =>
@@ -113,18 +132,31 @@ Console.CancelKeyPress += (_, e) =>
     cts.Cancel();
 };
 
-// ── WebSocket ────────────────────────────────────────────────────────────────
-var wsClient = new BinanceAggTradeWebSocketClient(
-    streamNames,
-    onTrade: (symbol, price, qty, isBuyerMaker, tradeTimeMs) =>
-    {
-        if (!aggregatorsBySymbol.TryGetValue(symbol, out var aggregators)) return;
-        foreach (var agg in aggregators)
-            agg.OnTrade(price, qty, isBuyerMaker, tradeTimeMs);
-    },
-    baseUrl: wsBaseUrl,
-    wsFactory: () => new SystemWebSocketAdapter(useSystemProxy));
+// ── Feed (REST por default; WS opcional) ──────────────────────────────────────
+ITradeFeed feed;
+if (feedMode == "ws")
+{
+    var streamNames = symbols.Select(sym => $"{sym.ToLowerInvariant()}@aggTrade").ToList();
+    feed = new BinanceAggTradeWebSocketClient(
+        streamNames,
+        onTrade,
+        baseUrl: wsBaseUrl,
+        wsFactory: () => new SystemWebSocketAdapter(useSystemProxy));
+    Console.WriteLine($"[Recorder] Feed WebSocket — base={wsBaseUrl}, proxy={(useSystemProxy ? "system" : "bypass")}");
+}
+else
+{
+    var aggTradesApi = new BinanceFuturesAggTradesApi(new HttpClient(), restBaseUrl);
+    var cursorStore  = new FileAggTradeCursorStore(storageDir);
+    feed = new BinanceAggTradeRestFeed(
+        symbols,
+        onTrade,
+        aggTradesApi,
+        cursorStore,
+        pollInterval: TimeSpan.FromSeconds(restPollSeconds));
+    Console.WriteLine($"[Recorder] Feed REST polling — base={restBaseUrl}, cada {restPollSeconds}s");
+}
 
-Console.WriteLine("[Recorder] Iniciando WebSocket...");
-await wsClient.RunAsync(cts.Token);
+Console.WriteLine("[Recorder] Iniciando feed...");
+await feed.RunAsync(cts.Token);
 Console.WriteLine("[Recorder] Apagado completo.");
