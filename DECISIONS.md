@@ -15,6 +15,7 @@
 
 | ADR | TÃ­tulo corto | Ãrea |
 |---|---|---|
+| ADR-050 | Live con minimal-position-mode permanente como validación operativa (reemplaza paper para estrategias ya aprobadas) | Operaciones / Riesgo |
 | ADR-049 | Recorder: feed REST polling de aggTrades (el WS de Binance Futures no entrega push) | Recorder / Infraestructura |
 | ADR-048 | Grabador continuo de microestructura: data plane desacoplado del execution plane | Estrategias / Infraestructura |
 | ADR-047 | ~~Warmup autosuficiente: aggTrades REST backfill + persistencia rolling 7d~~ (**Supersedida por ADR-048**) | Estrategias / Infraestructura |
@@ -60,6 +61,39 @@
 | ADR-003 | `OrderRegistry` vive en `Trading.Application` | Arquitectura |
 | ADR-002 | `RiskPerTradePercentage` falla loud si no estÃ¡ en `strategies.json` | Dominio |
 | ADR-001 | Desacople quirÃºrgico de QuantConnect: dominio Lean-free | Arquitectura |
+
+## ADR-050 — Live con minimal-position-mode permanente como validación operativa (reemplaza paper para estrategias ya aprobadas)
+**Fecha:** 2026-06-20
+**Estado:** Aceptada
+**ADRs relacionados:** ADR-045 (minimal-position-mode — reclasificado de shakedown a permanente), ADR-041 (broker real validado), ADR-039/ADR-040 (validación estadística). **Enmienda POLICY P1.**
+
+### Contexto
+Las dos estrategias de microestructura aprobadas (`TradeSizeInstitutionalStrategy`, `CvdSellExhaustionStrategy`) completaron el pipeline estadístico completo (M4 → QC IS → QC OOS → Monte Carlo, Hito-G; OOS Sharpe 4.186 y 1.718, P(Sharpe<0) 0% y 1%). POLICY P1 exige paper trading antes de capital real ("orden estricto… no se saltea pasos").
+
+Dos hechos motivan revisar ese paso:
+1. **El paper trading usa fills simulados.** Para estrategias de **microestructura** —cuyo edge depende del order flow y es sensible a slippage/latencia— los fills simulados son optimistas y dan **confianza falsa**. El live con capital mínimo da fills, slippage y comisiones **reales**: evidencia operativa superior.
+2. **Corrección de registro:** POLICY 7.4/7.5 declaraban "paper (activa desde 2026-06-15)", pero esas estrategias **nunca operaron** (paper ni live); el proceso que corrió en paper fue EmaCross. Ese estado era incorrecto y se corrige en este ADR.
+
+### Decisión
+La validación operativa de estas estrategias se hace en **live con capital mínimo** (`minimal-position-mode`, tamaño fijado al min notional del exchange: BTCUSDT=100, ETHUSDT=20, SOLUSDT=5 USD), **no** en paper. El modo es **permanente hasta nuevo aviso** (no shakedown temporal).
+- Reclasifica `minimal-position-mode` (ADR-045) de "modo de shakedown, desactivar para sizing real" a **modo operativo permanente** para este plano.
+- **Enmienda P1**: la validación operativa (paso c) admite dos formas — (c1) paper, o (c2) live con capital mínimo para estrategias que ya pasaron Hito-G. Condiciones de (c2): U1-U4 y la cadencia de revisión (POLICY 4) activos; documentar con ADR.
+- Escala a sizing real: **criterio indefinido por ahora** (revisar en la revisión trimestral de POLICY).
+
+### Alternativas consideradas
+- **Paper primero (lo que decía P1).** Descartada para este plano: fills simulados → confianza falsa en estrategias de microestructura; el live-mínimo es evidencia real con riesgo de capital despreciable.
+- **Live a tamaño real directo.** Descartada: prematuro; no hay medición de slippage real previa y el riesgo deja de ser despreciable.
+- **No operar hasta acumular paper.** Descartada: las estrategias ya pasaron toda la validación estadística; el paper no agrega información de ejecución real.
+
+### Consecuencias
+- **P1 enmendada** (path c2). **POLICY 7.4/7.5 corregidas** a la realidad: nunca operaron en paper; estado pre-live; validación operativa por live-mínimo.
+- **`minimal-position-mode` permanente** para este plano (revierte para este caso la nota de ADR-045 "desactivar para sizing real").
+- **Caveat (P3):** el live-mínimo valida **dirección + plomería**, NO el **slippage a escala** (el slippage crece con el tamaño). Al escalar el sizing, esperar el haircut P3 (30-50%) o peor. No interpretar el desempeño a mínimo notional como predictor del desempeño a tamaño real.
+- **Guardas activas obligatorias:** U1-U4 (`StrategyHealthMonitor` real, no Null), kill switch, dead-man's switch (ADR-042), y la cadencia de revisión humana de POLICY 4. Live = capital real aunque sea mínimo.
+- Riesgo de capital por trade: despreciable (~$0.25-5 con SL 5% sobre notional $5-100).
+- **Deuda conocida:** definir el criterio de escala a sizing real (hoy indefinido); revisar en la revisión trimestral de POLICY.
+
+---
 
 ## ADR-049 — Recorder: feed REST polling de aggTrades (el WS de Binance Futures no entrega push a ninguna red/cliente del proyecto)
 **Fecha:** 2026-06-19

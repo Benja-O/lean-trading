@@ -20,7 +20,9 @@
 
 Estos principios son el marco mental que justifica los números y procedimientos del resto del documento. No son chequeables por código; son la fuente de verdad de **por qué** las reglas son las que son.
 
-**P1 — Validación antes de capital.** Ninguna estrategia opera con capital real sin haber pasado: (a) tests de referencia de sus indicadores, (b) tests de comportamiento con datos sintéticos, (c) un mínimo de paper trading con métricas dentro de banda. El orden es estricto: backtest → tests unitarios → paper → live. No se saltea pasos.
+**P1 — Validación antes de capital.** Ninguna estrategia opera con capital real (más allá del mínimo notional del exchange) sin haber pasado: (a) tests de referencia de sus indicadores, (b) tests de comportamiento con datos sintéticos, (c) **validación operativa** con métricas dentro de banda. El orden es estricto: backtest → tests unitarios → validación operativa → capital a escala. No se saltea pasos.
+
+La validación operativa (c) admite dos formas: **(c1) paper trading**, o **(c2) live con capital mínimo** (`minimal-position-mode`, fijado al min notional del exchange) para estrategias que ya pasaron la validación estadística completa (M4 → IS → OOS → Monte Carlo, Hito-G). Para estrategias de **microestructura**, (c2) es preferible: los fills reales son evidencia superior a los fills simulados del paper, y el capital en riesgo es despreciable. Condiciones de (c2): U1-U4 y la cadencia de revisión (sección 4) activos; y el caveat de que el live-mínimo **no** valida el slippage a escala (ver P3). Todo uso de (c2) se documenta con un ADR. Ver ADR-050.
 
 **P2 — El kill switch nunca se desactiva en caliente.** Si el sistema activó el kill switch automáticamente (drawdown global, pérdidas consecutivas, degradación de estrategia), la reactivación exige: comprensión documentada de qué disparó el kill, decisión escrita de qué se ajusta antes de reanudar, y nuevo arranque manual del sistema. **Nunca** se reactiva "para esperar el rebote" ni "porque me parece que ya pasó."
 
@@ -441,10 +443,12 @@ P(Sharpe<0)=0%. Resultado extraordinario: OOS supera IS, señal robusta fuera de
 durante pánico (BSR colapsa < 1 en crashes). Long-only.
 
 ```
-Estado: paper (activa desde 2026-06-15)
-Fecha inicio paper: 2026-06-15
-Fecha inicio live: pendiente (mínimo 50 trades paper O 30 días, el que llegue después)
+Estado: pre-live — aprobada para live con minimal-position-mode (ADR-050); deploy de LeanLive pendiente
+Fecha inicio paper: N/A — no operó en paper; la validación operativa se hace en live-mínimo (ADR-050)
+Fecha inicio live: pendiente (arranque de LeanLive; minimal-position-mode permanente)
 Trades acumulados en vivo: 0
+Sizing: minimal-position-mode permanente (min notional del exchange); escala a sizing real: indefinida (revisar en revisión trimestral)
+Corrección de registro: la versión previa decía "paper (activa desde 2026-06-15)" — era incorrecto, la estrategia nunca operó. Ver ADR-050.
 
 Símbolos activos: BTCUSDT 1h, ETHUSDT 1h, SOLUSDT 1h
 Parámetros (alineados con QC IS/OOS): SL=5%, TP=10%, MaxBars=8, Risk=1%
@@ -477,10 +481,12 @@ P(Sharpe<0)=1%.
 durante crashes donde dominan vendedores actúa como filtro natural. Long-only.
 
 ```
-Estado: paper (activa desde 2026-06-15)
-Fecha inicio paper: 2026-06-15
-Fecha inicio live: pendiente (mínimo 50 trades paper O 30 días, el que llegue después)
+Estado: pre-live — aprobada para live con minimal-position-mode (ADR-050); deploy de LeanLive pendiente
+Fecha inicio paper: N/A — no operó en paper; la validación operativa se hace en live-mínimo (ADR-050)
+Fecha inicio live: pendiente (arranque de LeanLive; minimal-position-mode permanente)
 Trades acumulados en vivo: 0
+Sizing: minimal-position-mode permanente (min notional del exchange); escala a sizing real: indefinida (revisar en revisión trimestral)
+Corrección de registro: la versión previa decía "paper (activa desde 2026-06-15)" — era incorrecto, la estrategia nunca operó. Ver ADR-050.
 
 Símbolos activos: BTCUSDT 1h, ETHUSDT 1h, SOLUSDT 1h
 Parámetros (alineados con QC IS/OOS): SL=5%, TP=10%, MaxBars=6, Risk=1%
