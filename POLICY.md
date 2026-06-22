@@ -443,9 +443,9 @@ P(Sharpe<0)=0%. Resultado extraordinario: OOS supera IS, señal robusta fuera de
 durante pánico (BSR colapsa < 1 en crashes). Long-only.
 
 ```
-Estado: pre-live — aprobada para live con minimal-position-mode (ADR-050); deploy de LeanLive pendiente
+Estado: live (minimal-position-mode permanente, ADR-050) — arranque de LeanLive completado 2026-06-22
 Fecha inicio paper: N/A — no operó en paper; la validación operativa se hace en live-mínimo (ADR-050)
-Fecha inicio live: pendiente (arranque de LeanLive; minimal-position-mode permanente)
+Fecha inicio live: 2026-06-22 (LeanLive en VPS; minimal-position-mode permanente)
 Trades acumulados en vivo: 0
 Sizing: minimal-position-mode permanente (min notional del exchange); escala a sizing real: indefinida (revisar en revisión trimestral)
 Corrección de registro: la versión previa decía "paper (activa desde 2026-06-15)" — era incorrecto, la estrategia nunca operó. Ver ADR-050.
@@ -481,9 +481,9 @@ P(Sharpe<0)=1%.
 durante crashes donde dominan vendedores actúa como filtro natural. Long-only.
 
 ```
-Estado: pre-live — aprobada para live con minimal-position-mode (ADR-050); deploy de LeanLive pendiente
+Estado: live (minimal-position-mode permanente, ADR-050) — arranque de LeanLive completado 2026-06-22
 Fecha inicio paper: N/A — no operó en paper; la validación operativa se hace en live-mínimo (ADR-050)
-Fecha inicio live: pendiente (arranque de LeanLive; minimal-position-mode permanente)
+Fecha inicio live: 2026-06-22 (LeanLive en VPS; minimal-position-mode permanente)
 Trades acumulados en vivo: 0
 Sizing: minimal-position-mode permanente (min notional del exchange); escala a sizing real: indefinida (revisar en revisión trimestral)
 Corrección de registro: la versión previa decía "paper (activa desde 2026-06-15)" — era incorrecto, la estrategia nunca operó. Ver ADR-050.
