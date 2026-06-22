@@ -134,8 +134,10 @@ if (-not (Test-Path $configPath)) {
     Fail "No existe config.json en $LiveDir." "Copia config.live.template.json a config.json y completa las API keys."
 }
 $configText = Get-Content $configPath -Raw
-if ($configText -match 'PLACEHOLDER_') {
-    Fail "config.json todavia tiene PLACEHOLDER_ sin reemplazar." "Completa binance-api-key / binance-api-secret con las keys reales (Futures + IP whitelist)."
+# Chequear el VALOR de los campos, no la palabra suelta: el comentario de cabecera
+# del template menciona "PLACEHOLDER_*" y daria un falso positivo.
+if ($configText -match '"binance-api-(key|secret)"\s*:\s*"(\s*PLACEHOLDER[^"]*|\s*)"') {
+    Fail "config.json tiene binance-api-key/secret sin completar (placeholder o vacio)." "Completa binance-api-key / binance-api-secret con las keys reales (Futures + IP whitelist)."
 }
 if ($configText -notmatch '"environment"\s*:\s*"live-futures-binance"') {
     Fail "config.json no tiene environment 'live-futures-binance'." 'Setea "environment": "live-futures-binance".'
