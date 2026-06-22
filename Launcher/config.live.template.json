@@ -23,10 +23,15 @@
   "algorithm-language": "CSharp",
   "algorithm-location": "Trading.Strategies.dll",
 
-  // data-folder: crear directorio vacío ./data/ en el VPS.
-  // En live el feed viene de Binance (BrokerageHistoryProvider);
-  // la carpeta se necesita para que LocalDiskMapFileProvider no falle.
-  // Para crypto futures los map/factor files no existen → errores no fatales.
+  // data-folder: NO alcanza con un ./data/ vacío. Lean exige archivos base
+  // o crashea en el arranque (LiveTradingRealTimeHandler →
+  // MarketHoursDatabase.FromDataFolder → DirectoryNotFoundException):
+  //   data\market-hours\market-hours-database.json        (OBLIGATORIO)
+  //   data\symbol-properties\symbol-properties-database.csv (OBLIGATORIO)
+  // Fuente: carpeta Data\ del repo Lean, o copiar la data que ya usa LeanPaper
+  // (en el VPS: robocopy C:\Lean\Paper\data C:\Lean\Live\data /E).
+  // El feed viene de Binance (BrokerageHistoryProvider); los map/factor files
+  // de crypto futures no existen → esos errores puntuales no son fatales.
   "data-folder": "./data/",
   "results-destination-folder": "",
   "trade-list-destination": "",
