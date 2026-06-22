@@ -37,6 +37,12 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+# Windows PowerShell 5.1 (default en Windows Server) negocia TLS 1.0/1.1; Binance exige
+# TLS 1.2+. Sin esto, Invoke-WebRequest a fapi.binance.com falla con "Could not create
+# SSL/TLS secure channel" en el VPS. .NET 10 (el motor Lean) ya usa TLS 1.2 por defecto;
+# esto es solo para este script en PS 5.1.
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+
 function Write-Line {
     param([string]$Message)
     if (-not $Quiet) { Write-Host $Message }
