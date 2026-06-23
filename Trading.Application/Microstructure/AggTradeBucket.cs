@@ -20,6 +20,7 @@ namespace Trading.Application.Microstructure
         private double _sellVolume;
         private long _tradeCount;
         private double _sumQty;
+        private decimal _volume;
         private bool _hasData;
 
         public bool HasData => _hasData;
@@ -28,6 +29,15 @@ namespace Trading.Application.Microstructure
         public double High  => (double)_highPrice;
         public double Low   => (double)_lowPrice;
         public double Close => (double)_lastPrice;
+
+        // OHLCV en decimal (precio/cantidad → decimal por AI.md), para persistir al store y
+        // reconstruir MarketBars en el warmup. Los getters double de arriba se conservan para
+        // el cómputo estadístico de price_return en MicrostructureFeatureComputer.
+        public decimal OpenPrice  => _firstPrice;
+        public decimal HighPrice  => _hasData ? _highPrice : 0m;
+        public decimal LowPrice   => _hasData ? _lowPrice  : 0m;
+        public decimal ClosePrice => _lastPrice;
+        public decimal Volume     => _volume;
 
         public double BuyVolume  => _buyVolume;
         public double SellVolume => _sellVolume;
@@ -59,6 +69,7 @@ namespace Trading.Application.Microstructure
                 _buyVolume  += qtyD;
 
             _sumQty += qtyD;
+            _volume += qty;
             _tradeCount++;
         }
     }

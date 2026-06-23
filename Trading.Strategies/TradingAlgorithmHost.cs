@@ -246,18 +246,20 @@ namespace Trading.Strategies
                     foreach (var symbolTicker in symbolsToLoad)
                         provider.SeedCvdFromHistory(new InstrumentId(symbolTicker));
 
-                    // Cargar barras recientes desde el store del Recorder (fuente primaria).
+                    // Cargar TODAS las barras del store del Recorder (fuente primaria). LoadAll (no
+                    // LoadRecent) para que el warmup de estrategias tenga la profundidad de WarmUpBars
+                    // sin depender del wall clock. El store es rolling (~7d), así que cargar todo es barato.
                     var store = new PersistentMicrostructureStore(liveFeaturesDir, timeframeKey);
                     foreach (var symbolTicker in symbolsToLoad)
                     {
                         var instrumentId = new InstrumentId(symbolTicker);
-                        var recentBars   = store.LoadRecent(instrumentId, hours: 72);
-                        foreach (var bar in recentBars)
+                        var storedBars   = store.LoadAll(instrumentId);
+                        foreach (var bar in storedBars)
                             provider.AddBar(bar);
-                        if (recentBars.Count > 0)
+                        if (storedBars.Count > 0)
                             _logger.Info(
                                 "MicrostructureStore [{TF}]: {Count} barras cargadas para {Ticker} (hasta {LastBar:yyyy-MM-dd HH:mm} UTC).",
-                                timeframeKey, recentBars.Count, symbolTicker, recentBars[recentBars.Count - 1].BarUtc);
+                                timeframeKey, storedBars.Count, symbolTicker, storedBars[storedBars.Count - 1].BarUtc);
                     }
 
                     _liveProviderByTimeframe[timeframeKey] = provider;
@@ -490,11 +492,20 @@ namespace Trading.Strategies
                     "El archivo heartbeat.json refleja el estado al boot.");
             }
 
-            // Warm-up dinámico: el mayor entre el mínimo del HMM (100 barras × 4h ≈ 17 días)
-            // y el requerimiento de cada estrategia (WarmUpBars × timeframe). Así cualquier
-            // estrategia nueva con indicadores largos nunca arranca con historia parcial.
-            const double hmmMinHours = 100.0 * 4.0; // 100 barras × 4h
-            var warmUpSpan = TimeSpan.FromHours(hmmMinHours);
+            // En live, las estrategias se warmean reproduciendo el store (Lean no puede: no hay
+            // history de ticks — "Tick resolution not supported"). En backtest, el warmup de Lean
+            // con history de precio Minute las cubre, así que esto no aplica.
+            if (LiveMode)
+                WarmUpStrategiesFromStore();
+
+            // Warm-up dinámico de Lean: cubre el HMM de régimen (cuando hay) y dispara
+            // OnWarmupFinished (baseline del dead-man's switch + DrawdownMonitor). El piso del HMM
+            // (100 barras × 4h ≈ 17 días) ahora es CONDICIONAL a que haya un clasificador de régimen
+            // cargado: sin régimen, forzar 17 días pedía history que no se usa (las estrategias ya
+            // se warmean desde el store). Igual se toma el máximo con el WarmUpBars de cada estrategia.
+            var warmUpSpan = regimeClassifiers.Count > 0
+                ? TimeSpan.FromHours(100.0 * 4.0)
+                : TimeSpan.Zero;
             foreach (var executor in _strategyExecutors)
             {
                 var tfSpan = TimeframeHelper.GetTimeSpan(executor.Timeframe);
@@ -516,6 +527,70 @@ namespace Trading.Strategies
             // al comparar DateTime.UtcNow contra un timestamp histórico del último bar.
             if (LiveMode)
                 _healthHeartbeatTracker.MarkLiveModeStart(DateTime.UtcNow);
+        }
+
+        /// <summary>Barras extra (sobre WarmUpBars) que se reproducen en el warmup, por margen.</summary>
+        private const int WarmUpReplayMargin = 2;
+
+        /// <summary>
+        /// Warmup genérico de estrategias desde el store del Recorder (solo LiveMode).
+        ///
+        /// Reproduce las barras históricas del store por <see cref="IStrategy.EvaluateSignal"/> —el
+        /// MISMO punto de entrada que usan las barras vivas— para que cada estrategia llene su estado
+        /// interno (colas, indicadores). No depende de la history de precios del broker, que en live
+        /// con suscripción Tick no existe ("Tick resolution is not supported, no history returned").
+        ///
+        /// Es agnóstico a la estrategia: itera executors y les pasa barras; cada estrategia warmea lo
+        /// que necesita. Una estrategia nueva de aggTrades warmea sin código nuevo (open-closed). La
+        /// señal devuelta se descarta; no se colocan órdenes durante el warmup. Las features de cada
+        /// barra las resuelve la propia estrategia vía IMicrostructureProvider.GetBar (el provider ya
+        /// cargó esas barras del store). Reconstruir el OHLC requiere el store con columnas OHLCV; un
+        /// store viejo sin ellas deja Close=0 → warmup parcial (la estrategia completa con barras vivas).
+        /// </summary>
+        private void WarmUpStrategiesFromStore()
+        {
+            foreach (var executor in _strategyExecutors)
+            {
+                if (!_liveProviderByTimeframe.TryGetValue(executor.Timeframe, out var provider))
+                    continue;
+
+                var history  = provider.GetHistoricalBarsSorted(executor.InstrumentId);
+                int required = executor.Strategy.WarmUpBars;
+
+                int startIndex = history.Count > required + WarmUpReplayMargin
+                    ? history.Count - required - WarmUpReplayMargin
+                    : 0;
+
+                int fed = 0;
+                for (int barIndex = startIndex; barIndex < history.Count; barIndex++)
+                {
+                    var microstructureBar = history[barIndex];
+                    // Store viejo sin OHLC → Close = 0 → no se puede reconstruir un MarketBar con precio.
+                    if (microstructureBar.Close == 0m) continue;
+
+                    var marketBar = new Trading.Domain.Models.MarketBar(
+                        executor.InstrumentId,
+                        microstructureBar.Open,
+                        microstructureBar.High,
+                        microstructureBar.Low,
+                        microstructureBar.Close,
+                        microstructureBar.Volume,
+                        microstructureBar.BarUtc);
+
+                    executor.Strategy.EvaluateSignal(marketBar); // descarta la señal; solo warmea estado
+                    fed++;
+                }
+
+                if (fed >= required)
+                    _logger.Info(
+                        "Warmup desde store: {Strategy} {Ticker}/{TF} warmeada con {Fed} barras (>= {Required}).",
+                        executor.Strategy.GetType().Name, executor.InstrumentId.Ticker, executor.Timeframe, fed, required);
+                else
+                    _logger.Warning(
+                        "Warmup PARCIAL desde store: {Strategy} {Ticker}/{TF} {Fed}/{Required} barras " +
+                        "(store corto o sin OHLC). La estrategia completará su warmup con barras vivas.",
+                        executor.Strategy.GetType().Name, executor.InstrumentId.Ticker, executor.Timeframe, fed, required);
+            }
         }
 
         public override void OnData(Slice data)

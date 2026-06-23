@@ -59,7 +59,15 @@ namespace Trading.Application.Microstructure
                 arrivalRate,
                 bucket.MeanTradeSize,
                 buySellRatio,
-                priceReturn);
+                priceReturn)
+            {
+                // OHLCV de la barra (decimal), para persistir al store y warmear estrategias.
+                Open   = bucket.OpenPrice,
+                High   = bucket.HighPrice,
+                Low    = bucket.LowPrice,
+                Close  = bucket.ClosePrice,
+                Volume = bucket.Volume,
+            };
 
             return (bar, newCvdRunning);
         }

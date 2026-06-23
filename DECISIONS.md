@@ -15,6 +15,7 @@
 
 | ADR | TÃ­tulo corto | Ãrea |
 |---|---|---|
+| ADR-051 | Warmup de estrategias desde el store (OHLCV en el store + replay genérico por EvaluateSignal) | Estrategias / Infraestructura |
 | ADR-050 | Live con minimal-position-mode permanente como validación operativa (reemplaza paper para estrategias ya aprobadas) | Operaciones / Riesgo |
 | ADR-049 | Recorder: feed REST polling de aggTrades (el WS de Binance Futures no entrega push) | Recorder / Infraestructura |
 | ADR-048 | Grabador continuo de microestructura: data plane desacoplado del execution plane | Estrategias / Infraestructura |
@@ -61,6 +62,33 @@
 | ADR-003 | `OrderRegistry` vive en `Trading.Application` | Arquitectura |
 | ADR-002 | `RiskPerTradePercentage` falla loud si no estÃ¡ en `strategies.json` | Dominio |
 | ADR-001 | Desacople quirÃºrgico de QuantConnect: dominio Lean-free | Arquitectura |
+
+## ADR-051 — Warmup de estrategias desde el store (OHLCV en el store + replay genérico por EvaluateSignal)
+**Fecha:** 2026-06-23
+**Estado:** Aceptada
+**ADRs relacionados:** ADR-046 (pipeline live de features), ADR-048/049 (store del Recorder), ADR-032 (warm-up dinámico — enmendado)
+
+### Contexto
+LeanLive arrancó (ADR-050) pero las estrategias no señalizaban: su warmup interno (colas de close/features) no se llenaba. Causa: Lean warmea las estrategias reproduciendo history de **precio** a través del consolidador, y en live la suscripción es `Resolution.Tick` (ADR-046), para la cual Binance no devuelve history (`Tick resolution is not supported, no history returned`). Las colas arrancan vacías y se llenan a 1 barra/hora → CvdSellExhaustion (48 closes) tarda ~48h y TradeSizeInstitutional (24) ~24h en poder señalizar. **Cada reinicio ciega al sistema 1-2 días.** El store del Recorder (ADR-048/049) tiene la historia (features) hasta la última barra cerrada, pero (a) el warmup no la usaba y (b) no incluía OHLC, que las estrategias de precio necesitan (`CvdSellExhaustion` lee `marketBar.Close`).
+
+### Decisión
+1. **El store persiste OHLCV.** `MicrostructureBar` gana `Open/High/Low/Close/Volume` (decimal por AI.md, propiedades `init`, default 0). El `AggTradeBucket` ya computaba OHLC; se exponen en decimal y `MicrostructureFeatureComputer.Compute` los puebla. El CSV del store **apenda** `open,high,low,close,volume` al final (compat: archivos de 8 columnas se leen con OHLCV=0). **Sin cambios en el Recorder:** ambos paths (feed live vía `TimeframeAggregator` + Vision seeder) ya pasan por `Compute`.
+2. **Warmup genérico desde el store (replay).** En `Initialize()` (LiveMode), tras cargar el store, el host reproduce las barras históricas por `IStrategy.EvaluateSignal` —el mismo punto de entrada que las barras vivas— descartando la señal, para que cada estrategia llene su estado interno. Es **agnóstico a la estrategia** (open-closed): cualquier estrategia de aggTrades warmea sin código nuevo. Store sin OHLC o más corto que `WarmUpBars` → warmup **parcial** + Warning (nunca fabrica dato; la estrategia completa con barras vivas).
+3. **Fix del piso de warmup (enmienda ADR-032).** El piso de 400h (100 barras × 4h del HMM) ahora es **condicional** a que haya al menos un clasificador de régimen cargado. Sin régimen no se fuerzan 17 días de warmup innecesarios.
+
+### Alternativas descartadas
+- **Klines REST en `Initialize()` para el close histórico.** Reintroduce el acople REST-en-Initialize que ADR-048 eliminó deliberadamente. Descartada.
+- **Esperar 1-2 días de barras vivas tras cada reinicio.** Inaceptable para un sistema live: ciega el sistema en cada restart.
+- **Tipo `StoredBar` separado en vez de OHLCV en `MicrostructureBar`.** Más tipos y blast radius; las `init` props aditivas no rompen ningún caller y modelan mejor "barra OHLCV + features de flujo" (lo que ya decía la doc de `MicrostructureBar`).
+
+### Consecuencias
+- **Re-seed del store requerido** (los archivos de 8 columnas no tienen OHLC). Secuencia: parar Recorder → borrar `*_1h_live.csv` → arrancar Recorder (re-siembra de Vision **con OHLC**) → redeploy LeanLive (warmea completo).
+- Genérico: una estrategia nueva de aggTrades warmea desde el store sin tocar el host. **Límite:** estrategias que necesiten datos fuera del store (ej. régimen 4h del HMM) tienen su warmup aparte.
+- Backtest intacto: usa el CSV de research (16 col) + history de precio Minute; el replay desde store es **LiveMode-only**.
+- Tests: store OHLC round-trip + compat hacia atrás, OHLC parity del computer, y warmup-via-replay con contraste sin replay. 309 tests verdes.
+- `AI.md`: el store ahora documenta columnas OHLCV.
+
+---
 
 ## ADR-050 — Live con minimal-position-mode permanente como validación operativa (reemplaza paper para estrategias ya aprobadas)
 **Fecha:** 2026-06-20

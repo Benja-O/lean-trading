@@ -136,6 +136,23 @@ namespace Trading.Application.Microstructure
             return _historical.GetBar(instrumentId, barUtc);
         }
 
+        /// <summary>
+        /// Devuelve las barras pre-cargadas (vía AddBar desde el store) para un instrumento,
+        /// en orden cronológico ascendente. Usado por el warmup de estrategias en Initialize()
+        /// para reproducirlas por EvaluateSignal y llenar el estado interno de cada estrategia.
+        /// Lista vacía si no hay barras cargadas para el instrumento.
+        /// </summary>
+        public IReadOnlyList<MicrostructureBar> GetHistoricalBarsSorted(InstrumentId instrumentId)
+        {
+            if (instrumentId is null) throw new ArgumentNullException(nameof(instrumentId));
+            if (!_live.TryGetValue(instrumentId, out var byTime))
+                return Array.Empty<MicrostructureBar>();
+
+            var bars = new List<MicrostructureBar>(byTime.Values);
+            bars.Sort((left, right) => left.BarUtc.CompareTo(right.BarUtc));
+            return bars;
+        }
+
         /// <inheritdoc/>
         public bool HasDataFor(InstrumentId instrumentId) =>
             _live.ContainsKey(instrumentId) || _historical.HasDataFor(instrumentId);

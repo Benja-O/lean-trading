@@ -39,6 +39,22 @@ namespace Trading.Domain.Models
         /// <summary>Retorno de precio en la barra: (close - open) / open.</summary>
         public double PriceReturn { get; }
 
+        // OHLCV de la barra (precios → decimal por AI.md). Propiedades init opcionales: las
+        // pobla el productor (MicrostructureFeatureComputer desde el bucket de aggTrades) cuando
+        // el dato está disponible. Quedan en 0 cuando se cargan de un store viejo sin columnas
+        // OHLCV. Permiten reconstruir un MarketBar para warmear estrategias desde el store sin
+        // depender de history de precios del broker (que en live-tick no existe).
+        /// <summary>Precio de apertura de la barra. 0 si el origen no lo provee.</summary>
+        public decimal Open { get; init; }
+        /// <summary>Precio máximo de la barra. 0 si el origen no lo provee.</summary>
+        public decimal High { get; init; }
+        /// <summary>Precio mínimo de la barra. 0 si el origen no lo provee.</summary>
+        public decimal Low { get; init; }
+        /// <summary>Precio de cierre de la barra. 0 si el origen no lo provee.</summary>
+        public decimal Close { get; init; }
+        /// <summary>Volumen total (base) de la barra. 0 si el origen no lo provee.</summary>
+        public decimal Volume { get; init; }
+
         public MicrostructureBar(
             InstrumentId instrumentId,
             DateTime barUtc,

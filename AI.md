@@ -312,6 +312,8 @@ F:\Lean\data\results\analytics\validation-{estrategia}-{YYYYMMDD}.md
 
 El store de microestructura usa la convención `{ticker}_{timeframe}_live.csv` (p.ej. `BTCUSDT_1h_live.csv`, `ETHUSDT_5m_live.csv`). Un `PersistentMicrostructureStore` recibe el `timeframe` en su constructor y lo incorpora en el nombre de archivo.
 
+**Columnas (desde ADR-051):** `bar_utc,ofi,cvd_delta,cvd,arrival_rate,mean_trade_size,buy_sell_ratio,price_return,open,high,low,close,volume`. El OHLCV se apenda al final (no se inserta) para no correr los índices de las features: un store viejo de 8 columnas se sigue leyendo con OHLCV en 0. El OHLC habilita el warmup de estrategias desde el store en `Initialize()` (live), reproduciendo las barras por `IStrategy.EvaluateSignal` sin depender de history de precios del broker (que en live-tick no existe). Cambiar el formato del store requiere **re-seed** (borrar los `*_live.csv` y dejar que el Recorder re-siembre desde Vision).
+
 **Regla de escritura única:** el grabador (`Trading.Recorder`) es el **único proceso que escribe** a estos archivos. Lean (`TradingAlgorithmHost`) los lee en `Initialize()` y luego computa en memoria sin persistir. Nunca añadir llamadas a `PersistentMicrostructureStore.Append()` en el host.
 
 ---
