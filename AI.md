@@ -182,9 +182,11 @@ Estructura de directorios en el VPS — cada servicio es dueño de su carpeta; e
 C:\Lean\
   Paper\                 ← LeanPaper:    binarios, config.json, logs\, data\
   Live\                  ← LeanLive:     binarios, config.json, logs\, data\
-  Recorder\              ← LeanRecorder: binarios, strategies.json, logs\
+  DataDownloader\        ← LeanRecorder: binarios (Trading.Recorder.exe), strategies.json, logs\
   MicrostructureStore\   ← Compartido:   escritura = LeanRecorder, lectura = LeanPaper + LeanLive
 ```
+
+> **Nota de path (verificado en el VPS 2026-06-23):** el servicio `LeanRecorder` corre desde `C:\Lean\DataDownloader\Trading.Recorder.exe` (no `C:\Lean\Recorder\`). Al deployar DLLs del Recorder, el destino es `C:\Lean\DataDownloader\`.
 
 > **Regla de ownership:** `MicrostructureStore\` no pertenece a ningún proceso Lean. Solo el Recorder escribe ahí. Nunca poner el store dentro de `Paper\` ni de `Live\`.
 
