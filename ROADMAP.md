@@ -28,6 +28,25 @@ Evidencia (mismo dato/estrategia/período, solo cambia el apareo):
 
 ---
 
+## Backlog de research — ejes de hipótesis nuevas (post-deuda #1)
+
+Tras cerrar deuda #1, el research pivota a hipótesis nuevas sobre datos aggTrades correctos.
+Cuatro ejes identificados (2026-06-24). **Todos se exploran sí o sí**; el orden va de barato
+(datos 1h existentes) a caro (regenerar dataset): construir sobre 1h y escalar.
+
+| # | Eje | Datos | Costo | Estado |
+|---|-----|-------|-------|--------|
+| 1 | **Cross-sectional / relative-value** — market-neutral entre activos: long el de mayor desbalance de flujo, short el menor. Neutraliza la beta de bull-market (el confound que mató a OfiContrarian OOS). | 1h existente (3 activos; ampliable) | Bajo | **EN CURSO** |
+| 2 | **Condicionado por régimen (HMM)** — gatear señales de microestructura por el clasificador de vol/trend (Hito B). Separa dónde vive el edge o prueba que era beta. | 1h existente | Bajo | Pendiente |
+| 3 | **Timeframe sub-hora (5m/15m)** — re-generar features aggTrades a resolución fina y correr OFI mean-reversion / CVD exhaustion. Ataca la causa raíz: literatura y notas propias (lead-lag, FRP) ubican el edge de microestructura sub-hora. | Regenerar dataset | Medio | Pendiente (escalón siguiente) |
+| 4 | **Overlay de vol / ejecución** — pivote de alfa direccional a timing de volatilidad o calidad de ejecución (la microestructura predice vol, no dirección). | 1h existente + diseño nuevo | Alto (cambio de producto) | Pendiente |
+
+Aprendizaje que motiva el pivote: ~12 hipótesis 1h univariadas/bivariadas Long-only no
+sobrevivieron sobre datos correctamente apareados (las "aprobadas" eran lookahead). Repetir el
+mismo molde probablemente repite el null; estos cuatro ejes son palancas genuinamente distintas.
+
+---
+
 ## Plan general (hitos del proyecto)
 
 El proyecto está organizado en bloques de trabajo. Los refactors técnicos están agrupados por bloque según cuándo es necesario hacerlos.
