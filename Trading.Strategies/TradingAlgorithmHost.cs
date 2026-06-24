@@ -75,12 +75,22 @@ namespace Trading.Strategies
         private HealthchecksIoPinger _healthchecksPinger;
         private BarStalenessGate _barStalenessGate;
 
-        // Pipeline de microestructura en vivo (solo LiveMode).
-        // El Recorder (proceso independiente) escribe a disco; el host solo lee en Initialize().
-        private LiveAggTradeAccumulator _aggTradeAccumulator;
+        // Pipeline de microestructura (ADR-053): las features (OHLCV + flujo) llegan por el custom
+        // data MicrostructureFeatureData, mismo camino en backtest y live. El Recorder (proceso
+        // independiente) escribe el store; el host lo lee como custom data vía GetSource.
         // Proveedor por timeframe: un LiveMicrostructureProvider por cada timeframe activo.
-        // El proveedor correcto se captura en el closure de cada DataConsolidated.
         private Dictionary<string, LiveMicrostructureProvider> _liveProviderByTimeframe;
+
+        // Timeframe que materializa el custom data de microestructura (el store/CSV son barras 1h).
+        private const string MicrostructureTimeframe = "1h";
+
+        // Ruteo del custom data: ticker → barras 1h a evaluar. OnData arma el MarketBar desde el
+        // custom data, lo registra en el provider y dispara ProcessBar para los executors del ticker.
+        private sealed record MicrostructureRoute(
+            InstrumentId InstrumentId,
+            LiveMicrostructureProvider Provider,
+            System.Collections.Generic.IReadOnlyList<StrategyExecutor> Executors);
+        private readonly Dictionary<string, MicrostructureRoute> _microstructureRoutes = new();
 
         // Servicios de Application
         private OrderRegistry _orderRegistry;
@@ -168,10 +178,12 @@ namespace Trading.Strategies
                 }
             }
 
-            // Live: Resolution.Tick para recibir aggTrades individuales con is_buyer_maker
-            // (SaleCondition "BUY"/"SELL" codificado por EmitTradeTick, ADR-046).
-            // Backtest: Resolution.Minute — el CSV histórico cubre los features; no necesitamos ticks.
-            var dataResolution = LiveMode ? Resolution.Tick : Resolution.Minute;
+            // El cripto se suscribe a Resolution.Minute en AMBOS modos: provee precio de ejecución
+            // (fills), liveness del dead-man's switch (datos de minuto) y alimenta el consolidator de
+            // régimen 4h. La barra de señal y las features NO vienen de acá: llegan por el custom data
+            // MicrostructureFeatureData (ADR-053), mismo camino en backtest y live. Antes era Tick en
+            // live para acumular aggTrades del WS — transporte que ADR-049 probó irreparable.
+            var dataResolution = Resolution.Minute;
             foreach (var symbolTicker in symbolsToLoad)
             {
                 var cryptoAsset = AddCryptoFuture(symbolTicker, dataResolution, Market.Binance);
@@ -210,6 +222,9 @@ namespace Trading.Strategies
             var microstructureRegistry = new MicrostructureRegistry(_logger);
             string microstructureDir = rootConfiguration.MicrostructureDataPath
                 ?? System.IO.Path.Combine(System.AppContext.BaseDirectory, "microstructure");
+            // El custom data (backtest) resuelve el CSV de research desde esta variable — mismo
+            // directorio que el registry de fallback. GetSource la lee al armar el SubscriptionDataSource.
+            System.Environment.SetEnvironmentVariable("MICROSTRUCTURE_FEATURES_DIR", microstructureDir);
             foreach (var symbolTicker in symbolsToLoad)
             {
                 string csvPath = System.IO.Path.Combine(
@@ -217,38 +232,35 @@ namespace Trading.Strategies
                 microstructureRegistry.Load(new InstrumentId(symbolTicker), csvPath);
             }
 
-            // En live: el Recorder (proceso independiente siempre encendido) escribe las barras
-            // de microestructura a {ticker}_{timeframe}_live.csv. El host solo lee ese store en
-            // Initialize() para cubrir el warmup, y luego sigue computando la barra en curso en
-            // memoria con aggTrades del WebSocket live. Nunca escribe a disco (ADR-048).
-            // En backtest: el CSV histórico cubre todo el período; no se necesita pipeline en vivo.
+            // El Recorder (proceso independiente) escribe las barras de microestructura a
+            // {ticker}_{timeframe}_live.csv; en backtest el CSV de research cubre el período. Ambas
+            // fuentes entran al algoritmo por el custom data MicrostructureFeatureData (ADR-053). El
+            // provider por timeframe recibe esas barras (OnData → AddBar) y resuelve GetBar para las
+            // estrategias. En live se pre-carga el store para el warmup; en backtest el custom data
+            // reproduce toda la historia por OnData durante SetWarmUp.
             _liveProviderByTimeframe = new Dictionary<string, LiveMicrostructureProvider>();
             string liveFeaturesDir = System.Environment.GetEnvironmentVariable("MICROSTRUCTURE_STORE_DIR")
                 ?? System.IO.Path.Combine(System.AppContext.BaseDirectory, "microstructure-live");
 
-            if (LiveMode)
+            foreach (var timeframeKey in rootConfiguration.Timeframes.Keys)
             {
-                // Un LiveMicrostructureProvider por timeframe activo en strategies.json.
-                // El proveedor de 1h usa el MicrostructureRegistry (CSV histórico) como fallback
-                // para barras anteriores al rolling window del Recorder (7 días).
-                // Timeframes distintos de 1h usan un registry vacío (sin CSV histórico disponible).
-                foreach (var timeframeKey in rootConfiguration.Timeframes.Keys)
+                // Fallback histórico al CSV de research solo para el timeframe de microestructura (1h);
+                // otros timeframes usan un registry vacío.
+                var fallback = string.Equals(timeframeKey, MicrostructureTimeframe, StringComparison.OrdinalIgnoreCase)
+                    ? microstructureRegistry
+                    : new MicrostructureRegistry(_logger);
+
+                var provider = new LiveMicrostructureProvider(fallback, _logger);
+
+                // Seed CVD desde el último bar del CSV histórico (punto de partida del acumulado).
+                foreach (var symbolTicker in symbolsToLoad)
+                    provider.SeedCvdFromHistory(new InstrumentId(symbolTicker));
+
+                // Live: pre-cargar TODAS las barras del store del Recorder para el warmup de estrategias
+                // (LoadAll, sin depender del wall clock; el store es rolling ~7d). En backtest no se
+                // pre-carga: el custom data reproduce la historia por OnData.
+                if (LiveMode)
                 {
-                    // Para 1h: fallback al CSV histórico de Research. Para otros: registry vacío.
-                    var fallback = string.Equals(timeframeKey, "1h", StringComparison.OrdinalIgnoreCase)
-                        ? microstructureRegistry
-                        : new MicrostructureRegistry(_logger);
-
-                    var provider = new LiveMicrostructureProvider(fallback, _logger);
-
-                    // Seed CVD desde el último bar del CSV histórico (punto de partida si el store
-                    // en disco no cubre el período completo).
-                    foreach (var symbolTicker in symbolsToLoad)
-                        provider.SeedCvdFromHistory(new InstrumentId(symbolTicker));
-
-                    // Cargar TODAS las barras del store del Recorder (fuente primaria). LoadAll (no
-                    // LoadRecent) para que el warmup de estrategias tenga la profundidad de WarmUpBars
-                    // sin depender del wall clock. El store es rolling (~7d), así que cargar todo es barato.
                     var store = new PersistentMicrostructureStore(liveFeaturesDir, timeframeKey);
                     foreach (var symbolTicker in symbolsToLoad)
                     {
@@ -261,11 +273,9 @@ namespace Trading.Strategies
                                 "MicrostructureStore [{TF}]: {Count} barras cargadas para {Ticker} (hasta {LastBar:yyyy-MM-dd HH:mm} UTC).",
                                 timeframeKey, storedBars.Count, symbolTicker, storedBars[storedBars.Count - 1].BarUtc);
                     }
-
-                    _liveProviderByTimeframe[timeframeKey] = provider;
                 }
 
-                _aggTradeAccumulator = new LiveAggTradeAccumulator();
+                _liveProviderByTimeframe[timeframeKey] = provider;
             }
 
             // ===== Construcción de executors =====
@@ -279,13 +289,11 @@ namespace Trading.Strategies
             foreach (var timeframeNode in rootConfiguration.Timeframes)
             {
                 string timeframe = timeframeNode.Key;
-                TimeSpan timeframeSpan = TimeframeHelper.GetTimeSpan(timeframe);
 
-                // Proveedor efectivo para este timeframe:
-                //   Live    → LiveMicrostructureProvider específico del timeframe (lee del Recorder).
-                //   Backtest → MicrostructureRegistry (CSV histórico cargado arriba).
-                IMicrostructureProvider effectiveProvider = LiveMode
-                    && _liveProviderByTimeframe.TryGetValue(timeframe, out var tfProvider)
+                // Proveedor efectivo del timeframe (mismas instancias en backtest y live, ADR-053):
+                // recibe las barras del custom data por OnData y resuelve GetBar para las estrategias.
+                IMicrostructureProvider effectiveProvider =
+                    _liveProviderByTimeframe.TryGetValue(timeframe, out var tfProvider)
                         ? tfProvider
                         : microstructureRegistry;
 
@@ -298,13 +306,6 @@ namespace Trading.Strategies
                 {
                     string symbolTicker = strategyGroup.Key;
                     var instrumentId = new InstrumentId(symbolTicker);
-                    var symbol = _instrumentResolver.Resolve(instrumentId);
-
-                    // Live: TickConsolidator acepta Tick y produce TradeBar (aggTrades → OHLCV 1h).
-                    // Backtest: TradeBarConsolidator acepta TradeBar de minuto → OHLCV 1h.
-                    IDataConsolidator tradeBarConsolidator = LiveMode
-                        ? (IDataConsolidator)new TickConsolidator(timeframeSpan)
-                        : new TradeBarConsolidator(timeframeSpan);
                     var localStrategyExecutors = new List<StrategyExecutor>();
 
                     foreach (var strategyDefinition in strategyGroup)
@@ -344,39 +345,30 @@ namespace Trading.Strategies
                             new StrategyRegimeCompatibility(strategyExecutor.ExecutorIdentifier, allowedRegimes);
                     }
 
-                    // Capturar el proveedor de este timeframe en el closure (ADR-048).
-                    // El Recorder (proceso externo) es el único escritor a disco; el host
-                    // solo computa en memoria para que GetBar() resuelva en la barra en curso.
-                    var closureProvider = effectiveProvider as LiveMicrostructureProvider;
-
-                    tradeBarConsolidator.DataConsolidated += (sender, tradeBarData) =>
+                    // Ruteo del custom data (ADR-053): el MarketBar de señal y las features llegan por
+                    // OnData(MicrostructureFeatureData), no por un consolidator del feed de precio. Solo
+                    // el timeframe de microestructura tiene custom data (el store/CSV son barras 1h).
+                    if (string.Equals(timeframe, MicrostructureTimeframe, StringComparison.OrdinalIgnoreCase)
+                        && effectiveProvider is LiveMicrostructureProvider routeProvider)
                     {
-                        var marketBar = MarketBarMapper.ToMarketBar(
-                            (TradeBar)tradeBarData, _instrumentResolver);
-
-                        // Live post-warmup: computar features desde aggTrades acumulados ANTES de
-                        // evaluar señales. El bucket contiene ticks de [barUtc, barUtc+TF).
-                        // DataConsolidated dispara antes de OnData (orden QC), por lo que el tick
-                        // que cierra la barra ya fue procesado por el consolidador pero aún no llegó
-                        // al accumulator — el bucket es exactamente [barStart, barEnd).
-                        // No se escribe a disco: el Recorder es el único escritor del store.
-                        if (_aggTradeAccumulator != null && closureProvider != null && !IsWarmingUp)
-                        {
-                            var bucket = _aggTradeAccumulator.TakeBucket(instrumentId, marketBar.TimestampUtc);
-                            if (bucket != null)
-                                closureProvider.ComputeAndAdd(instrumentId, marketBar.TimestampUtc, bucket);
-                            else
-                                _logger.Warning(
-                                    "LiveMicrostructure [{Ticker}/{TF}] {BarUtc:yyyy-MM-dd HH:mm} UTC: sin aggTrades — estrategias retornarán Flat.",
-                                    instrumentId.Ticker, timeframe, marketBar.TimestampUtc);
-                        }
-
-                        _barProcessingService.ProcessBar(marketBar, localStrategyExecutors, IsWarmingUp);
-                    };
-
-                    SubscriptionManager.AddConsolidator(symbol, tradeBarConsolidator);
+                        _microstructureRoutes[symbolTicker] =
+                            new MicrostructureRoute(instrumentId, routeProvider, localStrategyExecutors);
+                    }
+                    else
+                    {
+                        _logger.Warning(
+                            "Timeframe {TF} para {Ticker} sin custom data de microestructura — las " +
+                            "estrategias de ese timeframe no recibirán barras (fuera de alcance de ADR-053).",
+                            timeframe, symbolTicker);
+                    }
                 }
             }
+
+            // Registro del custom data de microestructura (ADR-053): un MicrostructureFeatureData por
+            // ticker, a Resolution.Minute para que el poll live sea ~1 min (el dato es sparse: una fila/h).
+            // GetSource resuelve el CSV de research (backtest) o el store del Recorder (live).
+            foreach (var symbolTicker in _microstructureRoutes.Keys)
+                AddData<MicrostructureFeatureData>(symbolTicker, Resolution.Minute);
 
             // ===== Consolidator dedicado para el régimen de mercado (4h) =====
             // Independiente de los consolidators de estrategias. Alimenta al MarketRegimeRegistry.
@@ -603,31 +595,50 @@ namespace Trading.Strategies
 
         public override void OnData(Slice data)
         {
+            // Custom data de microestructura (ADR-053): dispara la evaluación de señales por el MISMO
+            // camino en backtest y live. Se procesa ANTES del early-return de warmup porque en backtest
+            // es el único mecanismo de warmup de estrategias (SetWarmUp reproduce la historia acá).
+            foreach (var kvp in data.Get<MicrostructureFeatureData>())
+            {
+                var featureData = kvp.Value;
+                if (!_microstructureRoutes.TryGetValue(featureData.Symbol.Value, out var route))
+                    continue;
+
+                var microstructureBar = ToMicrostructureBar(featureData, route.InstrumentId);
+                route.Provider.AddBar(microstructureBar);
+
+                var marketBar = new Trading.Domain.Models.MarketBar(
+                    route.InstrumentId,
+                    featureData.Open, featureData.High, featureData.Low, featureData.Close,
+                    featureData.Volume, featureData.Time);
+
+                // Backtest: procesar también durante warmup (único warmup de estrategias).
+                // Live: durante warmup ya warmeó WarmUpStrategiesFromStore; evitar doble-warmup.
+                if (!IsWarmingUp || !LiveMode)
+                    _barProcessingService.ProcessBar(marketBar, route.Executors, IsWarmingUp);
+            }
+
             if (IsWarmingUp) return;
 
-            // Liveness del feed: cada slice live (~aggTrade) refresca la marca que usa el
-            // auto-restart. Wall clock real (ADR-021), no IClock simulado.
+            // Liveness del feed: cada slice de minuto (cripto) refresca la marca que usa el auto-restart.
+            // Wall clock real (ADR-021), no IClock simulado.
             if (LiveMode)
                 _healthHeartbeatTracker.MarkDataFeedAlive(DateTime.UtcNow);
-
-            // Pipeline de microestructura (ADR-046): acumular aggTrades por barra 1h.
-            // Solo en live post-warmup; en backtest los features vienen del CSV histórico.
-            // OnData se invoca DESPUÉS de que los consolidadores actualizan (orden QC),
-            // por lo que el tick que cierra una barra ya disparó DataConsolidated antes
-            // de llegar aquí — el bucket queda limpio para la barra siguiente.
-            if (_aggTradeAccumulator != null && data.Ticks != null)
-            {
-                foreach (var kvp in data.Ticks)
-                {
-                    var instrumentId = _instrumentResolver.Resolve(kvp.Key);
-                    foreach (var tick in kvp.Value)
-                        _aggTradeAccumulator.OnTick(instrumentId, tick);
-                }
-            }
 
             _riskOrchestrator.EvaluateAllMonitors();
             if (_riskOrchestrator.IsKillSwitchActivated) return;
         }
+
+        /// <summary>Mapea el custom data de Lean al MicrostructureBar del dominio (BarUtc = inicio de barra).</summary>
+        private static Trading.Domain.Models.MicrostructureBar ToMicrostructureBar(
+            MicrostructureFeatureData data, InstrumentId instrumentId) =>
+            new(instrumentId, data.Time,
+                data.Ofi, data.CvdDelta, data.Cvd, data.ArrivalRate,
+                data.MeanTradeSize, data.BuySellRatio, data.PriceReturn)
+            {
+                Open = data.Open, High = data.High, Low = data.Low,
+                Close = data.Close, Volume = data.Volume,
+            };
 
         public override void OnOrderEvent(OrderEvent orderEvent)
         {

@@ -54,45 +54,6 @@ namespace Trading.Application.Microstructure
         }
 
         /// <summary>
-        /// Computa las features para una barra 1h recién cerrada y las almacena para lookup inmediato.
-        /// Debe llamarse desde el DataConsolidated handler, ANTES de BarProcessingService.ProcessBar(),
-        /// para que GetBar() ya tenga el resultado cuando la estrategia lo consulte.
-        /// </summary>
-        /// <param name="instrumentId">Instrumento.</param>
-        /// <param name="barUtc">Timestamp de inicio de la barra (floor a la hora, UTC).</param>
-        /// <param name="bucket">Ticks acumulados durante esa barra.</param>
-        /// <returns>El MicrostructureBar recién computado, o null si el bucket está vacío.</returns>
-        public MicrostructureBar? ComputeAndAdd(InstrumentId instrumentId, DateTime barUtc, AggTradeBucket bucket)
-        {
-            if (instrumentId is null) throw new ArgumentNullException(nameof(instrumentId));
-            if (bucket is null)       throw new ArgumentNullException(nameof(bucket));
-
-            if (!bucket.HasData)
-            {
-                _logger.Warning(
-                    "LiveMicrostructureProvider: bucket vacío para {Ticker} {BarUtc:yyyy-MM-dd HH:mm} UTC — sin aggTrades en esta barra.",
-                    instrumentId.Ticker, barUtc);
-                return null;
-            }
-
-            double cvdSeed = _cvdRunning.TryGetValue(instrumentId, out var running) ? running : 0.0;
-            var (bar, newCvd) = MicrostructureFeatureComputer.Compute(instrumentId, barUtc, bucket, cvdSeed);
-
-            _cvdRunning[instrumentId] = newCvd;
-
-            if (!_live.TryGetValue(instrumentId, out var byTime))
-            {
-                byTime = new Dictionary<DateTime, MicrostructureBar>();
-                _live[instrumentId] = byTime;
-            }
-
-            var key = DateTime.SpecifyKind(barUtc, DateTimeKind.Utc);
-            byTime[key] = bar;
-
-            return bar;
-        }
-
-        /// <summary>
         /// Pre-carga una barra ya computada (desde disco o backfill REST) en el dict en vivo.
         /// Actualiza _cvdRunning con el CVD de la barra para que el próximo Compute lo use como seed.
         /// Llamar antes de SetWarmUp(), en orden cronológico para que _cvdRunning quede en el último valor.

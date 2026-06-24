@@ -16,6 +16,7 @@
 
 | ADR | TÃ­tulo corto | Ãrea |
 |---|---|---|
+| ADR-053 | Custom BaseData del store de microestructura: un solo camino de datos para backtest y live (cierra la paridad rota por el WS) | Datos / Estrategias / Paridad |
 | ADR-052 | Observabilidad de señal: evento estructurado SignalEmitted (features genéricas + condición vía ISignalDiagnosticsProvider) | Observabilidad / Estrategias |
 | ADR-051 | Warmup de estrategias desde el store (OHLCV en el store + replay genérico por EvaluateSignal) | Estrategias / Infraestructura |
 | ADR-050 | Live con minimal-position-mode permanente como validación operativa (reemplaza paper para estrategias ya aprobadas) | Operaciones / Riesgo |
@@ -64,6 +65,52 @@
 | ADR-003 | `OrderRegistry` vive en `Trading.Application` | Arquitectura |
 | ADR-002 | `RiskPerTradePercentage` falla loud si no estÃ¡ en `strategies.json` | Dominio |
 | ADR-001 | Desacople quirÃºrgico de QuantConnect: dominio Lean-free | Arquitectura |
+
+## ADR-053 — Custom BaseData del store de microestructura: un solo camino de datos para backtest y live
+**Fecha:** 2026-06-24
+**Estado:** Aceptada — implementada (unit tests verdes: 11 Reader incl. paridad cruzada + 33 App + 57 Strat). Pendiente: verificación backtest end-to-end y re-validación de las 2 estrategias sobre el camino unificado (decisión A — el backtest cambia respecto del QC IS/OOS previo, que era de procedencia mixta precio-QC + features-research).
+**ADRs relacionados:** ADR-049 (Recorder REST, premisa "el WS no entrega push"), ADR-048 (Recorder = data plane, escritor único del store), ADR-051 (warmup desde store), ADR-046 (pipeline live de features — el camino que esto reemplaza), ADR-037 (IMicrostructureProvider), ADR-001 (dominio Lean-free)
+
+### Contexto
+La paridad backtest/live está rota en la **barra en curso**. La estrategia consume dos fuentes y ambas pasaban por el WebSocket de aggTrades de Binance Futures:
+- el **precio** (`marketBar.Close`, p.ej. condición "close es mínimo de 48") lo arma `TickConsolidator` desde los ticks del WS;
+- las **features** (`CvdDelta`, `MeanTradeSize`) las computa `LiveAggTradeAccumulator` + `ComputeAndAdd` desde el bucket del WS.
+
+ADR-049 probó empíricamente que ese WS **no entrega push** a las redes/clientes del proyecto (irreparable desde el cliente). El Recorder esquivó el problema migrando a REST y dejando el `MicrostructureStore` confiable — pero el execution plane **nunca migró**: sigue computando la barra en curso desde el WS roto. Un bucket parcial infla `mean_trade_size` (=vol/conteo) → señal espuria que el store no sostiene (caso ETH 2026-06-23). ADR-051 cubrió solo el warmup desde el store; la barra en curso quedó en el WS. ADR-052 hizo *auditable* el dato malo, no cambió la fuente.
+
+Además, backtest y live usaban **caminos de datos distintos** (backtest: `TradeBarConsolidator` sobre minuto + `MicrostructureRegistry`; live: `TickConsolidator` sobre ticks + cómputo en memoria). Esa divergencia es la clase de bug que estamos cerrando.
+
+### Decisión
+Las features microestructurales (OHLCV + las 7 features, en una sola fila) entran al algoritmo como un **custom data source de Lean** (`BaseData`), streameado por el motor de QC con **el mismo camino en backtest y en live**. La barra que dispara la evaluación deja de armarse desde ticks/buckets del WS y llega por `OnData`, idéntica en ambos modos. Paridad **por construcción**.
+
+- **`MicrostructureFeatureData : BaseData`** (en `Trading.Strategies`, lado Lean-aware; el dominio sigue Lean-free por ADR-001). Lleva OHLCV + ofi/cvd/cvdDelta/arrivalRate/meanTradeSize/buySellRatio/priceReturn.
+- **`GetSource`:** backtest → CSV histórico de research (`{ticker}_1h_features.csv`); live → CSV del store del Recorder (`{ticker}_1h_live.csv`). Ambos `SubscriptionTransportMedium.LocalFile`. El Recorder sigue siendo el escritor único (ADR-048).
+- **`Reader` mode-aware:** los dos CSV tienen orden de columnas y formato de timestamp distintos (research: 16 cols, ts `...+00:00`, orden OHLCV-first; store: 13 cols, ts `...Z`, orden features-first). El `Reader` ramifica por `isLiveMode` — patrón canónico de Lean (`CustomDataBitcoinAlgorithm`). El timestamp es el **inicio** de la barra; `Time = barStart`, `EndTime = barStart + 1h` (el motor live no emite hasta wall-clock ≥ EndTime → entrega al cierre).
+- **Registro a `Resolution.Minute`, no `Hour`.** El custom data live se pollea cada `Min(resolución, 30min)`; a `Hour` serían **30 min de latencia** (inaceptable). A `Minute` el poll baja a **~1 min** y, como el dato es sparse (una fila/hora) con `IsSparseData()=true`, el frontier-dedup por `EndTime` de Lean emite cada barra una sola vez. Latencia ~1 min **sin tocar el motor de Lean**.
+- **`OnData` orquesta:** al llegar un `MicrostructureFeatureData`, se arma el `MarketBar` desde su OHLCV, el provider resuelve sus features y se llama `BarProcessingService.ProcessBar` — que ya es agnóstico de QC. El sizing/SL/TP usa el close del store (≈1 min de antigüedad; el fill es a mercado).
+- **Se elimina el camino del WS:** `LiveAggTradeAccumulator`, `ComputeAndAdd` en vivo y la suscripción a `Resolution.Tick`. En live el cripto pasa a `Resolution.Minute` (solo para pricing de ejecución y liveness del dead-man's switch — **verificar** que ese feed de minuto sobreviva, ver radio de impacto).
+
+### Alternativas descartadas
+- **`Schedule.On(hora+delay)` + poll-con-timeout del store.** Más chico, pero (a) deja backtest y live en caminos distintos —no cierra la divergencia—, (b) el timeout es una heurística de reloj, no una garantía de completitud, (c) re-acopla la evaluación al feed de QC justo en el evento poco confiable. Es un compromiso pragmático, no el patrón institucional.
+- **Modificar `LiveCustomDataSubscriptionEnumeratorFactory` (bajar `minimumIntervalCheck`).** Tocar el motor de Lean. Innecesario: registrar a `Resolution.Minute` logra ~1 min sin divergir del fork.
+- **Convergir los dos formatos de CSV a uno solo.** Exigiría re-generar el dataset de research (pipeline Python). El `Reader` mode-aware lo evita; convergencia queda como deuda opcional.
+
+### Consecuencias
+- **Paridad por construcción:** mismo `BaseData` y mismo `OnData` en backtest y live; la única diferencia es el archivo fuente (research vs store), que contiene el mismo esquema de features.
+- **Latencia de entrada ~1 min** tras el cierre de barra (poll de minuto). Para holds multi-barra de 1h es despreciable. Si en el futuro se baja a timeframes sub-horarios, revisar.
+- **Warmup:** en esta fase se conserva el warmup vía store reader (ADR-051). Deuda de seguimiento: unificar el warmup a través de la historia del custom data (QC reproduce historia por `GetSource` de fechas pasadas), eliminando el segundo camino.
+- **El backtest sigue necesitando `AddCryptoFuture`** para fills/pricing; el custom data aporta la barra de señal, el cripto aporta la ejecución (igual en live).
+
+### Radio de impacto (componentes que dependían del supuesto viejo "la barra en curso se computa desde el WS")
+- [x] `MicrostructureFeatureData : BaseData` — creado (Trading.Strategies/Microstructure). 11 tests del `Reader` (research 16-col, store 13-col, timestamps, paridad cruzada, NaN, header/columnas).
+- [x] `TradingAlgorithmHost.Initialize` — `AddData<MicrostructureFeatureData>` por ticker a `Resolution.Minute`; cripto a `Minute` en ambos modos; quitado `_aggTradeAccumulator` y el handler `DataConsolidated` de microestructura; `OnData(custom)` → `ProcessBar` vía `_microstructureRoutes`. Providers creados en ambos modos. Compila.
+- [x] `LiveAggTradeAccumulator` + `ComputeAndAdd` — sin uso → `git rm` del accumulator + método removido del provider. Sin referencias ni tests rotos.
+- [x] `LiveMicrostructureProvider` — `GetBar` resuelve la barra del custom data vía `AddBar` (sin cambios; seed CVD intacto). 33 tests verdes.
+- [ ] Dead-man's switch (ADR-042) — **verificar en live** que el feed de minuto del cripto da liveness sin la suscripción de ticks (¿el kline WS de Binance Futures sí entrega, a diferencia del aggTrade de ADR-049?).
+- [ ] Estrategias no-microestructura (EmaCross) — N/A en config actual (solo estrategias de microestructura 1h). Si se agregan, necesitan su propia fuente de barra (el host loguea Warning para timeframes sin custom data).
+- [ ] Backtest end-to-end — **verificar** que corre sobre el camino unificado y produce resultados sensatos. NO es no-regresión byte-idéntica: el backtest cambia por diseño (precio ahora de research, no de QC-minuto). Riesgo abierto: resolución del path LocalFile absoluto fuera del data-folder de Lean.
+- [ ] Re-validación de las 2 estrategias sobre el camino unificado (Fase 2 IS → Fase 3 OOS → Fase 4 MC, AI.md).
+- [ ] `BinanceAggTradeBackfiller` — sigue para el gap de warmup; confirmar que no colisiona con el custom data.
 
 ## ADR-052 — Observabilidad de señal: evento estructurado SignalEmitted (features genéricas + condición vía ISignalDiagnosticsProvider)
 **Fecha:** 2026-06-24
