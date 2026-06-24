@@ -12,24 +12,19 @@
 
 ---
 
-## ⚠️ Estado crítico (2026-06-24) — Hito E/G invalidado por bug de apareo
+## Estado (2026-06-24) — Hito E/G invalidado por bug de apareo; deuda #1 RESUELTA: pivote a hipótesis nuevas
 
-**Las validaciones QC IS/OOS de Hito E y G están en duda.** Al implementar ADR-053 se descubrió un **lookahead de apareo de features de 1 hora** en la capa QC: el precio de la hora *t* se evaluaba contra las features de *t+1* (`GetBar(EndTime)` mientras el registry indexa por el inicio). Inflaba el Sharpe artificialmente. Ver **ADR-054** (el bug) y **ADR-053** (la corrección).
+**Las validaciones QC IS/OOS de Hito E y G eran inválidas por un lookahead de apareo de features de 1h:** el precio de *t* se evaluaba contra el flujo de *t+1* (`GetBar(EndTime)` mientras el registry indexa por el inicio). Ver **ADR-054** (el bug) y **ADR-053** (la corrección: custom data, precio+features de la misma fila por construcción). H3 y H5 quedaron rechazadas; live detenido; **no hay estrategias validadas activas.**
 
 Evidencia (mismo dato/estrategia/período, solo cambia el apareo):
 - H5 TradeSizeInstitutional: Sharpe **6.645 → −0.289** (corregido).
 - H3 CvdSellExhaustion: Sharpe **2.193 → −1.224** (corregido).
 
-Consecuencias:
-- **H3 y H5 RECHAZADAS** y eliminadas (`git rm`). Live detenido manualmente en el VPS. **No quedan estrategias validadas activas.**
-- **Deuda abierta #1 — Re-validación del pipeline:** re-correr Hito E/G sobre el camino corregido (custom data, ADR-053). El bug afectó a TODA estrategia evaluada por QC IS/OOS — las aprobadas (infladas) y las rechazadas (posiblemente penalizadas injustamente). El edge de microestructura **aún no está demostrado sobre datos correctos.**
+**Deuda #1 (re-validación del pipeline) — RESUELTA por análisis de costura, sin re-correr (2026-06-24).** Al verificar el código punta a punta (no la narrativa) se descubrió que:
+- **El bug INFLABA, no penalizaba.** El lookahead usa información del futuro → ventaja artificial (de ahí 6.6/2.2 → negativo al corregir). Una estrategia *rechazada que tenía el lookahead* fue favorecida y aun así falló → muerta sin rescate. **No hay falsos negativos del bug.**
+- **OfiContrarian ni siquiera estaba bugueada.** Llamaba `GetBar(TimestampUtc.AddHours(-1))`, que cancelaba exactamente la convención `EndTime` del camino viejo → estaba correctamente apareada. Sus números (IS 0.503 / OOS −0.703) son sobre datos correctos; **su rechazo OOS es genuino.** (H3/H5 usaban `GetBar(TimestampUtc)` sin offset → lookahead.) Esto corrige el radio-de-impacto de ADR-054, que la listaba como posible falso negativo.
 
-  **Plan:**
-  1. **Alcance:** solo las que llegaron a QC IS/OOS (pasaron M4). Las rechazadas en M4 NO se tocan: M4 (Python) aparea correcto, el bug era solo de la capa QC (C#).
-  2. **Primero: OfiContrarian** (ADR-039) — mejor candidata a falso negativo: pasó el gate IS (Sharpe 0.503) y se rechazó en OOS, ambos números del camino bugueado. Recuperar la clase del historial de git (`git log --all --oneline -- '*OfiContrarian*'`), re-registrar en `StrategyFactory`, y re-correr Fase 2 IS → Fase 3 OOS sobre el camino corregido. De paso confirma que M4↔QC dan números coherentes.
-  3. Si OfiContrarian tampoco sobrevive → el camino es generar hipótesis NUEVAS, no rescatar viejas. Otras candidatas que llegaron a QC (CvdBullishDivergence, DonchianBreakout, IntradayMomentum, ATR Compression) tienen Sharpe muy negativo; re-correr solo si hay tiempo.
-  4. La pregunta de fondo: **¿alguna estrategia de microestructura tiene edge sobre datos correctos?** Si ninguna, el pipeline funciona — lo que falta es señal.
-- El camino de datos ya quedó corregido (backtest=live por construcción, ADR-053); lo que falta es re-validar el research.
+**Conclusión:** el pipeline corregido es confiable (apareo correcto por construcción vía ADR-053; M4/Python ya apareaba bien). No hay candidata vieja que rescatar. **El camino es generar hipótesis NUEVAS sobre los datos aggTrades correctos, no re-validar viejas.** Próximo: diseño de hipótesis nuevas (Opus) → gate M4 → QC IS/OOS → MC.
 
 ---
 
