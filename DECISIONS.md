@@ -10,6 +10,7 @@
 > - Las decisiones que se revierten NO se borran: se marcan como "Revertida en ADR-NNN" y se mantienen para historia.
 > - Identificador correlativo `ADR-NNN`.
 > - Al agregar un ADR nuevo, actualizar tambiÃ©n la tabla de Ã­ndice abajo.
+> - **Radio de impacto de premisas invalidadas:** si un ADR falsa o cambia un supuesto del que dependian otros componentes (ej.: "el WS entrega aggTrades"), la seccion Consecuencias debe incluir un **checklist explicito de cada componente que dependia del supuesto viejo, con su estado** (migrado / pendiente / no-aplica) — no prosa. Un fix que arregla un solo consumidor de una premisa muerta y no traza el resto es el modo de falla mas comun del sistema (ver ADR-049 -> execution plane quedo en el WS roto). El blast radius se enumera y se verifica en el mismo ADR.
 
 ## Ãndice
 
