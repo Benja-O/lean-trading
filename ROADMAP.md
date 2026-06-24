@@ -12,6 +12,21 @@
 
 ---
 
+## ⚠️ Estado crítico (2026-06-24) — Hito E/G invalidado por bug de apareo
+
+**Las validaciones QC IS/OOS de Hito E y G están en duda.** Al implementar ADR-053 se descubrió un **lookahead de apareo de features de 1 hora** en la capa QC: el precio de la hora *t* se evaluaba contra las features de *t+1* (`GetBar(EndTime)` mientras el registry indexa por el inicio). Inflaba el Sharpe artificialmente. Ver **ADR-054** (el bug) y **ADR-053** (la corrección).
+
+Evidencia (mismo dato/estrategia/período, solo cambia el apareo):
+- H5 TradeSizeInstitutional: Sharpe **6.645 → −0.289** (corregido).
+- H3 CvdSellExhaustion: Sharpe **2.193 → −1.224** (corregido).
+
+Consecuencias:
+- **H3 y H5 RECHAZADAS** y eliminadas (`git rm`). Live detenido manualmente en el VPS. **No quedan estrategias validadas activas.**
+- **Deuda abierta #1 — Re-validación del pipeline:** re-correr Hito E/G sobre el camino corregido (custom data, ADR-053). El bug afectó a TODA estrategia evaluada por QC IS/OOS — las aprobadas (infladas) y las rechazadas (posiblemente penalizadas injustamente, ej.: OfiContrarian/ADR-039). El edge de microestructura **aún no está demostrado sobre datos correctos.**
+- El camino de datos ya quedó corregido (backtest=live por construcción, ADR-053); lo que falta es re-validar el research.
+
+---
+
 ## Plan general (hitos del proyecto)
 
 El proyecto está organizado en bloques de trabajo. Los refactors técnicos están agrupados por bloque según cuándo es necesario hacerlos.

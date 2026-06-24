@@ -19,8 +19,9 @@ namespace Trading.Strategies.Infrastructure
             return strategyName?.ToLower() switch
             {
                 "emacrossstrategy" or "emacross"                         => new EmaCrossStrategy(),
-                "tradesizeinstitutionalstrategy" or "tradesizeinstitutional" => new TradeSizeInstitutionalStrategy(microstructureProvider),
-                "cvdsellexhaustionstrategy" or "cvdsellexhaustion"       => new CvdSellExhaustionStrategy(microstructureProvider),
+                // TradeSizeInstitutional (H5) y CvdSellExhaustion (H3) RECHAZADAS 2026-06-24:
+                // su aprobación QC IS/OOS fue artefacto de un lookahead de apareo (ADR-054).
+                // Sobre el camino corregido (ADR-053) no tienen edge. Eliminadas con git rm.
 
                 null or "" => throw new ArgumentNullException(nameof(strategyName),
                     "El nombre de la estrategia no puede ser nulo o vacío."),

@@ -1,11 +1,11 @@
 using System;
+using System.Collections.Generic;
 using FluentAssertions;
 using Trading.Application.Microstructure;
 using Trading.Application.Tests.Fakes;
 using Trading.Domain.Abstractions;
 using Trading.Domain.Models;
 using Trading.Domain.ValueObjects;
-using Trading.Strategies.Implementations;
 using Xunit;
 
 namespace Trading.Application.Tests.Microstructure
@@ -56,9 +56,9 @@ namespace Trading.Application.Tests.Microstructure
         public void Replay_de_barras_historicas_warmea_la_estrategia_para_senalizar()
         {
             // Simula el warmup del host: el provider tiene las features históricas y se reproducen
-            // las barras por EvaluateSignal. CvdSellExhaustion necesita Lookback(48) closes.
+            // las barras por EvaluateSignal. La estrategia de test necesita Lookback(48) closes.
             var provider = new FakeMicrostructureProvider();
-            var strategy = new CvdSellExhaustionStrategy(provider);
+            var strategy = new WarmupSensitiveTestStrategy(provider);
 
             for (int barIndex = 0; barIndex < 50; barIndex++)
             {
@@ -80,12 +80,54 @@ namespace Trading.Application.Tests.Microstructure
             // Contraste: misma barra trigger pero sin warmear → la cola interna está vacía → Flat.
             // Es exactamente el problema (1-2 días ciega tras cada arranque) que el warmup desde store resuelve.
             var provider = new FakeMicrostructureProvider();
-            var strategy = new CvdSellExhaustionStrategy(provider);
+            var strategy = new WarmupSensitiveTestStrategy(provider);
             var triggerTime = BaseTime;
 
             provider.Add(MicrostructureBarAt(triggerTime, close: 90m, cvdDelta: 5.0));
 
             strategy.EvaluateSignal(MarketBarAt(triggerTime, 90m)).Should().Be(SignalDirection.Flat);
+        }
+
+        // ── doble de test ────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Estrategia de TEST (no de producción) que replica la dependencia de warmup de una
+        /// estrategia microestructural: necesita Lookback closes antes de poder señalizar. Reemplaza
+        /// como fixture a CvdSellExhaustionStrategy (rechazada 2026-06-24 por lookahead, ADR-054).
+        /// Señaliza Long cuando el close es mínimo de la ventana y cvdDelta &gt; 0 — la misma forma que
+        /// hacía falta para ejercitar el replay de warmup.
+        /// </summary>
+        private sealed class WarmupSensitiveTestStrategy : IStrategy
+        {
+            private const int Lookback = 48;
+            private readonly IMicrostructureProvider _provider;
+            private readonly Queue<double> _closes = new();
+
+            public int WarmUpBars => Lookback + 2;
+
+            public WarmupSensitiveTestStrategy(IMicrostructureProvider provider) => _provider = provider;
+
+            public SignalDirection EvaluateSignal(MarketBar marketBar)
+            {
+                var microstructureBar = _provider?.GetBar(marketBar.InstrumentId, marketBar.TimestampUtc);
+                if (microstructureBar == null) return SignalDirection.Flat;
+
+                double close = (double)marketBar.Close;
+                if (_closes.Count < Lookback - 1)
+                {
+                    _closes.Enqueue(close);
+                    return SignalDirection.Flat;
+                }
+
+                bool isMinimum = true;
+                foreach (var previous in _closes)
+                    if (previous < close) { isMinimum = false; break; }
+
+                _closes.Dequeue();
+                _closes.Enqueue(close);
+
+                return isMinimum && microstructureBar.CvdDelta > 0 ? SignalDirection.Long : SignalDirection.Flat;
+            }
         }
 
         // ── helpers ──────────────────────────────────────────────────────────

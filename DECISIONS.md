@@ -16,6 +16,7 @@
 
 | ADR | TÃ­tulo corto | Ãrea |
 |---|---|---|
+| ADR-054 | Bug de apareo de features (lookahead de 1h) en QC IS/OOS — invalida las validaciones de Hito E/G; H3 y H5 rechazadas | Validación / Datos |
 | ADR-053 | Custom BaseData del store de microestructura: un solo camino de datos para backtest y live (cierra la paridad rota por el WS) | Datos / Estrategias / Paridad |
 | ADR-052 | Observabilidad de señal: evento estructurado SignalEmitted (features genéricas + condición vía ISignalDiagnosticsProvider) | Observabilidad / Estrategias |
 | ADR-051 | Warmup de estrategias desde el store (OHLCV en el store + replay genérico por EvaluateSignal) | Estrategias / Infraestructura |
@@ -65,6 +66,40 @@
 | ADR-003 | `OrderRegistry` vive en `Trading.Application` | Arquitectura |
 | ADR-002 | `RiskPerTradePercentage` falla loud si no estÃ¡ en `strategies.json` | Dominio |
 | ADR-001 | Desacople quirÃºrgico de QuantConnect: dominio Lean-free | Arquitectura |
+
+## ADR-054 — Bug de apareo de features (lookahead de 1h) en QC IS/OOS — invalida las validaciones de Hito E/G
+**Fecha:** 2026-06-24
+**Estado:** Identificado y corregido (la corrección es ADR-053). Consecuencias de validación en curso: H3 y H5 rechazadas; re-validación del pipeline pendiente (ROADMAP).
+**ADRs relacionados:** ADR-053 (la corrección — unifica el camino de datos), ADR-040 (pipeline de validación M4→IS→OOS→MC), ADR-039/038 (Hito G), ADR-037 (IMicrostructureProvider)
+
+### Contexto
+Al implementar ADR-053 se descubrió que el backtest de QC (capa C#) apareaba mal el precio con las features de microestructura. El `MarketBarMapper` seteaba `marketBar.TimestampUtc = TradeBar.EndTime` (el **fin** de la barra: 16:00 para la barra [15:00,16:00)), pero el `MicrostructureRegistry` indexa las features por el **inicio** (15:00, floor de la hora — convención de `download_aggtrades.py` y del Recorder). Entonces, dentro de `EvaluateSignal`, la estrategia consultaba `GetBar(marketBar.TimestampUtc = 16:00)` y recibía las features de la barra **siguiente** [16:00,17:00).
+
+Resultado: **el precio de la hora t se evaluaba contra el flujo de órdenes de la hora t+1** — información del futuro. Sesgo forward-looking (lookahead) de 1 hora.
+
+### Evidencia empírica
+Mismo dato, misma estrategia, mismo período (IS 2021-2024); la única diferencia es el apareo (commit padre vs ADR-053):
+
+| Estrategia | OLD (apareo desfasado) | NEW (apareo correcto) |
+|---|---|---|
+| TradeSizeInstitutional (H5) | Sharpe **6.645** / Net **+1384%** / Win 60% | Sharpe **−0.289** / Net +2.4% / Win 48% |
+| CvdSellExhaustion (H3) | Sharpe **2.193** / Net **+129%** / Win 61% | Sharpe **−1.224** / Net −7.9% / Win 45% |
+
+Un Sharpe de 6.6 con +1384% en 4 años es físicamente implausible: la firma inconfundible del lookahead. El apareo correcto se verificó además campo por campo (OHLC + 7 features) contra la fila del CSV de research vía el log `SignalEmitted`.
+
+### Decisión / corrección
+La corrección es **ADR-053**: las features entran como custom data (`MicrostructureFeatureData`) y la barra de señal se arma de la **misma fila** (OHLCV + features), con `marketBar.TimestampUtc = bar start`, eliminando el desfase por construcción. No hay forma de re-introducir el lookahead: precio y features salen del mismo registro.
+
+### Consecuencias
+- **H3 (CvdSellExhaustion) y H5 (TradeSizeInstitutional) rechazadas** (`git rm`). Su aprobación QC IS/OOS (Hito G) fue un artefacto del lookahead; sobre el camino correcto no tienen edge. Documentado en `Trading.Research/strategy_experiments.md`. Live detenido manualmente en el VPS.
+- **El bug vivía en la capa QC (C#), no en M4 (Python).** M4 aparea correcto (usa el CSV de research directo), por eso una estrategia podía pasar M4 con edge real-pero-débil y luego ser inflada por QC IS/OOS.
+
+### Radio de impacto (componentes que dependían del supuesto "la validación QC IS/OOS es sólida")
+- [x] H5 TradeSizeInstitutional — rechazada, `git rm`, documentada.
+- [x] H3 CvdSellExhaustion — rechazada, `git rm`, documentada.
+- [x] Camino de apareo (`MarketBarMapper`/`GetBar` en live; consolidator en backtest) — reemplazado por ADR-053 (custom data, misma fila).
+- [ ] **Todas las demás estrategias evaluadas por QC IS/OOS en Hito E y G** — las **aprobadas** quedan en duda (posible inflación); las **rechazadas** pueden haber sido penalizadas injustamente (ej.: OfiContrarian, ADR-039). Re-validación del pipeline sobre el camino corregido: ítem de ROADMAP.
+- [ ] POLICY.md sección 7 (umbrales U1-U4 de estrategias aprobadas) — invalidada para H3/H5; revisar al re-validar.
 
 ## ADR-053 — Custom BaseData del store de microestructura: un solo camino de datos para backtest y live
 **Fecha:** 2026-06-24

@@ -433,6 +433,8 @@ Riesgo por trade: 2.0% (campo RiskPerTradePercentage en strategies.json).
 
 ### 7.4 TradeSizeInstitutionalStrategy / BTC-ETH-SOL / 1h
 
+> **⛔ RECHAZADA 2026-06-24 — NO operar.** La aprobación QC IS/OOS fue artefacto de un lookahead de apareo de features (ADR-054). Sobre el camino corregido (ADR-053): Sharpe IS **−0.289** (vs 3.985 inflado), Net +2.4% en 4 años — sin edge. `git rm` de la clase; live detenido manualmente en el VPS. Bloque conservado como registro histórico; umbrales U1-U4 invalidados.
+
 **Naturaleza de esta estrategia.** H5 del batch de microestructura (Hito E/G, 2026-06-11).
 Completó el pipeline completo: M4 (3/3 activos, Sharpe medio +2.7) → QC IS 2021-2024
 (Sharpe=3.985) → QC OOS 2025 (Sharpe=4.186, MaxDD=5.9%, CAGR=97%). Monte Carlo Gate 2:
@@ -470,6 +472,8 @@ Riesgo por trade: 1.0% (campo RiskPerTradePercentage en strategies.json).
 ---
 
 ### 7.5 CvdSellExhaustionStrategy / BTC-ETH-SOL / 1h
+
+> **⛔ RECHAZADA 2026-06-24 — NO operar.** La aprobación QC IS/OOS fue artefacto de un lookahead de apareo de features (ADR-054). Sobre el camino corregido (ADR-053): Sharpe IS **−1.224** (vs 2.178 inflado), Net −7.9% en 4 años — pierde plata. `git rm` de la clase; live detenido manualmente en el VPS. Bloque conservado como registro histórico; umbrales U1-U4 invalidados.
 
 **Naturaleza de esta estrategia.** H3 del batch de microestructura (Hito E/G, 2026-06-11).
 Completó el pipeline completo: M4 (≥2/3 activos, BTC Sharpe=+2.178 IS en QC) → QC IS

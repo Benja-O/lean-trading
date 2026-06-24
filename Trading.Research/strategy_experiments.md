@@ -21,6 +21,19 @@ Registro de hipÃ³tesis evaluadas por Fase 0. Fuente de verdad para evitar re-e
 
 ---
 
+## Hito G — RECHAZO por lookahead de apareo (2026-06-24)
+
+**Las dos estrategias aprobadas por Hito G se rechazan: su aprobación fue un artefacto de un bug de apareo de features (lookahead de 1 hora) en el camino QC IS/OOS, no edge real.**
+
+| Hito | Estrategia | TF | Activos | Backtest OLD (lookahead) | Backtest NEW (corregido, ADR-053) | Estado |
+|---|---|---|---|---|---|---|
+| G | TradeSizeInstitutionalStrategy (H5) | 1h | BTC,ETH,SOL | Sharpe 6.645 / Net +1384% / Win 60% | Sharpe -0.289 / Net +2.4% / Win 48% | RECHAZADA |
+| G | CvdSellExhaustionStrategy (H3) | 1h | BTC,ETH,SOL | Sharpe 2.193 / Net +129% / Win 61% | Sharpe -1.224 / Net -7.9% / Win 45% | RECHAZADA |
+
+Root cause: el `MarketBarMapper` viejo seteaba `marketBar.TimestampUtc = TradeBar.EndTime` (fin de barra), pero el `MicrostructureRegistry` indexa por el INICIO. `GetBar(EndTime)` devolvia las features de la barra SIGUIENTE -> el precio de la hora t se evaluaba contra el flujo de la hora t+1 (sesgo forward-looking). Un Sharpe 6.6 con +1384% en 4 anios es la firma del lookahead. ADR-053 unifico el camino de datos y corrigio el apareo; sobre el camino correcto, ninguna tiene edge (verificado con backtest viejo vs nuevo, misma data/estrategia/periodo). Ver ADR-054 (el bug de apareo) y ADR-053.
+
+**Implicacion de alcance:** el bug vivia en la capa QC (C#), no en M4 (Python, apareo correcto). Afecto a TODA estrategia evaluada por QC IS/OOS en Hito E y G — las aprobadas (infladas) y posiblemente las rechazadas (penalizadas injustamente). Re-validacion del pipeline pendiente (ROADMAP).
+
 ## Notas por experimento
 
 ### DonchianBreakoutStrategy
