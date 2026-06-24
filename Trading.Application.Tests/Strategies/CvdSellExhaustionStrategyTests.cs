@@ -1,6 +1,8 @@
 using FluentAssertions;
 using System;
+using System.Linq;
 using Trading.Application.Tests.Fakes;
+using Trading.Domain.Abstractions;
 using Trading.Domain.Models;
 using Trading.Domain.ValueObjects;
 using Trading.Strategies.Implementations;
@@ -76,6 +78,50 @@ namespace Trading.Application.Tests.Strategies
             provider.Add(BuildMsBar(47, cvdDelta: -500));
             strategy.EvaluateSignal(BuildBar(50m, 47))
                 .Should().Be(SignalDirection.Flat);
+        }
+
+        [Fact]
+        public void DescribeLastEvaluation_AlDispararLong_ExponeAmbasCondicionesSatisfechas()
+        {
+            // ADR-052: el rationale debe reflejar close=min48 (satisfecho) y cvdDelta>0 (satisfecho).
+            var provider = new FakeMicrostructureProvider();
+            var strategy = new CvdSellExhaustionStrategy(provider);
+
+            for (int i = 0; i < 47; i++)
+            {
+                provider.Add(BuildMsBar(i, cvdDelta: -100));
+                strategy.EvaluateSignal(BuildBar(100m, i));
+            }
+            provider.Add(BuildMsBar(47, cvdDelta: 500));
+            strategy.EvaluateSignal(BuildBar(50m, 47));
+
+            var diagnostics = ((ISignalDiagnosticsProvider)strategy).DescribeLastEvaluation();
+            diagnostics.Should().NotBeNull();
+            var closeCond = diagnostics!.Conditions.Single(c => c.Name == "CloseIsMin48");
+            closeCond.Value.Should().Be(50.0);
+            closeCond.Threshold.Should().Be(100.0);   // mínimo de los 47 previos
+            closeCond.Satisfied.Should().BeTrue();
+            diagnostics.Conditions.Single(c => c.Name == "CvdDeltaPositive").Satisfied.Should().BeTrue();
+        }
+
+        [Fact]
+        public void DescribeLastEvaluation_CvdNegativo_MarcaCvdDeltaPositiveComoNoSatisfecho()
+        {
+            var provider = new FakeMicrostructureProvider();
+            var strategy = new CvdSellExhaustionStrategy(provider);
+
+            for (int i = 0; i < 47; i++)
+            {
+                provider.Add(BuildMsBar(i, cvdDelta: -100));
+                strategy.EvaluateSignal(BuildBar(100m, i));
+            }
+            provider.Add(BuildMsBar(47, cvdDelta: -500));
+            strategy.EvaluateSignal(BuildBar(50m, 47));
+
+            var diagnostics = ((ISignalDiagnosticsProvider)strategy).DescribeLastEvaluation();
+            diagnostics.Should().NotBeNull();
+            diagnostics!.Conditions.Single(c => c.Name == "CloseIsMin48").Satisfied.Should().BeTrue();
+            diagnostics.Conditions.Single(c => c.Name == "CvdDeltaPositive").Satisfied.Should().BeFalse();
         }
     }
 }

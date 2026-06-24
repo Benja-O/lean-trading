@@ -15,6 +15,7 @@
 
 | ADR | TÃ­tulo corto | Ãrea |
 |---|---|---|
+| ADR-052 | Observabilidad de señal: evento estructurado SignalEmitted (features genéricas + condición vía ISignalDiagnosticsProvider) | Observabilidad / Estrategias |
 | ADR-051 | Warmup de estrategias desde el store (OHLCV en el store + replay genérico por EvaluateSignal) | Estrategias / Infraestructura |
 | ADR-050 | Live con minimal-position-mode permanente como validación operativa (reemplaza paper para estrategias ya aprobadas) | Operaciones / Riesgo |
 | ADR-049 | Recorder: feed REST polling de aggTrades (el WS de Binance Futures no entrega push) | Recorder / Infraestructura |
@@ -62,6 +63,41 @@
 | ADR-003 | `OrderRegistry` vive en `Trading.Application` | Arquitectura |
 | ADR-002 | `RiskPerTradePercentage` falla loud si no estÃ¡ en `strategies.json` | Dominio |
 | ADR-001 | Desacople quirÃºrgico de QuantConnect: dominio Lean-free | Arquitectura |
+
+## ADR-052 — Observabilidad de señal: evento estructurado SignalEmitted (features genéricas + condición vía ISignalDiagnosticsProvider)
+**Fecha:** 2026-06-24
+**Estado:** Aceptada
+**ADRs relacionados:** ADR-046 (pipeline live de features), ADR-051 (warmup desde store), ADR-037 (IMicrostructureProvider), ADR-021 (JSONL + structured logging), ADR-007 (ITradingLogger como abstracción de dominio)
+
+### Contexto
+La primera señal real (ETHUSDT 2026-06-23 16:00 UTC, entry Long) **no era auditable**: la plomería (entry/SL/TP/sizing) quedó logueada, pero **no qué estrategia disparó, contra qué features, ni qué condición se cumplió**. Al contrastar contra el store del Recorder (REST, dato confiable) ninguna de las dos estrategias activas debería haber señalizado en esa barra (`CvdSellExhaustion`: close 1658.9 no era mínimo de 48; `TradeSizeInstitutional`: mean_trade_size 2.78 muy por debajo del P90 ≈ 4.5). Hipótesis: el WS de aggTrades de LeanLive es intermitente (ADR-049 manifestándose en el execution plane) y un feed parcial infla `mean_trade_size` (=volumen/conteo) disparando una señal espuria. **Sin observabilidad de señal no se puede validar la hipótesis ni auditar ninguna señal futura.**
+
+Tensión de diseño: `IStrategy.EvaluateSignal` devuelve solo `SignalDirection`; no expone el "por qué". Loguear las **features** de forma genérica no requiere tocar la estrategia (el provider ya tiene la barra). Loguear la **condición** específica (qué umbral se comparó) sí requiere que la estrategia exponga su rationale.
+
+### Decisión
+Emitir un evento estructurado **`SignalEmitted`** por cada señal **no-Flat**, en `BarProcessingService` **antes** de los filtros de régimen/posición/sizing (para que toda señal emitida quede auditable aunque después se descarte). Dos capas, ambas open-closed:
+
+1. **Features genéricas (sin código por estrategia).** `BarProcessingService` recibe un mapa `timeframe → IMicrostructureProvider` (las mismas instancias que ven las estrategias; la clave es `StrategyExecutor.Timeframe` por correctitud multi-timeframe) y loguea el OHLC del `MarketBar` + las 7 features del `MicrostructureBar` (ofi, cvd, cvd_delta, arrival_rate, mean_trade_size, buy_sell_ratio, price_return) de la barra que disparó. Resuelve con el mismo `GetBar(instrumentId, barUtc)` que usó la estrategia → misma barra. El mapa es **opcional**: sin él, la señal igual se audita (OHLC + `tieneMicroestructura=false`).
+
+2. **Condición específica (interfaz-capacidad opcional, espejo de `IAtrProvider`).** Nueva `ISignalDiagnosticsProvider` en `Trading.Domain.Abstractions` con `SignalDiagnostics? DescribeLastEvaluation()`, y el value object `SignalDiagnostics(Summary, IReadOnlyList<SignalCondition>)` / `SignalCondition(Name, Value, Comparison, Threshold, Satisfied)` en `Trading.Domain.ValueObjects`. Las dos estrategias de microestructura la implementan: guardan en `_lastDiagnostics` la condición que evaluaron (`CvdSellExhaustion`: close≤min48, cvd_delta>0; `TradeSizeInstitutional`: mean_trade_size≥P90, bsr>1.02, con los valores reales). `BarProcessingService` chequea `strategy is ISignalDiagnosticsProvider` y anexa el rationale. **`IStrategy` no cambia**; EmaCross no la implementa y se loguea igual a nivel features (condición `(n/d)`).
+
+El render de condiciones usa **`InvariantCulture`** (el VPS tiene locale no-US; sin esto los decimales salían con coma y rompían la parseabilidad del log). Template con **placeholders nombrados sin format specifiers** (`{Close}`, no `{Close:F4}`): la estructura va en las properties del JSONL, no en el render — evita además el bug cosmético de placeholders con `:` sin interpolar.
+
+### Alternativas descartadas
+- **Cambiar la firma de `IStrategy.EvaluateSignal` para devolver señal + diagnóstico.** Rompe a todos los implementadores (EmaCross) — no es open-closed. La interfaz-capacidad opcional logra lo mismo sin tocar el contrato base, siguiendo el precedente de `IAtrProvider`.
+- **Meter las 7 features dentro del `SignalDiagnostics` de cada estrategia.** Exige código por estrategia para algo que el provider ya tiene; una estrategia que no implemente la interfaz no loguearía features. Las features genéricas vía provider son el piso garantizado.
+- **Inyectar un único `IMicrostructureProvider` en vez del mapa por timeframe.** Incorrecto en setups multi-timeframe (hay un provider por timeframe, ADR-048). El executor trae su `Timeframe`, que es la clave correcta.
+- **Evento de dominio en el bus + subscriber que loguea.** Más maquinaria para lo mismo; `ITradingLogger.Info` estructurado ya aterriza en el JSONL (ADR-021) y es el camino de menor fricción.
+
+### Consecuencias
+- **La próxima señal queda auditable**: estrategia, executor, símbolo, timeframe, barUtc, dirección, OHLC, las 7 features, y la condición evaluada con sus umbrales, todo en el JSONL. Habilita validar en vivo la hipótesis del WS intermitente (backlog #2/#3).
+- Genérico y coherente con ADR-051: cualquier estrategia de aggTrades audita features sin código nuevo; las que exponen rationale agregan la condición.
+- Warmup-safe: el log vive solo en el camino live no-warmup; el replay de warmup (ADR-051) llama `EvaluateSignal` pero no llega a este código → sin ruido.
+- Sin fuga de QC: `IMicrostructureProvider`/`ISignalDiagnosticsProvider` son abstracciones de dominio.
+- Tests: 6 en `BarProcessingServiceSignalAuditTests` (emite en no-Flat, no en Flat ni warmup, condición presente/`(n/d)`, sin provider) + 4 de diagnostics en las dos estrategias. Suite verde.
+- **Deuda conocida (cosmético, MENORES):** quedan placeholders `{...:F4}`/`{...:yyyy-…}` sin interpolar en otros logs (ej. seed de CVD, warning de bucket vacío) — el `LogTemplateRenderer` no maneja format specifiers. No lo toca este ADR; el evento `SignalEmitted` los evita por diseño.
+
+---
 
 ## ADR-051 — Warmup de estrategias desde el store (OHLCV en el store + replay genérico por EvaluateSignal)
 **Fecha:** 2026-06-23

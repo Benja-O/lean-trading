@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Text;
 using Trading.Application.Regimes;
 using Trading.Application.Risk;
 using Trading.Application.Sizing;
@@ -30,6 +32,12 @@ namespace Trading.Application.Execution
         private readonly MarketRegimeRegistry _regimeRegistry;
         private readonly IReadOnlyDictionary<string, StrategyRegimeCompatibility> _strategyCompatibilities;
         private readonly IStrategyHealthMonitor _strategyHealthMonitor;
+        // Opcional: providers de microestructura por timeframe (mismas instancias que usan las
+        // estrategias). Si está presente, se loguean las features de la barra que disparó cada señal
+        // (observabilidad genérica, sin código por estrategia). El executor trae su Timeframe, que es
+        // la clave para resolver el provider correcto en setups multi-timeframe. Null/ausente en
+        // deployments sin microestructura: se loguea igual la señal y el OHLC, sin features de flujo.
+        private readonly IReadOnlyDictionary<string, IMicrostructureProvider>? _microstructureByTimeframe;
 
         public BarProcessingService(
             IPortfolioState portfolioState,
@@ -41,7 +49,8 @@ namespace Trading.Application.Execution
             IClock clock,
             MarketRegimeRegistry regimeRegistry,
             IReadOnlyDictionary<string, StrategyRegimeCompatibility> strategyCompatibilities,
-            IStrategyHealthMonitor strategyHealthMonitor)
+            IStrategyHealthMonitor strategyHealthMonitor,
+            IReadOnlyDictionary<string, IMicrostructureProvider>? microstructureByTimeframe = null)
         {
             _portfolioState = portfolioState;
             _orderRouter = orderRouter;
@@ -53,6 +62,7 @@ namespace Trading.Application.Execution
             _regimeRegistry = regimeRegistry ?? throw new ArgumentNullException(nameof(regimeRegistry));
             _strategyCompatibilities = strategyCompatibilities ?? throw new ArgumentNullException(nameof(strategyCompatibilities));
             _strategyHealthMonitor = strategyHealthMonitor ?? throw new ArgumentNullException(nameof(strategyHealthMonitor));
+            _microstructureByTimeframe = microstructureByTimeframe;
         }
 
         public void ProcessBar(
@@ -114,6 +124,12 @@ namespace Trading.Application.Execution
                 SignalDirection signalDirection = strategyExecutor.Strategy.EvaluateSignal(marketBar);
 
                 if (signalDirection == SignalDirection.Flat) continue;
+
+                // Auditoría de señal (ADR-052): se loguea ACÁ —tras confirmar señal no-Flat y ANTES
+                // de los filtros de régimen/posición/sizing— para que toda señal emitida quede
+                // auditable aunque después se descarte. Genérico: features del provider + condición
+                // de la estrategia (si expone ISignalDiagnosticsProvider).
+                LogSignalEmitted(strategyExecutor, marketBar, signalDirection);
 
                 // ===== Filtro de régimen pre-orden =====
                 // Si la estrategia declara CompatibleRegimes y el régimen actual del instrumento no está
@@ -192,6 +208,74 @@ namespace Trading.Application.Execution
                     StopPrice: null,
                     ClientTag: string.Empty));
             }
+        }
+
+        /// <summary>
+        /// Emite un evento estructurado por cada señal no-Flat: identidad del executor, OHLC de la
+        /// MarketBar, las features microestructurales de la barra (si hay provider) y la condición
+        /// evaluada por la estrategia (si expone ISignalDiagnosticsProvider). Placeholders nombrados
+        /// sin format specifiers: la estructura va en las properties del JSONL, no en el render.
+        /// </summary>
+        private void LogSignalEmitted(
+            StrategyExecutor strategyExecutor,
+            MarketBar marketBar,
+            SignalDirection signalDirection)
+        {
+            var instrumentId = strategyExecutor.InstrumentId;
+
+            MicrostructureBar? msBar = null;
+            if (_microstructureByTimeframe != null &&
+                _microstructureByTimeframe.TryGetValue(strategyExecutor.Timeframe, out var provider))
+            {
+                msBar = provider.GetBar(instrumentId, marketBar.TimestampUtc);
+            }
+
+            string conditions = BuildConditionsText(strategyExecutor.Strategy);
+
+            _logger.Info(
+                "SignalEmitted estrategia={ExecutorIdentifier} ticker={Ticker} timeframe={Timeframe} " +
+                "barUtc={BarUtc} direccion={Direction} " +
+                "open={Open} high={High} low={Low} close={Close} volume={Volume} " +
+                "ofi={Ofi} cvd={Cvd} cvdDelta={CvdDelta} arrivalRate={ArrivalRate} " +
+                "meanTradeSize={MeanTradeSize} buySellRatio={BuySellRatio} priceReturn={PriceReturn} " +
+                "tieneMicroestructura={HasMicrostructure} condiciones={Conditions}",
+                strategyExecutor.ExecutorIdentifier,
+                instrumentId.Ticker,
+                strategyExecutor.Timeframe,
+                marketBar.TimestampUtc,
+                signalDirection,
+                marketBar.Open, marketBar.High, marketBar.Low, marketBar.Close, marketBar.Volume,
+                msBar?.Ofi, msBar?.Cvd, msBar?.CvdDelta, msBar?.ArrivalRate,
+                msBar?.MeanTradeSize, msBar?.BuySellRatio, msBar?.PriceReturn,
+                msBar != null, conditions);
+        }
+
+        /// <summary>
+        /// Resumen legible de la condición que evaluó la estrategia. "(n/d)" si la estrategia no
+        /// expone diagnóstico (no implementa ISignalDiagnosticsProvider o aún no evaluó ninguna barra).
+        /// </summary>
+        private static string BuildConditionsText(IStrategy strategy)
+        {
+            if (strategy is not ISignalDiagnosticsProvider diagnosticsProvider)
+                return "(n/d)";
+
+            var diagnostics = diagnosticsProvider.DescribeLastEvaluation();
+            if (diagnostics == null)
+                return "(n/d)";
+
+            // InvariantCulture: el log de auditoría debe ser independiente de la cultura de la máquina
+            // (evita separador decimal coma en VPS con locale no-US y mantiene los valores parseables).
+            var builder = new StringBuilder(diagnostics.Summary);
+            foreach (var condition in diagnostics.Conditions)
+            {
+                builder.Append(" | ")
+                    .Append(condition.Name).Append('[')
+                    .Append(condition.Value.ToString(CultureInfo.InvariantCulture))
+                    .Append(condition.Comparison)
+                    .Append(condition.Threshold.ToString(CultureInfo.InvariantCulture))
+                    .Append('=').Append(condition.Satisfied).Append(']');
+            }
+            return builder.ToString();
         }
     }
 }

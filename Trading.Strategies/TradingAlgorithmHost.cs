@@ -271,6 +271,11 @@ namespace Trading.Strategies
             // ===== Construcción de executors =====
             var strategyCompatibilities = new Dictionary<string, StrategyRegimeCompatibility>();
 
+            // Mapa timeframe → provider efectivo: lo consume BarProcessingService para loguear las
+            // features de la barra que dispara cada señal (ADR-052). Son las MISMAS instancias que
+            // ven las estrategias, así que GetBar resuelve la misma barra que evaluó la estrategia.
+            var microstructureByTimeframe = new Dictionary<string, IMicrostructureProvider>();
+
             foreach (var timeframeNode in rootConfiguration.Timeframes)
             {
                 string timeframe = timeframeNode.Key;
@@ -283,6 +288,8 @@ namespace Trading.Strategies
                     && _liveProviderByTimeframe.TryGetValue(timeframe, out var tfProvider)
                         ? tfProvider
                         : microstructureRegistry;
+
+                microstructureByTimeframe[timeframe] = effectiveProvider;
 
                 var strategiesBySymbol = timeframeNode.Value.Strategies
                     .GroupBy(strategy => strategy.Symbol);
@@ -408,7 +415,8 @@ namespace Trading.Strategies
             _barProcessingService = new BarProcessingService(
                 _portfolioState, _orderRouter, _riskOrchestrator, _positionSizer,
                 _logger, domainEventBus, _clock,
-                regimeRegistry, strategyCompatibilities, strategyHealthMonitor);
+                regimeRegistry, strategyCompatibilities, strategyHealthMonitor,
+                microstructureByTimeframe);
 
             _orderLifecycleService = new OrderLifecycleService(
                 _strategyExecutors, _consecutiveLossesMonitor, _orderRouter, _priceRounder, _logger, domainEventBus, _clock,
