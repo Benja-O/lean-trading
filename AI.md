@@ -238,6 +238,8 @@ C:\Lean\
 
 Proceso estándar para cualquier nueva hipótesis de trading. **Las fases son lineales con early exit**: si una falla, la hipótesis se descarta y no se avanza a la siguiente. El rationale completo y las alternativas consideradas están en ADR-040.
 
+**Principio de orden — infra a demanda, después de edge validado.** El cuello de botella del proyecto es *descubrir edge*, no la ingeniería. Por eso la regla por defecto es: **producción/infra se construye en función de una hipótesis que ya mostró edge — no antes.** La iteración de research vive en la capa Python M4 (Fase 0: barata, descartable, sin tocar C#); cada pieza de C#/producción/infra se tira **a demanda**, en su versión más barata, cuando una candidata la necesita para avanzar a la siguiente fase. No construir motor por adelantado a la demanda (régimen, ejecución, cartera, etc.) cuando ninguna estrategia validada lo requiere todavía. Esto no contradice el orden de López de Prado (motor → validar → automatizar); lo acota: el motor se construye al ritmo que el research prueba que hace falta.
+
 ### Fase 0 — M4 (Python, validación rápida)
 
 Script en `Trading.Research/m4_*.py`. No requiere tocar código C#.
