@@ -17,7 +17,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Remove="pseudo_codigo.cs" />
     <!-- El proyecto HmmTrainer vive en Tools/HmmTrainer/. Es un .csproj independiente
          (tool offline) y no debe ser compilado como parte de Trading.Strategies.
          Sin esta exclusión MSBuild incluiría Program.cs/BicCalculator.cs vía glob. -->

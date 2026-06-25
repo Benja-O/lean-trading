@@ -159,9 +159,9 @@ def _read_zip(path):
         return None
 
 
-def _agg_1h(df):
-    """Agrega AggTrades a barras 1h y calcula features microestructurales."""
-    df["bar"]      = pd.to_datetime(df["ts_ms"], unit="ms", utc=True).dt.floor("1h")
+def _agg_bars(df, freq):
+    """Agrega AggTrades a barras de la frecuencia indicada y calcula features microestructurales."""
+    df["bar"]      = pd.to_datetime(df["ts_ms"], unit="ms", utc=True).dt.floor(freq)
     df["buy_qty"]  = df["qty"].where(~df["is_buyer_maker"], 0.0)
     df["sell_qty"] = df["qty"].where( df["is_buyer_maker"], 0.0)
 
@@ -193,6 +193,11 @@ def _agg_1h(df):
         "buy_volume", "sell_volume", "trade_count", "mean_trade_size",
         "ofi", "buy_sell_ratio", "cvd_delta", "arrival_rate", "price_return",
     ]]
+
+
+def _agg_1h(df):
+    """Agrega AggTrades a barras 1h y calcula features microestructurales."""
+    return _agg_bars(df, "1h")
 
 
 def process_symbol(symbol):
@@ -237,6 +242,48 @@ def process_symbol(symbol):
 
     span = f"{result['bar'].iloc[0].date()} → {result['bar'].iloc[-1].date()}"
     log.info(f"[{symbol}] Guardado {out.name} + {csv_out.name} — {len(result):,} barras  ({span})")
+
+
+def process_symbol_subhour(symbol):
+    """Genera features 5m y 15m a partir de los ZIPs raw existentes."""
+    raw_root = BASE_PATH / "raw" / symbol
+    all_zips = sorted(raw_root.rglob("*.zip")) if raw_root.exists() else []
+
+    if not all_zips:
+        log.warning(f"[{symbol}] Sin ZIPs disponibles — saltando procesamiento sub-hora")
+        return
+
+    log.info(f"[{symbol}] Procesando {len(all_zips)} ZIPs → barras 5m y 15m")
+
+    frames_5m  = []
+    frames_15m = []
+
+    for i, zp in enumerate(all_zips, 1):
+        raw = _read_zip(zp)
+        if raw is not None:
+            frames_5m.append(_agg_bars(raw, "5min"))
+            frames_15m.append(_agg_bars(raw, "15min"))
+        if i % 300 == 0:
+            log.info(f"  [{symbol}] {i}/{len(all_zips)} ZIPs procesados")
+
+    for label, frames in [("5m", frames_5m), ("15m", frames_15m)]:
+        if not frames:
+            log.warning(f"[{symbol}] Sin datos procesables para {label}")
+            continue
+
+        result = (
+            pd.concat(frames, ignore_index=True)
+            .sort_values("bar")
+            .reset_index(drop=True)
+        )
+        result["cvd"] = result["cvd_delta"].cumsum()
+
+        out = BASE_PATH / "features" / f"{symbol}_{label}_features.parquet"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        result.to_parquet(out, index=False, compression="snappy")
+
+        span = f"{result['bar'].iloc[0].date()} → {result['bar'].iloc[-1].date()}"
+        log.info(f"[{symbol}] Guardado {out.name} — {len(result):,} barras {label}  ({span})")
 
 
 # ── Verificación previa de símbolos ───────────────────────────────────────────
@@ -306,9 +353,13 @@ def main():
     for sym in valid_symbols:
         download_symbol(sym)
 
-    log.info("\n── FASE 2: PROCESAMIENTO ────────────────────────────────────")
+    log.info("\n── FASE 2: PROCESAMIENTO 1h ─────────────────────────────────")
     for sym in valid_symbols:
         process_symbol(sym)
+
+    log.info("\n── FASE 3: PROCESAMIENTO SUB-HORA (5m y 15m) ───────────────")
+    for sym in valid_symbols:
+        process_symbol_subhour(sym)
 
     log.info("\n── RESUMEN ──────────────────────────────────────────────────")
     for sym in valid_symbols:
@@ -319,6 +370,14 @@ def main():
             log.info(f"  {sym}: {len(df):,} barras 1h  |  {size_mb:.1f} MB")
         else:
             log.warning(f"  {sym}: parquet no generado")
+        for label in ("5m", "15m"):
+            fp_sh = BASE_PATH / "features" / f"{sym}_{label}_features.parquet"
+            if fp_sh.exists():
+                size_mb = fp_sh.stat().st_size / (1 << 20)
+                df_sh = pd.read_parquet(fp_sh, columns=["bar"])
+                log.info(f"  {sym} {label}: {len(df_sh):,} barras  |  {size_mb:.1f} MB")
+            else:
+                log.warning(f"  {sym} {label}: parquet no generado")
 
     log.info("\n✔ Pipeline completado.")
 
