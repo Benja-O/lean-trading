@@ -16,6 +16,7 @@
 
 | ADR | TÃ­tulo corto | Ãrea |
 |---|---|---|
+| ADR-055 | Universo y datos sin restricción a priori; el objetivo del sistema es la cartera, no la estrategia individual | Research / Metodología |
 | ADR-054 | Bug de apareo de features (lookahead de 1h) en QC IS/OOS — invalida las validaciones de Hito E/G; H3 y H5 rechazadas | Validación / Datos |
 | ADR-053 | Custom BaseData del store de microestructura: un solo camino de datos para backtest y live (cierra la paridad rota por el WS) | Datos / Estrategias / Paridad |
 | ADR-052 | Observabilidad de señal: evento estructurado SignalEmitted (features genéricas + condición vía ISignalDiagnosticsProvider) | Observabilidad / Estrategias |
@@ -66,6 +67,40 @@
 | ADR-003 | `OrderRegistry` vive en `Trading.Application` | Arquitectura |
 | ADR-002 | `RiskPerTradePercentage` falla loud si no estÃ¡ en `strategies.json` | Dominio |
 | ADR-001 | Desacople quirÃºrgico de QuantConnect: dominio Lean-free | Arquitectura |
+
+## ADR-055 — Universo y datos sin restricción a priori; el objetivo del sistema es la cartera
+**Fecha:** 2026-06-25
+**Estado:** Vigente. Política de research; condiciona el criterio de éxito de toda hipótesis futura y, eventualmente, el pipeline de validación (ADR-040) y los umbrales de POLICY.md.
+**ADRs relacionados:** ADR-040 (pipeline M4→IS→OOS→MC — su criterio de éxito se extiende aquí), ADR-053 (custom data: el camino de datos ya es agnóstico a la fuente y permite sumar OHLCV/aggTrades/order book), ADR-039 (Monte Carlo / validación).
+
+### Contexto
+El research arrastraba dos restricciones **implícitas** que nunca fueron decisiones conscientes, solo el camino de menor esfuerzo:
+1. **Universo de 3-4 majors** (BTC/ETH/SOL/BNB). Surgió de los primeros backtests, no de un criterio.
+2. **Datos atados a lo ya disponible** (features 1h existentes), con el backlog de ejes ordenado explícitamente "de barato (1h existente) a caro".
+
+Estas restricciones bloquearon hipótesis enteras. El caso disparador: **momentum cross-sectional** necesita dispersión de ranking sobre muchos nombres (la literatura usa 10-100+); con N=3-4 majors de beta ~1 a BTC es estadísticamente vacío. El "no-go" no era de la hipótesis sino del universo auto-impuesto. Lo mismo aplica a cualquier estrategia de cartera: **una cartera diversificada no se puede construir sobre 3 activos correlacionados.**
+
+Además, el criterio de éxito vigente (Sharpe standalone vs gate M4) juzga cada estrategia **en aislamiento**, lo que es incoherente con el objetivo declarado del sistema.
+
+### Decisión
+1. **El objetivo final del sistema es la cartera, no la estrategia individual.** El criterio de éxito de una hipótesis incorpora su **contribución marginal a la cartera** (correlación con lo ya presente, diversificación), no solo su Sharpe standalone. Una estrategia de Sharpe moderado pero descorrelacionada puede valer más que una de Sharpe alto que replica el beta de BTC.
+2. **Universo sin restricción a priori.** Se usan tantos activos como la hipótesis requiera. No hay límite implícito de majors.
+3. **Datos sin restricción a priori.** aggTrades, OHLCV y order book (si hace falta y es posible obtenerlo), en **cualquier temporalidad**. El dato se elige por la hipótesis, no la hipótesis por el dato disponible.
+
+### Condiciones que hacen válida la decisión (no es un cheque en blanco)
+"Sin restricción" significa **habilitado, evaluado con criterio** — no gratis ni por default. Toda expansión asume explícitamente:
+- **Survivorship bias:** un universo de alts armado con los símbolos *de hoy* excluye las que murieron → el backtest cross-sectional miente a favor. Cualquier universo ampliado debe ser **point-in-time** (la membresía en fecha t es la que existía y era listable en t), o el resultado es inválido. Trampa #1 de cualquier cartera de cripto.
+- **Disponibilidad y costo de datos:** order book histórico con profundidad es caro/escaso; aggTrades sub-hora hay que regenerarlo. La política habilita *pedir* el dato, no presupone que existe — cada expansión de datos es una tarea con costo, no un supuesto.
+- **Liquidez y costos por activo:** el muro de costos (fees + slippage) **empeora en alts** (más slippage, menos profundidad). El universo se pondera por liquidez; nada de equiponderado ingenuo. El umbral señal/costo se evalúa por activo, no global.
+
+### Alternativas consideradas
+- **Mantener el universo acotado a majors:** descartada. Es la causa raíz del bloqueo de cross-sectional y es incompatible con el objetivo de cartera.
+- **Abrir universo/datos sin caveats ("usar lo que haga falta" a secas):** descartada. Sin point-in-time y ponderación por liquidez, ampliar el universo es una fábrica de sobreajuste y backtests inflados — exactamente el modo de falla que ya nos costó Hito E/G (ADR-054).
+
+### Consecuencias
+- El backlog de ejes de research deja de leerse como "atado a 1h/majors existentes". El orden barato→caro sigue siendo una guía de eficiencia, no una restricción de alcance (ver banner de `ROADMAP.md`).
+- **Pendiente de diseño (no implementado aquí):** (a) construcción de universo point-in-time para cripto; (b) extensión del criterio de éxito de ADR-040 para medir contribución a cartera (correlación / diversificación), no solo Sharpe standalone; (c) ponderación por liquidez en M4 y en ejecución. Estos son ítems de ROADMAP que esta decisión habilita, no entregables de este ADR.
+- **No invalida** ningún resultado previo: las hipótesis ya rechazadas lo fueron por razones que se sostienen (costo estructural, OOS genuino). Esta decisión amplía el espacio de búsqueda hacia adelante.
 
 ## ADR-054 — Bug de apareo de features (lookahead de 1h) en QC IS/OOS — invalida las validaciones de Hito E/G
 **Fecha:** 2026-06-24

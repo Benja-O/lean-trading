@@ -34,6 +34,15 @@ Tras cerrar deuda #1, el research pivota a hipótesis nuevas sobre datos aggTrad
 Cuatro ejes identificados (2026-06-24). **Todos se exploran sí o sí**; el orden va de barato
 (datos 1h existentes) a caro (regenerar dataset): construir sobre 1h y escalar.
 
+> **Alcance (ADR-055, 2026-06-25):** el universo y los datos **no están restringidos a priori**.
+> Se usan tantos activos como la hipótesis requiera, y aggTrades / OHLCV / order book (si hace
+> falta y es posible) en cualquier temporalidad. El orden barato→caro de la tabla es una guía de
+> **eficiencia**, no un techo de alcance — el límite implícito de 3-4 majors y de "1h existente" ya
+> no aplica. **El objetivo final del sistema es la cartera**, así que una hipótesis se juzga también
+> por su contribución marginal (correlación / diversificación), no solo por su Sharpe standalone.
+> Caveats que toda expansión asume: universo **point-in-time** (anti-survivorship-bias), costo/
+> disponibilidad real del dato, y ponderación por liquidez (el muro de costos empeora en alts).
+
 | # | Eje | Datos | Costo | Estado |
 |---|-----|-------|-------|--------|
 | 1 | **Cross-sectional / relative-value** — market-neutral: long z-score flujo máximo, short mínimo, dollar-neutral. | 1h existente | Bajo | **CERRADO — NO-GO (2026-06-25)** |
