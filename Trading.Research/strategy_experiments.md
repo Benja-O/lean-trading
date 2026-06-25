@@ -34,7 +34,15 @@ Registro de hipÃ³tesis evaluadas por Fase 0. Fuente de verdad para evitar re-e
 **OOS:** no corrido (gate IS fallo — touch-once por diseno).
 **Script:** `Trading.Research/m4_cross_sectional_flow.py`
 
-**Diagnostico:** la mecanica de neutralidad funciona (beta ~0 en todas las configs). El z-score de flujo por activo SI tiene senial, pero invertida: win rate consistentemente 15-22% en TODO el grid (no aleatorio — sistematicamente elige al activo que underperforma). La hipotesis de continuacion de flujo cruzada es incorrecta; lo que hay es mean reversion cross-sectional (el activo con mayor presion compradora inusual tiende a revertir). No es un rescate: seria una hipotesis nueva (long el z-score minimo, short el maximo). Anotada como posible Eje 1b a evaluar en el futuro.
+**Diagnostico:** la mecanica de neutralidad funciona (beta ~0 en todas las configs). El z-score de flujo por activo SI tiene senial, pero invertida: win rate consistentemente 15-22% en TODO el grid (no aleatorio — sistematicamente elige al activo que underperforma). La hipotesis de continuacion de flujo cruzada es incorrecta; lo que hay es mean reversion cross-sectional (el activo con mayor presion compradora inusual tiende a revertir). No es un rescate: seria una hipotesis nueva (long el z-score minimo, short el maximo). Ver Eje 1b.
+
+### Eje 1b — Cross-Sectional Invertido (2026-06-25) — RECHAZADO, limitacion estructural de costos
+
+Signal invertida: long z-score MINIMO, short z-score MAXIMO. Resultado: win rate after-cost ~21% — IDENTICO al eje 1 (~22%). Sharpe IS -14.4, net -100%.
+
+**Root cause:** los costos de rebalanceo (0.56% por bloque = fee+slippage x 2 piernas) destruyen la señal antes de medirla. A N=8 (8h hold), eso equivale a ~6% anual solo en costos. El retorno bruto del long-short es ~0.1-0.2% por bloque → ratio señal/costo de ~20-35% del break-even. El gross signal SI existe (eje 1 gross loss 78% implica eje 1b gross win 78%), pero es demasiado pequeño para superar los costos a esta frecuencia.
+
+**Implicacion para sub-hora:** el cross-sectional tiene la misma limitacion estructural en 5m/15m — el costo por bloque es identico en absoluto (0.56%) pero los bloques son mas cortos = mas rebalanceos = peor. El cross-sectional requeriria costos institucionales (~10-20x menores) o una señal mucho mas fuerte. **El eje 1b cierra el cross-sectional definitivamente en 1h y sub-hora.**
 
 ### Eje 2 — OFI Contrarian condicionado por regimen HMM (2026-06-25) — RECHAZADA M4
 

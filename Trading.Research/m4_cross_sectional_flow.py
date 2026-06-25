@@ -1,5 +1,9 @@
 """
-M4 pure-signal backtest: Cross-Sectional Order-Flow — long-short dollar-neutral entre activos
+M4 pure-signal backtest: Cross-Sectional Order-Flow INVERTIDO (eje 1b) — long-short dollar-neutral
+
+Variante invertida del eje 1: long el z-score MINIMO de flujo, short el MAXIMO.
+Motivacion: eje 1 (long maximo) tuvo win rate 15-22% en TODO el grid — señal invertida
+robusta. Mean reversion cross-sectional: el activo mas presionado revierte, no continua.
 
 Hipótesis:
   El desbalance de flujo *relativo* entre activos predice el retorno *relativo*: el activo
@@ -148,9 +152,9 @@ def build_portfolio_returns(
             i += hold
             continue
 
-        ranks = row_scores.rank()       # 1=min (short), 3=max (long)
-        long_asset  = ranks.idxmax()
-        short_asset = ranks.idxmin()
+        ranks = row_scores.rank()       # 1=min, 3=max
+        long_asset  = ranks.idxmin()   # long el z-score MINIMO (mas oversold)
+        short_asset = ranks.idxmax()   # short el z-score MAXIMO (mas overbought)
 
         entry_long  = closes.loc[entry_ts, long_asset]
         exit_long   = closes.loc[exit_ts,  long_asset]
