@@ -38,13 +38,15 @@ Cuatro ejes identificados (2026-06-24). **Todos se exploran sí o sí**; el orde
 |---|-----|-------|-------|--------|
 | 1 | **Cross-sectional / relative-value** — market-neutral: long z-score flujo máximo, short mínimo, dollar-neutral. | 1h existente | Bajo | **CERRADO — NO-GO (2026-06-25)** |
 | 1b | **Cross-sectional invertido** — long el z-score *mínimo*, short el máximo (mean reversion cross-sectional: el activo más presionado revierte). Derivado del diagnóstico del eje 1: win rate 15-22% invierte la hipótesis. | 1h existente | Bajo | Pendiente |
-| 2 | **Condicionado por régimen (HMM)** — gatear señales de microestructura por el clasificador de vol/trend (Hito B). Separa dónde vive el edge o prueba que era beta. | 1h existente | Bajo | **EN CURSO** |
-| 3 | **Timeframe sub-hora (5m/15m)** — re-generar features aggTrades a resolución fina y correr OFI mean-reversion / CVD exhaustion. Ataca la causa raíz: literatura y notas propias (lead-lag, FRP) ubican el edge de microestructura sub-hora. | Regenerar dataset | Medio | Pendiente (escalón siguiente) |
+| 2 | **Condicionado por régimen (HMM)** — gatear señales de microestructura por el clasificador de vol/trend (Hito B). Separa dónde vive el edge o prueba que era beta. | 1h existente | Bajo | **CERRADO — NO-GO (2026-06-25)** |
+| 3 | **Timeframe sub-hora (5m/15m)** — re-generar features aggTrades a resolución fina y correr OFI mean-reversion / CVD exhaustion. Ataca la causa raíz: literatura y notas propias (lead-lag, FRP) ubican el edge de microestructura sub-hora. | Regenerar dataset | Medio | **EN CURSO** |
 | 4 | **Overlay de vol / ejecución** — pivote de alfa direccional a timing de volatilidad o calidad de ejecución (la microestructura predice vol, no dirección). | 1h existente + diseño nuevo | Alto (cambio de producto) | Pendiente |
 
-Aprendizaje acumulado: ~12 hipótesis 1h univariadas/bivariadas Long-only + 1 cross-sectional no
-sobrevivieron sobre datos correctamente apareados. Eje 1 reveló que el flujo cruzado sí tiene
-señal pero invertida (mean reversion, no continuación) — anotado como eje 1b.
+Aprendizaje acumulado: ~12 hipótesis 1h univariadas/bivariadas Long-only + 1 cross-sectional +
+1 condicionado por régimen no sobrevivieron. Eje 1: señal cruzada existe pero invertida (eje 1b
+pendiente). Eje 2: régimen degrada OFI Contrarian (el edge es cross-regime; el HMM 4h casi nunca
+clasifica cripto como MeanReverting — domina Trend+Squeeze). Ejes 1 y 2 agotan lo barato sobre
+1h. El escalón natural es eje 3: datos sub-hora donde la literatura ubica el edge de microestructura.
 
 ---
 

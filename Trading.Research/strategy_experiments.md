@@ -36,6 +36,23 @@ Registro de hipÃ³tesis evaluadas por Fase 0. Fuente de verdad para evitar re-e
 
 **Diagnostico:** la mecanica de neutralidad funciona (beta ~0 en todas las configs). El z-score de flujo por activo SI tiene senial, pero invertida: win rate consistentemente 15-22% en TODO el grid (no aleatorio — sistematicamente elige al activo que underperforma). La hipotesis de continuacion de flujo cruzada es incorrecta; lo que hay es mean reversion cross-sectional (el activo con mayor presion compradora inusual tiende a revertir). No es un rescate: seria una hipotesis nueva (long el z-score minimo, short el maximo). Anotada como posible Eje 1b a evaluar en el futuro.
 
+### Eje 2 — OFI Contrarian condicionado por regimen HMM (2026-06-25) — RECHAZADA M4
+
+| Eje | Hipotesis | TF | Activos | Baseline IS (sin filtro) | Mejor config filtrada | Estado |
+|---|---|---|---|---|---|---|
+| 2 (regimen) | OFI Contrarian (Long OFI bottom-15%) gateado por regimen HMM 4h | 1h | BTC, ETH, SOL | Sharpe medio 1.188 (hold=8) | Trend+hold=6: Sharpe 0.827 (-0.36 vs baseline) | RECHAZADA M4 |
+
+**Grid:** compatible_regimes in {all, MeanRev, Trend, MR+Trend, MR+Squeeze}, hold in {4,6,8} — 15 configs. IS 2021-2024.
+**Gate pre-registrado:** Sharpe filtrado >= 0.5 AND mejora > 0.15 vs baseline AND >= 2 activos con trades >= 30.
+**Resultado:** Sharpe PASA (0.827) pero mejora FALLA (−0.361 — el filtro DEGRADA). OOS no corrido.
+**Script:** `Trading.Research/m4_ofi_regime.py`
+
+**Diagnostico:**
+- El regimen NO aisle el edge — el OFI Contrarian funciona en TODOS los regimenes. Filtrar a Trend descarta señales validas en Squeeze (32-37% del IS BTC/ETH) y HighVol. La hipotesis "el rebote post-exhaustion-of-sellers vive en ciertos regimenes" es falsa.
+- MeanReverting: 0 trades en los 3 activos. El HMM 4h casi nunca clasifica cripto en 2021-2024 como MeanReverting — domina Trend (52-56%) + Squeeze (32-37%). El régimen MeanReverting prácticamente no existe en este universo/período.
+- SOLUSDT con proxy BTC: HighVolatility 51% (el modelo BTC no mapea bien a SOL; el proxy genera distribución de regimenes distorsionada).
+- El edge IS de OFI Contrarian (Sharpe ~1.19 sin costos) es real pero no sobrevive OOS por razones que el regimen no explica. Probablemente beta de bull-market IS vs bear/flat OOS 2025.
+
 ---
 
 ## Hito G — RECHAZO por lookahead de apareo (2026-06-24)
