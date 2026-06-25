@@ -61,6 +61,25 @@ Signal invertida: long z-score MINIMO, short z-score MAXIMO. Resultado: win rate
 - SOLUSDT con proxy BTC: HighVolatility 51% (el modelo BTC no mapea bien a SOL; el proxy genera distribución de regimenes distorsionada).
 - El edge IS de OFI Contrarian (Sharpe ~1.19 sin costos) es real pero no sobrevive OOS por razones que el regimen no explica. Probablemente beta de bull-market IS vs bear/flat OOS 2025.
 
+### Eje 3 — OFI Contrarian sub-hora 5m/15m (2026-06-25) — M4 PASS
+
+| Eje | TF | Activos | Mejor config IS | Sharpe BTC/ETH/SOL | configs PASS | Estado |
+|---|---|---|---|---|---|---|
+| 3 (sub-hora 5m) | 5m | BTC, ETH, SOL | window=48, thr=0.85, hold=6 | +1.553 / +1.012 / +1.923 | 27/27 (100%) | **M4 PASS — QC IS/OOS pendiente** |
+| 3 (sub-hora 15m) | 15m | BTC, ETH, SOL | window=12, thr=0.75, hold=6 | +1.511 / +1.287 / +1.803 | 27/27 (100%) | **M4 PASS — QC IS/OOS pendiente** |
+
+**Grid:** ofi_window ∈ {12, 24, 48}, threshold ∈ {0.75, 0.80, 0.85}, hold ∈ {3, 6, 12}, TF ∈ {5m, 15m} — 54 configs total. IS 2021-2024.
+**Gate pre-registrado:** Sharpe >= 0.5, >= 2/3 activos. **54/54 configs pasaron (100%).**
+**Mejor config global:** TF=15m, window=12, threshold=0.75, hold=6 → media +1.534.
+**Datos:** 571,927 barras 5m y 190,649 barras 15m por símbolo (2021-01-01 → 2026-06-09).
+**Script:** `Trading.Research/m4_ofi_contrarian_subhora.py`
+
+**Diagnóstico y caveats pre-QC:**
+- **Signal robustísima IS**: 100% del grid pasa en ambos timeframes. Contrasta con el 1h (25/27 IS) y con los ejes 1/1b/2 (todos fallaron). La señal de exhaustión de vendedores es claramente más fuerte en sub-hora.
+- **Trade count alto**: con thr=0.75, window=12, hold=3 hay ~69k trades en 4 años (~47 trades/día). La estrategia está en posición ~50% del tiempo. En QC, fees (0.04% taker) y slippage sobre esta frecuencia no pueden ignorarse.
+- **thr=0.75 ≡ thr=0.80 para window=12**: con 12 barras, el percentile tiene pasos de 1/11 ≈ 9%; umbral 0.25 y 0.20 capturan el mismo conjunto de barras. No es un bug — es cuantización de ventana pequeña.
+- **Riesgo OOS de beta de bull-market**: el 1h OFI contrarian tuvo 25/27 IS pero Sharpe=-0.703 en OOS 2025. El sub-hora puede tener el mismo riesgo. La validación QC IS/OOS 2025 es el paso crítico antes de cualquier implementación.
+
 ---
 
 ## Hito G — RECHAZO por lookahead de apareo (2026-06-24)
