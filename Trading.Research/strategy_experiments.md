@@ -21,6 +21,23 @@ Registro de hipÃ³tesis evaluadas por Fase 0. Fuente de verdad para evitar re-e
 
 ---
 
+## Hipotesis nuevas post-deuda #1 (datos correctos, pipeline ADR-053)
+
+### Eje 1 — Cross-Sectional Order-Flow (2026-06-25) — RECHAZADA M4
+
+| Eje | Hipotesis | TF | Activos | M4 IS Sharpe | Win Rate IS | Beta BTC | Estado |
+|---|---|---|---|---|---|---|---|
+| 1 (cross-sectional) | Long z-score maximo de flujo, Short minimo — dollar-neutral | 1h | BTC, ETH, SOL | -13.97 (mejor config) | 15-22% (todas configs) | ~0 (PASA) | RECHAZADA M4 |
+
+**Grid:** metric in {ofi, cvd_delta, buy_sell_ratio, composite}, W in {24,48,96}, N in {4,6,8} — 36 configs. IS 2021-2024.
+**Gate pre-registrado:** Sharpe >= 0.5, >= 2/3 configs con Sharpe > 0, |beta BTC| < 0.3. **0/3 criterios pasados** (solo beta neutro).
+**OOS:** no corrido (gate IS fallo — touch-once por diseno).
+**Script:** `Trading.Research/m4_cross_sectional_flow.py`
+
+**Diagnostico:** la mecanica de neutralidad funciona (beta ~0 en todas las configs). El z-score de flujo por activo SI tiene senial, pero invertida: win rate consistentemente 15-22% en TODO el grid (no aleatorio — sistematicamente elige al activo que underperforma). La hipotesis de continuacion de flujo cruzada es incorrecta; lo que hay es mean reversion cross-sectional (el activo con mayor presion compradora inusual tiende a revertir). No es un rescate: seria una hipotesis nueva (long el z-score minimo, short el maximo). Anotada como posible Eje 1b a evaluar en el futuro.
+
+---
+
 ## Hito G — RECHAZO por lookahead de apareo (2026-06-24)
 
 **Las dos estrategias aprobadas por Hito G se rechazan: su aprobación fue un artefacto de un bug de apareo de features (lookahead de 1 hora) en el camino QC IS/OOS, no edge real.**

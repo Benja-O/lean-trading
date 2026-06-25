@@ -36,14 +36,15 @@ Cuatro ejes identificados (2026-06-24). **Todos se exploran sí o sí**; el orde
 
 | # | Eje | Datos | Costo | Estado |
 |---|-----|-------|-------|--------|
-| 1 | **Cross-sectional / relative-value** — market-neutral entre activos: long el de mayor desbalance de flujo, short el menor. Neutraliza la beta de bull-market (el confound que mató a OfiContrarian OOS). | 1h existente (3 activos; ampliable) | Bajo | **EN CURSO** |
-| 2 | **Condicionado por régimen (HMM)** — gatear señales de microestructura por el clasificador de vol/trend (Hito B). Separa dónde vive el edge o prueba que era beta. | 1h existente | Bajo | Pendiente |
+| 1 | **Cross-sectional / relative-value** — market-neutral: long z-score flujo máximo, short mínimo, dollar-neutral. | 1h existente | Bajo | **CERRADO — NO-GO (2026-06-25)** |
+| 1b | **Cross-sectional invertido** — long el z-score *mínimo*, short el máximo (mean reversion cross-sectional: el activo más presionado revierte). Derivado del diagnóstico del eje 1: win rate 15-22% invierte la hipótesis. | 1h existente | Bajo | Pendiente |
+| 2 | **Condicionado por régimen (HMM)** — gatear señales de microestructura por el clasificador de vol/trend (Hito B). Separa dónde vive el edge o prueba que era beta. | 1h existente | Bajo | **EN CURSO** |
 | 3 | **Timeframe sub-hora (5m/15m)** — re-generar features aggTrades a resolución fina y correr OFI mean-reversion / CVD exhaustion. Ataca la causa raíz: literatura y notas propias (lead-lag, FRP) ubican el edge de microestructura sub-hora. | Regenerar dataset | Medio | Pendiente (escalón siguiente) |
 | 4 | **Overlay de vol / ejecución** — pivote de alfa direccional a timing de volatilidad o calidad de ejecución (la microestructura predice vol, no dirección). | 1h existente + diseño nuevo | Alto (cambio de producto) | Pendiente |
 
-Aprendizaje que motiva el pivote: ~12 hipótesis 1h univariadas/bivariadas Long-only no
-sobrevivieron sobre datos correctamente apareados (las "aprobadas" eran lookahead). Repetir el
-mismo molde probablemente repite el null; estos cuatro ejes son palancas genuinamente distintas.
+Aprendizaje acumulado: ~12 hipótesis 1h univariadas/bivariadas Long-only + 1 cross-sectional no
+sobrevivieron sobre datos correctamente apareados. Eje 1 reveló que el flujo cruzado sí tiene
+señal pero invertida (mean reversion, no continuación) — anotado como eje 1b.
 
 ---
 
