@@ -1,0 +1,21 @@
+{
+  "name": "OFI-Contrarian-SubHora-15m",
+  "feature": "ofi",
+  "transform": "percentile",
+  "window": 24,
+  "threshold": 0.80,
+  "direction": "long",
+  "exit": {
+    "type": "hold_bars",
+    "bars": 6
+  },
+  "timeframe": "15m",
+  "symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
+  "is_start":  "2021-01-01",
+  "is_end":    "2024-12-31",
+  "oos_start": "2025-01-01",
+  "oos_end":   "2026-06-09",
+  "fee_per_side":      0.0004,
+  "slippage_per_side": 0.0002,
+  "_comment_config_choice": "Config central del plateau (no cherry-pick IS). window=24 medio, thr=0.80 medio, hold=6 medio, tf=15m. ADR-056: no optimizar por IS Sharpe — presupuesto de busqueda reservado para Fase 2."
+}

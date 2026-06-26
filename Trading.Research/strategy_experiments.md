@@ -61,24 +61,34 @@ Signal invertida: long z-score MINIMO, short z-score MAXIMO. Resultado: win rate
 - SOLUSDT con proxy BTC: HighVolatility 51% (el modelo BTC no mapea bien a SOL; el proxy genera distribución de regimenes distorsionada).
 - El edge IS de OFI Contrarian (Sharpe ~1.19 sin costos) es real pero no sobrevive OOS por razones que el regimen no explica. Probablemente beta de bull-market IS vs bear/flat OOS 2025.
 
-### Eje 3 — OFI Contrarian sub-hora 5m/15m (2026-06-25) — M4 PASS
+### Eje 3 — OFI Contrarian sub-hora 5m/15m — RECHAZADA (limitacion estructural de costos)
 
-| Eje | TF | Activos | Mejor config IS | Sharpe BTC/ETH/SOL | configs PASS | Estado |
+**2026-06-25 (M4 a costo 0):** 54/54 configs PASS — ver tabla original abajo.
+**2026-06-26 (Capa A ADR-056, costos reales):** 0/54 configs PASS. Eje rechazado.
+
+| Eje | TF | Activos | Mejor config IS (sin costos) | Sharpe BTC/ETH/SOL sin costos | configs PASS sin costos | Estado |
 |---|---|---|---|---|---|---|
-| 3 (sub-hora 5m) | 5m | BTC, ETH, SOL | window=48, thr=0.85, hold=6 | +1.553 / +1.012 / +1.923 | 27/27 (100%) | **M4 PASS — QC IS/OOS pendiente** |
-| 3 (sub-hora 15m) | 15m | BTC, ETH, SOL | window=12, thr=0.75, hold=6 | +1.511 / +1.287 / +1.803 | 27/27 (100%) | **M4 PASS — QC IS/OOS pendiente** |
+| 3 (sub-hora 5m) | 5m | BTC, ETH, SOL | window=48, thr=0.85, hold=6 | +1.553 / +1.012 / +1.923 | 27/27 (100%) | **RECHAZADA — muere por costos** |
+| 3 (sub-hora 15m) | 15m | BTC, ETH, SOL | window=12, thr=0.75, hold=6 | +1.511 / +1.287 / +1.803 | 27/27 (100%) | **RECHAZADA — muere por costos** |
 
-**Grid:** ofi_window ∈ {12, 24, 48}, threshold ∈ {0.75, 0.80, 0.85}, hold ∈ {3, 6, 12}, TF ∈ {5m, 15m} — 54 configs total. IS 2021-2024.
-**Gate pre-registrado:** Sharpe >= 0.5, >= 2/3 activos. **54/54 configs pasaron (100%).**
-**Mejor config global:** TF=15m, window=12, threshold=0.75, hold=6 → media +1.534.
-**Datos:** 571,927 barras 5m y 190,649 barras 15m por símbolo (2021-01-01 → 2026-06-09).
-**Script:** `Trading.Research/m4_ofi_contrarian_subhora.py`
+**Sensibilidad a costos (Capa A, ADR-056) — IS 2021-2024:**
 
-**Diagnóstico y caveats pre-QC:**
-- **Signal robustísima IS**: 100% del grid pasa en ambos timeframes. Contrasta con el 1h (25/27 IS) y con los ejes 1/1b/2 (todos fallaron). La señal de exhaustión de vendedores es claramente más fuerte en sub-hora.
-- **Trade count alto**: con thr=0.75, window=12, hold=3 hay ~69k trades en 4 años (~47 trades/día). La estrategia está en posición ~50% del tiempo. En QC, fees (0.04% taker) y slippage sobre esta frecuencia no pueden ignorarse.
-- **thr=0.75 ≡ thr=0.80 para window=12**: con 12 barras, el percentile tiene pasos de 1/11 ≈ 9%; umbral 0.25 y 0.20 capturan el mismo conjunto de barras. No es un bug — es cuantización de ventana pequeña.
-- **Riesgo OOS de beta de bull-market**: el 1h OFI contrarian tuvo 25/27 IS pero Sharpe=-0.703 en OOS 2025. El sub-hora puede tener el mismo riesgo. La validación QC IS/OOS 2025 es el paso crítico antes de cualquier implementación.
+| Costos RT | configs PASS | Sharpe tipico BTC 5m | Sharpe tipico BTC 15m |
+|---|---|---|---|
+| 0.000% (M4 original, COST_RT=0.0) | 54/54 (100%) | +1.0 a +1.5 | +1.0 a +1.5 |
+| 0.120% (fee 0.04%+slip 0.02% por lado) | **0/54 (0%)** | -44 a -13 | -15 a -4 |
+
+**Root cause:** la estrategia genera ~47 trades/dia en 5m (hasta 69k trades en 4 anos). Con 0.12% RT de costo, el breakeven del retorno medio por trade es ~0.12%, pero la media bruta IS es apenas ~0.015-0.025% (1-2 bps por barra de 5m o 15m). Ratio señal/costo: ~15-20% del break-even. El edge bruto existe pero es ~5-6x mas chico que los costos. El Sharpe con costos es catastroficamente negativo (peor que los ejes 1/1b).
+
+**Comparacion con eje 1/1b:** los ejes cross-seccionales (ratio señal/costo ~20-35%) tenian el mismo problema pero menos agudo. El eje 3 sub-hora es peor: mas frecuencia = mas costos acumulados = peor ratio.
+
+**OOS e IS/OOS/MC:** no corridos. El gate estadístico de costos IS falla categoricamente (Sharpe IS < -4 en todas las configs). Correr OOS o MC seria infructuoso — el eje muere en la primera capa.
+
+**Veredicto:** RECHAZADA por limitacion estructural de costos. No procede a Capa B (implementacion Lean).
+
+**Script M4 original (sin costos):** `Trading.Research/m4_ofi_contrarian_subhora.py`
+**Harness Capa A (con costos):** `Trading.Research/layer_a_validate.py` + `ofi_contrarian_subhora_spec.json`
+**Diagnostico original (2026-06-25):** el M4 usó COST_RT=0.0 (violacion del estandar ADR-040 de 0.04% RT). La señal es real pero mucho mas chica que los costos reales. El alto trade count (47/dia) es la causa raiz: mas trades = mas costos = el edge no alcanza.
 
 ---
 

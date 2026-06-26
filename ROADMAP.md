@@ -48,7 +48,7 @@ Cuatro ejes identificados (2026-06-24). **Todos se exploran sí o sí**; el orde
 | 1 | **Cross-sectional / relative-value** — market-neutral: long z-score flujo máximo, short mínimo, dollar-neutral. | 1h existente | Bajo | **CERRADO — NO-GO (2026-06-25)** |
 | 1b | **Cross-sectional invertido** — long el z-score *mínimo*, short el máximo (mean reversion cross-sectional: el activo más presionado revierte). Derivado del diagnóstico del eje 1: win rate 15-22% invierte la hipótesis. | 1h existente | Bajo | **CERRADO — NO-GO (2026-06-25): limitación estructural de costos** |
 | 2 | **Condicionado por régimen (HMM)** — gatear señales de microestructura por el clasificador de vol/trend (Hito B). Separa dónde vive el edge o prueba que era beta. | 1h existente | Bajo | **CERRADO — NO-GO (2026-06-25)** |
-| 3 | **Timeframe sub-hora (5m/15m)** — re-generar features aggTrades a resolución fina y correr OFI mean-reversion / CVD exhaustion. Ataca la causa raíz: literatura y notas propias (lead-lag, FRP) ubican el edge de microestructura sub-hora. | Regenerar dataset | Medio | **M4 PASS (2026-06-25) — 54/54 configs, media Sharpe +1.53 IS — QC IS/OOS pendiente** |
+| 3 | **Timeframe sub-hora (5m/15m)** — re-generar features aggTrades a resolución fina y correr OFI mean-reversion / CVD exhaustion. Ataca la causa raíz: literatura y notas propias (lead-lag, FRP) ubican el edge de microestructura sub-hora. | Regenerar dataset | Medio | **CERRADO — NO-GO (2026-06-26): muro de costos.** El M4 PASS (54/54) corría a costo 0.0; con costos reales (0.12% RT) en la Capa A (ADR-056), **0/54 sobreviven** (Sharpe -4 a -44). |
 | 4 | **Overlay de vol / ejecución** — pivote de alfa direccional a timing de volatilidad o calidad de ejecución (la microestructura predice vol, no dirección). | 1h existente + diseño nuevo | Alto (cambio de producto) | Pendiente |
 
 Aprendizaje acumulado: ~12 hipótesis 1h univariadas/bivariadas Long-only + 2 cross-sectional (eje 1
@@ -57,8 +57,14 @@ mean reversion cross-sectional existe, pero el costo de rebalanceo (0.56% por bl
 cualquier señal de microestructura a 1h — la relación señal/costo es ~20-35% del break-even; no es
 un problema de dirección sino estructural. Eje 2: régimen degrada OFI Contrarian (el edge es
 cross-regime; el HMM 4h casi nunca clasifica cripto como MeanReverting — domina Trend+Squeeze).
-Ejes 1, 1b y 2 agotan lo barato sobre 1h. El escalón natural es eje 3: datos sub-hora donde la
-literatura ubica el edge de microestructura y el ratio señal/costo es más favorable.
+Ejes 1, 1b y 2 agotaron lo barato sobre 1h. **Eje 3 (sub-hora) se cerró NO-GO el 2026-06-26**:
+el edge bruto sub-hora existe (~2-3 bps/barra) pero a ~47 trades/día el costo taker (0.12% RT) lo
+supera ~6x — mismo muro estructural que 1/1b, más agudo por la frecuencia. **Conclusión acumulada:
+la reversión de microestructura de alta frecuencia es no-viable bajo costos retail/taker — 4 rechazos
+por la misma causa (ejes 1/1b/2/3).** El perfil que sobrevive es baja frecuencia → pivote a
+trend-following (S1 de ROADMAP-STRATEGIES) y/o eje 4 (overlay de vol/ejecución, producto distinto).
+Nota de proceso: el eje 3 reveló que algunos scripts M4 corrían a costo 0.0 — el M4 debe correr con
+costos por estándar (ADR-040/ADR-056).
 
 ---
 
@@ -258,6 +264,55 @@ per-monitor en operación multi-estrategia y multi-símbolo. El hito
 introduce un allocator que asigne capital nominal a cada executor con
 visión coherente de la cuenta total. Trabajo arquitectónico no trivial.
 **Bloqueantes:** ninguno. Decisión del operador sobre cuándo abordarlo.
+
+#### ⬜ Infra de balanceo de cartera (termostato de exposición neta + contribución marginal)
+**Bloque:** capa de portafolio (hito propio).
+**Estado:** pendiente — **GATEADO a propósito, no es deuda olvidada.**
+**Descripción:** Maquinaria para gestionar la exposición neta long/short del
+conjunto (termostato con banda ajustada por beta, centrado en sesgo long
+moderado) y para admitir estrategias por contribución marginal a la cartera
+en lugar de Sharpe standalone. El diseño conceptual vive en
+`ROADMAP-STRATEGIES.md` Parte I (arquitectura de riesgo en 3 niveles,
+termostato I.5, contribución marginal I.6, dos ejes de descorrelación I.7).
+**Gate de construcción:** NO se construye hasta tener **≥2 edges validados
+conviviendo en vivo** que efectivamente compitan por exposición neta. Con un
+solo sleeve no hay neto que gestionar; el balanceo barato (cap de riesgo por
+trade) es regla de sizing dentro de cada estrategia, no un sistema. Aplicación
+directa del **principio de orden — infra a demanda, después de edge validado**
+(`AI.md`), que nombra "cartera" como ejemplo explícito de motor que no se
+construye por adelantado a la demanda.
+**Bloqueantes:** ≥2 estrategias con walk-forward aprobado (Hito G) operando
+simultáneamente. Hoy: 0 estrategias validadas activas.
+
+#### 🔄 Fábrica de validación de dos capas (ADR-056) — plan de construcción
+**Bloque:** research pipeline / fábrica de estrategias (evoluciona Hito F/H y reordena ADR-040).
+**Estado:** Capa A ✅ construida y operativa (2026-06-26, `Trading.Research/layer_a_validate.py`; primer cliente eje 3 → ❌ por costos) · Capa B gateada (aún sin sobreviviente de Capa A).
+**Descripción:** Separar la validación en una capa estadística barata y automatizada
+(Python) y una capa de fidelidad de producción cara (Lean/C#), con el lado Lean
+config-driven para no pagar C# por hipótesis. Diseño completo en ADR-056.
+
+**Capa A — gate estadístico en Python (construir YA; primer cliente: eje 3):**
+- ✅ A1 — Refactor del harness M4 a *spec-driven*: una hipótesis = spec declarativo
+  (feature, window, transform, threshold, direction, exit {hold/stop/TP}, tf, symbols).
+- ✅ A2 — El harness parte IS/OOS, aplica **costos realistas** (≥0.04% round-trip +
+  slippage; corrige el `COST_RT=0.0` del script del eje 3) y emite un trade-log en el
+  formato que consume `Trading.Analytics`.
+- ✅ A3 — Reusar `Trading.Analytics` (Gate 1 + Montecarlo, ADR-039) sobre el trade-log
+  de Python. Si el parser no acepta el formato, adaptarlo — **no** reimplementar métricas/MC.
+- ✅ A4 — Salida: un comando `spec → veredicto` (Gate 1 + Gate 2). Correr el eje 3 como
+  primer cliente y registrar resultado en `strategy_experiments.md`.
+
+**Capa B — gate de producción en Lean (GATEADA: construir recién si una hipótesis pasa la Capa A):**
+- ⬜ B1 — `ConfigurableMicrostructureStrategy : IStrategy` que interpreta el **mismo** spec
+  que la Capa A (single source of truth; apareo correcto centralizado vía ADR-053).
+- ⬜ B2 — Harness de corrida: spec → `strategies.json` → backtest IS + OOS en Lean →
+  `Trading.Analytics` → reporte. Un comando.
+- ⬜ B3 — La gramática del spec crece a demanda; lo bespoke fuera de la gramática se
+  codea en C# a mano (debe ser raro).
+
+**Gate de construcción:** Capa A se construye ahora (es el gate inmediato). Capa B
+NO se construye hasta que ≥1 hipótesis sobreviva la Capa A (infra a demanda, ADR-056/AI.md).
+**Bloqueantes:** ninguno para Capa A. Capa B bloqueada por "≥1 hipótesis pasa Capa A".
 
 #### ✅ DEUDA-3 — Backfiller aggTrades: rate limiter global + warmupHours por estrategia
 **Estado:** Cerrada (2026-06-18) — ya no aplica.

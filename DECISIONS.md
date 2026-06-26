@@ -68,6 +68,52 @@
 | ADR-002 | `RiskPerTradePercentage` falla loud si no estÃ¡ en `strategies.json` | Dominio |
 | ADR-001 | Desacople quirÃºrgico de QuantConnect: dominio Lean-free | Arquitectura |
 
+## ADR-056 — Validación en dos capas (gate estadístico en Python + gate de producción en Lean) y estrategias declarativas para automatizar el lado Lean
+**Fecha:** 2026-06-26
+**Estado:** Aceptada (diseño). Construcción pendiente y gateada (plan en `ROADMAP.md`). Evoluciona ADR-040.
+**ADRs relacionados:** ADR-040 (pipeline M4→IS→OOS→MC — este ADR reordena sus fases y separa concerns), ADR-039 (Trading.Analytics: métricas + block bootstrap Monte Carlo — se reutiliza tal cual), ADR-053 (custom data: un solo camino de datos, apareo correcto por construcción — se centraliza en el intérprete), ADR-054 (el bug de apareo Python↔C# que este diseño previene estructuralmente), ADR-037 (IMicrostructureProvider), ADR-055 (objetivo = cartera).
+
+### Contexto
+El pipeline vigente (ADR-040) es lineal: M4 (Python, barato) → **Fase 1: implementar `IStrategy` en C#** → QC IS → QC OOS → Trading.Analytics. El problema es que **para obtener los números IS/OOS/Montecarlo hay que construir primero la estrategia en C# y correrla en Lean** — estimado en 3-4 días de desarrollo por hipótesis.
+
+Esto no escala. Con N hipótesis en cola (ejes 1-4 y futuras), pagar 3-4 días de C# por cada una pone la producción a un año o más, y contradice el objetivo declarado de una *fábrica* de estrategias. La causa raíz: el pipeline **fusiona dos validaciones de naturaleza distinta**:
+1. **Validación estadística** (IS/OOS + costos + Montecarlo): *"¿el edge existe y es robusto?"*. Es estadística pura — no necesita el motor de producción.
+2. **Validación de fidelidad de producción** (Lean/C#): *"¿sobrevive a fills, slippage, funding, redondeos reales, y el artefacto que va a live es correcto?"*.
+
+Se está pagando el costo de (2) solo para obtener (1).
+
+Además, el M4 actual corre sin costos en algunos scripts (p. ej. el del eje 3 usó `COST_RT = 0.0`, en violación del estándar de 0.04% round-trip que el propio ADR-040 fija para M4), lo que infla el Sharpe y deja pasar hipótesis cost-dead. La limitación estructural de costos ya cerró los ejes 1/1b — el costo no es un detalle de Fase 5, es un gate temprano.
+
+### Decisión
+
+**D1 — Validación en dos capas, separadas por costo y propósito.**
+- **Capa A — gate estadístico (Python, automatizado, por hipótesis).** El harness de research parte IS/OOS, aplica **costos realistas** (≥0.04% round-trip + slippage) y corre Montecarlo, y **reutiliza `Trading.Analytics`** (Gate 1 + bootstrap MC de ADR-039) alimentándolo con el trade-log del sim de Python. La mayoría de las hipótesis mueren acá, baratas y rápido, sin tocar C#.
+- **Capa B — gate de fidelidad de producción (Lean/C#, caro, solo sobrevivientes).** El port a Lean se reserva como **gate final** para las pocas que pasaron la Capa A, justo antes de paper/live. Se ejecuta un puñado de veces, no por iteración.
+
+**D2 — Reordenamiento respecto de ADR-040: no se construye C# hasta pasar el gate estadístico.** La "Fase 1 — Implementación `IStrategy`" de ADR-040 se mueve **después** de la validación IS/OOS/MC, que ahora vive en la Capa A (Python). El early-exit estadístico ocurre antes de cualquier inversión en C#.
+
+**D3 — El lado Lean se vuelve config-driven: estrategia = especificación declarativa (datos), no clase.** La familia común de hipótesis de microestructura (leer feature → transformar → umbral → entrada → salida por hold/stop/TP) se describe con un **spec** (JSON). Una única clase genérica `ConfigurableMicrostructureStrategy : IStrategy` interpreta el spec. Nueva hipótesis de la familia = nueva config, **cero C# nuevo**.
+
+**D4 — Una sola fuente de verdad: el mismo spec alimenta el sim de Python (Capa A) y el intérprete de Lean (Capa B).** Hoy Python y C# son dos implementaciones a mano que pueden divergir — y divergieron: el lookahead de apareo de ADR-054. Con un spec compartido interpretado por ambos lados, esa deriva es **estructuralmente imposible** para la familia, y el apareo correcto (ADR-053) se arregla una vez en el intérprete → todas las configs lo heredan.
+
+**D5 — La gramática del spec crece a demanda, no se diseña gigante.** Tres niveles de automatización honestos: (a) **config-only** para la familia común; (b) **agregar un primitivo** (feature/transform/salida nuevos) al intérprete y al sim una vez, reutilizable después; (c) **bespoke en C# a mano** para lo estructuralmente distinto (multi-leg, modelos ML, lógica de cartera) — deben ser raros. No convertir el spec en lenguaje Turing-completo: sería un C# peor.
+
+### Condiciones que hacen válida la decisión (no es cheque en blanco)
+- **Los costos de la Capa A son una estimación → es un filtro, no un reemplazo de Lean.** Si una hipótesis muere bajo costos optimistas-realistas en Python, está muerta seguro; si sobrevive, *se gana* el chequeo caro de Lean. La Capa B sigue siendo **gate obligatorio** antes de capital real (coherente con la puerta dura de Fase 3-4 y POLICY P1).
+- **El spec compartido es la fuente de verdad solo mientras ambos lados lo interpreten de verdad** — no debe haber lógica de señal hardcodeada que sortee el spec en ninguno de los dos lados. Cualquier primitivo nuevo se agrega a ambos intérpretes en el mismo cambio.
+- **Reuso, no reimplementación:** las métricas y el Montecarlo son los de `Trading.Analytics` (ADR-039). La Capa A adapta el formato del trade-log para alimentarlo; no duplica el cálculo de métricas (evita una segunda fuente de verdad de métricas que pueda divergir).
+
+### Alternativas consideradas
+- **Strategy Scaffolder (Hito F) como solución:** insuficiente. El scaffolder genera un esqueleto que igual se completa a mano por estrategia — reduce fricción, no elimina el costo C# por hipótesis. Sigue siendo válido para el nivel (c) bespoke.
+- **Reimplementar IS/OOS/MC en Python independiente de Trading.Analytics:** descartada. Crea una segunda fuente de verdad de métricas que puede divergir de la de Lean — el mismo modo de falla (drift Python↔C#) que D4 busca eliminar.
+- **Seguir con un C# por estrategia (ADR-040 tal cual):** descartada. Es el cuello de botella que motiva este ADR; incompatible con el objetivo de fábrica.
+
+### Consecuencias
+- **Reemplaza el orden de fases de ADR-040** (la implementación C# deja de preceder a la validación estadística). El checklist de `AI.md` ("Pipeline de Research e Incorporación de Estrategias") debe actualizarse cuando se construya la Capa A.
+- **Construcción gateada por "infra a demanda" (AI.md, ADR-055):** la Capa A se construye ya (es el gate inmediato y el eje 3 es su primer cliente). La Capa B (intérprete + harness Lean) se construye **recién cuando una hipótesis sobreviva la Capa A** — no especulativamente. Plan de construcción en `ROADMAP.md`.
+- **Justificación de generalizar ahora:** ya se corrieron 12+ hipótesis de microestructura que comparten la forma → la abstracción surge de demanda demostrada, no de especulación (coherente con el criterio "la generalización surge de estrategias ya construidas").
+- **No invalida resultados previos.** Revela que el M4 PASS del eje 3 fue con costo 0.0 (incompleto per ADR-040); la Capa A lo re-evalúa con costos reales como primer acto.
+
 ## ADR-055 — Universo y datos sin restricción a priori; el objetivo del sistema es la cartera
 **Fecha:** 2026-06-25
 **Estado:** Vigente. Política de research; condiciona el criterio de éxito de toda hipótesis futura y, eventualmente, el pipeline de validación (ADR-040) y los umbrales de POLICY.md.
