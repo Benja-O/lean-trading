@@ -359,6 +359,34 @@ PerÃ­odo IS: 2021-2024. PerÃ­odo OOS: 2025-2026-06-09. Activos: BTCUSDT, ETH
 
 ---
 
+## Momentum Cross-Sectional / Time-Series — Universo ancho — Capa A (2026-06-27) — NO-GO
+
+**Tesis del test:** trend murio en 3 majors por falta de edge (no costos); el momentum es cross-sectional y 3 activos correlacionados no pueden expresarlo → re-test sobre universo ancho. Mecanismo re-testeado en el setting donde deberia vivir.
+
+**Universo:** 196 simbolos perp USDT Binance, panel diario 2020-2026 (desde klines 1m locales). Anti-survivorship: incluye nombres colapsados (LUNA/USTC −99.9% presentes en el panel, castigaron carteras 2022). Sesgo residual documentado y OPTIMISTA: no incluye perps removidos pre-2021 (habrian sido filtrados por baja liquidez) y no modela impacto de mercado → ambos inflan el resultado, por lo que el NO-GO es robusto. Filtro de liquidez point-in-time ADV-30d > $5M (~110 elegibles/rebalanceo). Costos escalonados: majors 0.12% RT, mid/small 0.22% RT. Causalidad verificada en 3 niveles (elegibilidad, senal, hold sin solape con la ventana de ranking).
+
+**Grilla pre-registrada long-only (8 configs):** L ∈ {30d, 90d} × H ∈ {7d, 30d} × seleccion ∈ {top-decil, top-5}.
+
+| Brazo | Configs PASS IS (Sharpe >= 0.5) | Rango Sharpe IS | Rango Sharpe OOS | Estado |
+|---|---|---|---|---|
+| Long-only (grilla principal) | 1/8 (solo L=30d/H=7d/top-5 = 0.526, marginal) | 0.526 a negativo | −1.1 a −3.6 | NO-GO |
+| Time-series (diagnostico) | N/A (diagnostico, no grilla principal) | hasta 0.70 (L=90d/H=30d) pero N=47-48 periodos | −2.1 a −3.4 | NO-GO |
+| Long-Short (diagnostico) | N/A | peor que long-only | — | NO-GO |
+
+**Resultado detallado:**
+- **1/8 configs pasa Sharpe IS >= 0.5** (solo L=30d/H=7d/top-5 = 0.526, marginal). **SIN meseta**: el Sharpe IS decae monotonamente con L.
+- **OOS colapsa en las 8 configs** (Sharpe OOS −1.1 a −3.6), incluida la unica que paso IS.
+- Brazo time-series (diagnostico): IS hasta 0.70 (L=90d/H=30d) pero N=47-48 periodos y OOS −2.1 a −3.4.
+- Brazo L/S (diagnostico): peor que long-only (la pata corta se destruye con los rallies de alts — confirma I.3 de ROADMAP-STRATEGIES).
+
+**Veredicto: NO-GO.** El criterio decisivo es la ausencia de meseta (juicio IS, no contaminado por OOS): aun sobre un universo optimista, el edge es 0.3-0.5 sin plateau. Falla de mecanismo: rankear por retorno bruto en un universo donde todo correlaciona con BTC ≈ rankear por beta×mercado → elige alta-beta que revierte. El colapso OOS confirma la prediccion (correlacion → 1 en crashes mata el cross-sectional).
+
+**Hilo vivo senalado por el director (NO condenado por este test, es otra senal):** momentum residual / beta-neutral (remover el factor mercado, rankear por residuo idiosincratico) — neutral por construccion, podria llenar el carril del carry. Pendiente de decision de research-direction.
+
+**Script:** `Trading.Research/m4_momentum_cross_sectional.py`
+
+---
+
 ## Eje Volatilidad — Capa A (2026-06-27) — NO-GO (3/3 hipotesis)
 
 **Triage estructural (Fase 0):** el carril de vol neutral al mercado (producto que reemplazaria al carry) esta BLOQUEADO por el venue — no hay opciones / variance swaps / indice de vol tradeable en Binance; toda expresion sin opciones muere por el muro de costos o disuelve su mecanismo. Solo sobrevivieron al triage hipotesis vol-as-signal (direccional, baja frecuencia) y vol-as-sizing (infra de riesgo). Costos 0.12% RT, IS 2021-2024 / OOS 2025-2026, frecuencia diaria, causalidad verificada (RV con shift, sin lookahead).

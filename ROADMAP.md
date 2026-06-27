@@ -69,9 +69,23 @@ Parte I (trend/carry/reversion) quedan vacios en el universo de majors.
 **Eje 4 (volatilidad): ❌ CERRADO NO-GO Capa A (2026-06-27).** 3/3 hipotesis rechazadas. Bloqueo de
 venue (Binance sin opciones/variance swaps): el carril neutral de vol no es construible. Vol-as-signal
 sin edge robusto (H-V1 falsado, H-V2 sesgo de activo, H-V3 deteriora OOS). El hueco del carril
-neutral (carry) sigue abierto — la vol no lo lleno. Proximo: universo ancho (ADR-055).
-Nota de proceso: el eje 3 reveló que algunos scripts M4 corrían a costo 0.0 — el M4 debe correr con
-costos por estándar (ADR-040/ADR-056).
+neutral (carry) sigue abierto — la vol no lo lleno.
+**Tarea 3 / universo ancho — Momentum cross-sectional/time-series: ❌ NO-GO Capa A (2026-06-27).**
+Re-test sobre 196 perps USDT Binance, panel diario 2020-2026, point-in-time, anti-survivorship
+(LUNA/USTC colapsados presentes), filtro liquidez ADV-30d>5M (~110 elegibles/rebalanceo), costos
+escalonados (majors 0.12% / alts 0.22% RT), causalidad verificada en 3 niveles. Grilla long-only 8
+configs (L 30/90d × H 7/30d × top-decil/top-5): 1/8 pasa Sharpe IS>=0.5 (0.526, marginal). SIN
+meseta: Sharpe IS decae monotonamente con L. OOS colapsa 8/8 (Sharpe −1.1 a −3.6). Brazo
+time-series: IS hasta 0.70 pero N=47-48 y OOS −2.1 a −3.4. Brazo L/S: peor que long-only. Falla de
+mecanismo: rankear por retorno bruto en universo correlacionado a BTC ≡ rankear por beta → alta-beta
+revierte; correlacion → 1 en crashes mata el cross-sectional. Sesgo del universo es OPTIMISTA (sin
+perps removidos pre-2021, sin impacto de mercado) → el NO-GO es robusto. Ver
+`Trading.Research/strategy_experiments.md`.
+Hilo vivo restante (no condenado por los tests, senalado por el director): momentum residual /
+beta-neutral (remover factor mercado, rankear por residuo idiosincratico) — neutral por construccion,
+candidato al carril del carry que sigue hueco. Pendiente de decision de research-direction.
+Nota de proceso: el eje 3 revelo que algunos scripts M4 corrian a costo 0.0 — el M4 debe correr con
+costos por estandar (ADR-040/ADR-056).
 
 ---
 
