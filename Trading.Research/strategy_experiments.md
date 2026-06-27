@@ -92,6 +92,66 @@ Signal invertida: long z-score MINIMO, short z-score MAXIMO. Resultado: win rate
 
 ---
 
+## S1 — Trend Following (2026-06-27) — RECHAZADO OOS universalmente
+
+Familia de 10 hipótesis de tendencia (long-only, mecanismo subreacción/continuación). Evaluadas con Capa A ADR-056: costos 0.12% RT, IS 2021-2024, OOS 2025-01→2026-06-09, activos BTC/ETH/SOL.
+
+**Script:** `Trading.Research/layer_a_trend_s1.py`
+**Grilla:** 38 configs totales × 3 activos = 114 evaluaciones individuales para testeo múltiple.
+
+### Tabla maestra IS (Sharpe con costos 0.12% RT):
+
+| ID | Hipótesis | TF | Configs PASS/Total | BTC Sharpe (mejor) | ETH Sharpe (mejor) | SOL Sharpe (mejor) | Gate IS |
+|---|---|---|---|---|---|---|---|
+| TS1 | Time-Series Momentum (retorno_L > 0) | 1h | 2/6 | +0.531 | +0.509 | +1.625 | PASS (2 configs) |
+| TS2 | Cruce de medias móviles | 1h/4h | 1/6 | +0.692 | +0.558 | +1.145 | PASS (1 config, 4h) |
+| TS3 | Breakout Donchian | 4h | 1/3 | +0.558 | +0.816 | +0.796 | PASS (1 config) |
+| TS4 | Precio vs MA larga | 4h | 2/4 | +0.098 | +0.664 | +1.568 | PASS (2 configs) |
+| TS5 | Momentum escalado por vol | 4h | 1/3 | -0.082 | +0.513 | +1.336 | PASS (1 config) |
+| TS6 | Breakout de canal (hold fijo) | 4h/1d | 4/6 | +0.776 | +0.915 | +1.399 | PASS (4 configs: 1 en 4h, 3 en 1d) |
+| TS7 | MACD (EMA rápida − EMA lenta > 0) | 4h | 0/3 | +0.045 | +0.437 | +1.456 | FAIL todas |
+| TS8 | Acuerdo multi-timeframe (4h AND 1d) | multi | 0/2 | +0.124 | +0.068 | +1.665 | FAIL todas |
+| TS9 | Momentum con skip | 4h | 0/3 | +0.033 | -0.037 | +1.392 | FAIL todas |
+| TS10 | TS1 + gate HMM Trend | 1h | 0/2 | +0.216 | +0.335 | +1.512 | FAIL (HMM no disponible = TS1 vanilla, lb=48) |
+
+**Resumen IS:** 11/38 configs PASS (28.9%). Hipótesis con señal: 6/10 (TS1, TS2, TS3, TS4, TS5, TS6).
+
+### Análisis de robustez:
+
+El análisis por hipótesis muestra **meseta parcial** — 6 de 10 formas de expresar tendencia tienen al menos una config que pasa el gate IS. Sin embargo, hay un patrón estructural crítico:
+
+- **SOL domina**: en prácticamente todas las configs que pasan, SOL Sharpe IS es +0.7 a +1.7 pero BTC y ETH raramente superan +0.5.
+- **BTC es el activo más débil**: la mayoría de configs PASS lo deben a SOL+ETH o SOL+BTC (nunca ETH+BTC solos).
+- **El gate 2/3 es frágil**: la mayoría de configs que pasan tienen 2/3 activos (no 3/3). Quitando SOL, el edge de tendencia en BTC y ETH sería casi inexistente en IS.
+
+### OOS (2025-01 → 2026-06): COLAPSO UNIVERSAL
+
+| Config PASS IS | BTC OOS | ETH OOS | SOL OOS | Veredicto |
+|---|---|---|---|---|
+| TS1 lookback=48 h=48 | -1.065 | -0.445 | -1.002 | FAIL OOS |
+| TS1 lookback=96 h=48 | -1.557 | -0.969 | -1.085 | FAIL OOS |
+| TS2 fast=5 slow=20 4h h=12 | -0.879 | -0.668 | -0.644 | FAIL OOS |
+| TS3 lb_entry=40 lb_exit=20 4h h=10 | -0.356 | -0.418 | -0.595 | FAIL OOS |
+| TS4 lookback=100 thr=0.000 4h | -1.091 | -0.659 | -0.831 | FAIL OOS |
+| TS4 lookback=100 thr=0.005 4h | -1.064 | -0.664 | -0.850 | FAIL OOS |
+| TS5 lookback=60 thr=0.5 4h | -1.762 | -0.560 | -1.057 | FAIL OOS |
+| TS6 lookback=40 h=10 4h | +0.619 | -0.157 | -0.791 | FAIL OOS |
+| TS6 lookback=20 h=5 1d | N/A (T<30) | N/A | N/A | FAIL OOS (T insuf.) |
+| TS6 lookback=40 h=10 1d | N/A (T<30) | N/A | N/A | FAIL OOS (T insuf.) |
+| TS6 lookback=10 h=3 1d | -0.476 | -1.524 | -1.679 | FAIL OOS |
+
+**0/11 configs sobreviven OOS.** Sharpes OOS típicos: -0.5 a -1.8. Gate1+Gate2 no corridos (early exit por OOS categórico). La única config con BTC OOS positivo (TS6-4h +0.619) falla ETH y SOL.
+
+### Diagnóstico del colapso OOS:
+
+El OOS 2025-2026 incluye un período bajista/lateral sostenido en cripto (H1 2025: BTC -15%, ETH -45% desde picos). El trend-following ES exactamente lo que la predicción de falla anticipaba: rinde mal en mercados sin tendencia sostenida. El IS 2021-2024 tuvo un bull market de 2021 y recovery 2023-2024 que infló las métricas IS. El OOS expone que el edge IS era régimen-dependiente.
+
+**Nota de sobreajuste vigilado:** no se detectó ninguna config con Sharpe alto en "todo régimen" IS — el patrón es exactamente el esperado (rendimiento heterogéneo IS + colapso OOS en régimen desfavorable).
+
+**Veredicto:** RECHAZADO. No procede a Capa B. El mecanismo de tendencia no tiene edge creíble que justifique implementación C# en el universo BTC/ETH/SOL con los costos actuales.
+
+---
+
 ## Hito G — RECHAZO por lookahead de apareo (2026-06-24)
 
 **Las dos estrategias aprobadas por Hito G se rechazan: su aprobación fue un artefacto de un bug de apareo de features (lookahead de 1 hora) en el camino QC IS/OOS, no edge real.**
