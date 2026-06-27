@@ -270,10 +270,11 @@ El gating por régimen es un eje de descorrelación valioso (I.7), pero **es un 
   - **S3 (mean-reversion microestructura OFI/CVD):** ❌ descartada por costos en la Capa A (2026-06-26). El M4 que pasó corría a costo 0.0; con costos reales, 0/54 configs sobreviven.
   - **S1 (trend-following):** ❌ descartada (Capa A / TS10, 2026-06-27). 10 variantes TS, 0/11 configs sobreviven OOS. Gate HMM {Trend} no rescata — inerte/degradante 0/3 brazos. Ver TS10 en strategy_experiments.md.
   - **S2 (carry de funding):** ❌ descartada en Fase 0 por costos.
-- **Arquitectura de cartera (Parte I):** decidida en lo conceptual. Pendientes de bajar a números: I.7. **Aviso:** con S1 ❌, los tres ejes de la Parte I (trend/carry/reversión) quedan vacíos en el universo de 3 majors correlacionados.
-- **Inflexion (2026-06-27):** Con S1 ❌, los tres ejes de la Parte I (trend/carry/reversion) quedan vacios en el universo de 3 majors correlacionados. Proximo: Tarea 2 (volatilidad, eje ortogonal) y Tarea 3 (universo ancho — la muerte de trend es sobre majors correlacionados; trend cross-sectional ancho es un test distinto, no condenado por TS10).
+  - **Eje volatilidad (eje 4 del backlog / Capa A):** ❌ NO-GO (2026-06-27). 3/3 hipotesis rechazadas en Capa A. H-V1: mecanismo falsado (spikes = crashes con continuacion, no capitulaciones). H-V2: sin meseta, sesgo de activo SOL, OOS colapsa. H-V3: deteriora OOS en 3/3. Bloqueo de venue (Binance sin opciones/variance swaps/indice de vol tradeable): el carril de vol neutral no existe. El hueco del carril neutral (carry) sigue abierto — la vol no lo lleno.
+- **Arquitectura de cartera (Parte I):** decidida en lo conceptual. Pendientes de bajar a números: I.7. **Aviso:** con S1 ❌ y eje vol ❌, los tres ejes de la Parte I (trend/carry/reversión) quedan vacíos en el universo de 3 majors correlacionados. El hueco de mecanismo neutral sigue abierto.
+- **Inflexion (2026-06-27):** Con S1 ❌ y eje vol ❌, los tres ejes originales (trend/carry/reversion) y el eje vol quedan vacios en el universo de majors. Proximo: Tarea 3 (universo ancho, ADR-055 — la muerte de trend es sobre majors correlacionados; trend cross-sectional ancho es un test distinto, no condenado por TS10).
 
-**Próximo paso:** Tarea 2 (overlay de vol / ejecucion, eje 4 del backlog) y Tarea 3 (universo ancho, ADR-055).
+**Próximo paso:** Tarea 3 (universo ancho, ADR-055).
 
 ---
 

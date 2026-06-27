@@ -357,3 +357,23 @@ PerÃ­odo IS: 2021-2024. PerÃ­odo OOS: 2025-2026-06-09. Activos: BTCUSDT, ETH
 - Scripts: `Trading.Research/m4_ofi_contrarian.py`, `Trading.Research/m4_ofi_momentum.py`.
 - ADR: ADR-038.
 
+---
+
+## Eje Volatilidad — Capa A (2026-06-27) — NO-GO (3/3 hipotesis)
+
+**Triage estructural (Fase 0):** el carril de vol neutral al mercado (producto que reemplazaria al carry) esta BLOQUEADO por el venue — no hay opciones / variance swaps / indice de vol tradeable en Binance; toda expresion sin opciones muere por el muro de costos o disuelve su mecanismo. Solo sobrevivieron al triage hipotesis vol-as-signal (direccional, baja frecuencia) y vol-as-sizing (infra de riesgo). Costos 0.12% RT, IS 2021-2024 / OOS 2025-2026, frecuencia diaria, causalidad verificada (RV con shift, sin lookahead).
+
+| Hipotesis | Configs PASS IS | Resultado | Estado |
+|---|---|---|---|
+| H-V1 (spike de vol → rebote, long-only) | 0/8 | Mecanismo falsado; evento raro (T=3-17 en 4 anos) | NO-GO |
+| H-V2 (compresion de vol → breakout) | 2/8 | Sin meseta; edge concentrado en SOL (T bajo = ruido); OOS colapsa | NO-GO |
+| H-V3 (vol-targeting 1/RV, diagnostico de infra) | N/A (no sleeve) | Deteriora Sharpe OOS en 3/3 activos vs buy-and-hold | NO-GO |
+
+**H-V1 (spike de vol → rebote, long-only):** 0/8 configs PASS. Sharpe IS medio BTC −0.21 / ETH +0.05 / SOL +0.13. Mecanismo FALSADO: los spikes de vol en cripto son crashes con continuacion, no capitulaciones que rebotan (BTC sistematicamente negativo). Evento demasiado raro (T=3-17 en 4 anos) — con MIN_TRADES=30 estandar todas serian N/A. NO-GO por falta de edge Y de poder estadistico.
+
+**H-V2 (compresion de vol → breakout):** 2/8 PASS IS pero SIN meseta. El "edge" se concentra en SOL solo (Sharpe IS 0.53-1.03 pero T=9-17 = ruido estadistico); BTC negativo 6/8; OOS colapsa. Mismo patron de sesgo de activo / pico-de-un-solo-passer que mato a trend. Redundante con breakout/trend ya rechazado. NO-GO.
+
+**H-V3 (vol-targeting 1/RV, diagnostico de infra — NO sleeve):** deteriora el Sharpe OOS en los 3 activos vs buy-and-hold (Δ −0.14 BTC / −0.26 ETH / −0.11 SOL). El escalado ingenuo compra exposicion en la calma de baja vol que precede los crashes. Leccion de infra (especifica de estos 3 majors / este periodo, no veredicto universal): la capa de riesgo I.4 NO debe usar inverse-vol simple aca.
+
+**Veredicto:** eje volatilidad DESCARTADO en Capa A. No pasa a C#. El hueco del carril neutral (carry) queda abierto — la vol no lo lleno (bloqueo de venue). Script: `Trading.Research/layer_a_vol_v1.py`.
+

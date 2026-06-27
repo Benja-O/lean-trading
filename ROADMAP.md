@@ -49,7 +49,7 @@ Cuatro ejes identificados (2026-06-24). **Todos se exploran sí o sí**; el orde
 | 1b | **Cross-sectional invertido** — long el z-score *mínimo*, short el máximo (mean reversion cross-sectional: el activo más presionado revierte). Derivado del diagnóstico del eje 1: win rate 15-22% invierte la hipótesis. | 1h existente | Bajo | **CERRADO — NO-GO (2026-06-25): limitación estructural de costos** |
 | 2 | **Condicionado por régimen (HMM)** — gatear señales de microestructura por el clasificador de vol/trend (Hito B). Separa dónde vive el edge o prueba que era beta. | 1h existente | Bajo | **CERRADO — NO-GO (2026-06-25)** |
 | 3 | **Timeframe sub-hora (5m/15m)** — re-generar features aggTrades a resolución fina y correr OFI mean-reversion / CVD exhaustion. Ataca la causa raíz: literatura y notas propias (lead-lag, FRP) ubican el edge de microestructura sub-hora. | Regenerar dataset | Medio | **CERRADO — NO-GO (2026-06-26): muro de costos.** El M4 PASS (54/54) corría a costo 0.0; con costos reales (0.12% RT) en la Capa A (ADR-056), **0/54 sobreviven** (Sharpe -4 a -44). |
-| 4 | **Overlay de vol / ejecución** — pivote de alfa direccional a timing de volatilidad o calidad de ejecución (la microestructura predice vol, no dirección). | 1h existente + diseño nuevo | Alto (cambio de producto) | Pendiente |
+| 4 | **Overlay de vol / ejecución** — pivote de alfa direccional a timing de volatilidad o calidad de ejecución (la microestructura predice vol, no dirección). | 1h existente + diseño nuevo | Alto (cambio de producto) | ❌ **CERRADO — NO-GO Capa A (2026-06-27): venue sin opciones bloquea el producto neutral; vol-as-signal sin edge robusto (H-V1 mecanismo falsado, H-V2 sesgo de activo, H-V3 deteriora OOS). El hueco del carril neutral (carry) sigue abierto.** |
 
 Aprendizaje acumulado: ~12 hipótesis 1h univariadas/bivariadas Long-only + 2 cross-sectional (eje 1
 directo y 1b invertido) + 1 condicionado por régimen no sobrevivieron. Ejes 1/1b: el gross signal de
@@ -65,8 +65,11 @@ por la misma causa (ejes 1/1b/2/3).** El perfil que sobrevive es baja frecuencia
 trend-following (S1 de ROADMAP-STRATEGIES) y/o eje 4 (overlay de vol/ejecución, producto distinto).
 **S1 trend-following: ❌ DESCARTADA (Capa A / TS10, 2026-06-27).** 10 variantes TS, 0/11 configs
 sobreviven OOS; gate HMM {Trend} inerte/degradante en 0/3 brazos. Con S1 cerrada, los 3 ejes de la
-Parte I (trend/carry/reversion) quedan vacios en el universo de majors. Proximo: eje 4 (vol/ejecucion)
-y universo ancho (ADR-055).
+Parte I (trend/carry/reversion) quedan vacios en el universo de majors.
+**Eje 4 (volatilidad): ❌ CERRADO NO-GO Capa A (2026-06-27).** 3/3 hipotesis rechazadas. Bloqueo de
+venue (Binance sin opciones/variance swaps): el carril neutral de vol no es construible. Vol-as-signal
+sin edge robusto (H-V1 falsado, H-V2 sesgo de activo, H-V3 deteriora OOS). El hueco del carril
+neutral (carry) sigue abierto — la vol no lo lleno. Proximo: universo ancho (ADR-055).
 Nota de proceso: el eje 3 reveló que algunos scripts M4 corrían a costo 0.0 — el M4 debe correr con
 costos por estándar (ADR-040/ADR-056).
 
