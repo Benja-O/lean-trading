@@ -220,7 +220,7 @@ El gating por régimen es un eje de descorrelación valioso (I.7), pero **es un 
 
 | ID | Estrategia | Mecanismo (Fase 0) | Eje (I.2) | Régimen | Estado | Notas |
 |---|---|---|---|---|---|---|
-| S1 | Trend-following / TS-Momentum | Subreacción / continuación (conductual) | 1 · Tendencia | Trend | 🔄 Fase 0 (borrador, §IV) — **PRÓXIMA** | Base de la fábrica. Reemplaza el rol de EmaCross como primera estrategia *real*. **Ahora es la prioridad** (S3 muerta por costos): perfil de baja frecuencia / bajo costo, el único que sobrevive el muro de costos retail. |
+| S1 | Trend-following / TS-Momentum | Subreacción / continuación (conductual) | 1 · Tendencia | Trend | ❌ Descartada (Capa A / TS10, 2026-06-27) | Trend ungated sin edge robusto (edge IS casi puro SOL, 0/11 OOS); TS10 (gate HMM {Trend}) no rescata — inerte/degradante 0/3 brazos. Eje 1 (Tendencia) de la cartera queda vacío. |
 | S2 | Carry de funding | Prima por financiamiento del apalancamiento | 2 · Carry | indiferente (neutral) | ❌ Descartada Fase 0 | Research preliminar: hoy sin edge neto por costos (edge crowdeado/arbitrado). Pendiente: confirmar contra estructura de costos propia antes de cerrar definitivamente. |
 | S3 | Mean Reversion (microestructura, OFI/CVD) | Corrección de sobrerreacción en rango | 3 · Reversión | Squeeze | ❌ Descartada (Capa A, 2026-06-26) | Materializada como el **Eje 3 (sub-hora 5m/15m)**. El M4 que pasó (54/54) corría a **costo 0.0**; al re-evaluar con costos reales (0.12% RT) en la **Capa A** (ADR-056), **0/54 configs sobreviven** (Sharpe -4 a -44). Edge bruto real (~2-3 bps/barra) pero ~6x menor que los costos. Mismo muro estructural que ejes 1/1b. **Sin C# construido** — la Capa A la mató antes. |
 | S4+ | *(abierto)* | A definir vía Fase 0 | A definir | A definir | ⬜ | Solo después de S1-S3 validadas a mano. |
@@ -236,11 +236,17 @@ El gating por régimen es un eje de descorrelación valioso (I.7), pero **es un 
 
 ---
 
-## IV — Fase 0 de S1 — Trend-following / Time-Series Momentum *(borrador)*
+## IV — Fase 0 de S1 — Trend-following / Time-Series Momentum *(registro histórico)*
 
-> Estado: 🔄 borrador para discutir y cerrar en sesión. **Es ahora el próximo entregable** (S3/eje 3 quedó ❌ por costos en la Capa A, ADR-056).
->
-> **Por qué S1 ahora:** el muro de costos retail ya mató el carry y toda la reversión de microestructura de alta frecuencia (ejes 1/1b/3). El trend-following es de **baja frecuencia / bajo costo** — el perfil que sobrevive. Se valida por la **Capa A** (Python) primero, extendiendo la gramática del spec con los primitivos de tendencia.
+> Estado: ❌ CERRADA — NO-GO (TS10, 2026-06-27)
+
+**Cierre (2026-06-27):** La Capa A evaluó 10 variantes de TS (TS1-TS10), 38 configs × 3 activos. Resultado: 0/11 configs que pasaron IS sobreviven OOS (Sharpes OOS tipicos -0.5 a -1.8). TS10 (gate HMM {Trend}) fue el ultimo intento: 0/3 brazos pasan el gate IS; el gate es inerte en BTC, degrada ETH y destruye SOL. La prediccion de mecanismo de §IV (trend rinde mejor en regimen Trend) queda falsada. Registro completo en `Trading.Research/strategy_experiments.md` (secciones S1 y TS10). **S1 no pasa a Capa B (C#).**
+
+---
+
+*(El contenido de diseño de Fase 0 se conserva abajo como registro histórico.)*
+
+> **Por qué S1 ahora [registro]:** el muro de costos retail ya mató el carry y toda la reversión de microestructura de alta frecuencia (ejes 1/1b/3). El trend-following es de **baja frecuencia / bajo costo** — el perfil que sobrevive. Se valida por la **Capa A** (Python) primero, extendiendo la gramática del spec con los primitivos de tendencia.
 
 - **Mercado / instrumento:** perpetuals de cripto líquido (BTC, ETH; universo a acotar). Datos: OHLCV, 100% accesibles a retail.
 - **Mecanismo económico:** subreacción inicial a información seguida de continuación del precio (sentiment / under-reaction; De Long et al. sobre noise-trader risk). En cripto el mecanismo se *amplifica*: mercado dominado por retail y sentimiento. Soporte empírico: Liu & Tsyvinski (2018) y evidencia de driver por sobrerreacción.
@@ -262,11 +268,12 @@ El gating por régimen es un eje de descorrelación valioso (I.7), pero **es un 
 - **Track de ingeniería:** Hito C (paper trading) en curso. Maquinaria de validación (Fases 1-7) mayormente implementada. **Capa A del pipeline (ADR-056) construida y operativa** (`Trading.Research/layer_a_validate.py`).
 - **Track de estrategias:**
   - **S3 (mean-reversion microestructura OFI/CVD):** ❌ descartada por costos en la Capa A (2026-06-26). El M4 que pasó corría a costo 0.0; con costos reales, 0/54 configs sobreviven.
-  - **S1 (trend-following):** Fase 0 en borrador (§IV), **es ahora la prioridad** — perfil de baja frecuencia, el que sobrevive el muro de costos.
+  - **S1 (trend-following):** ❌ descartada (Capa A / TS10, 2026-06-27). 10 variantes TS, 0/11 configs sobreviven OOS. Gate HMM {Trend} no rescata — inerte/degradante 0/3 brazos. Ver TS10 en strategy_experiments.md.
   - **S2 (carry de funding):** ❌ descartada en Fase 0 por costos.
-- **Arquitectura de cartera (Parte I):** decidida en lo conceptual. Pendientes de bajar a números: I.7. **Aviso:** dos de tres ejes muertos por costos; la composición futura de la cartera depende de qué sobreviva (hoy: solo trend en pie).
+- **Arquitectura de cartera (Parte I):** decidida en lo conceptual. Pendientes de bajar a números: I.7. **Aviso:** con S1 ❌, los tres ejes de la Parte I (trend/carry/reversión) quedan vacíos en el universo de 3 majors correlacionados.
+- **Inflexion (2026-06-27):** Con S1 ❌, los tres ejes de la Parte I (trend/carry/reversion) quedan vacios en el universo de 3 majors correlacionados. Proximo: Tarea 2 (volatilidad, eje ortogonal) y Tarea 3 (universo ancho — la muerte de trend es sobre majors correlacionados; trend cross-sectional ancho es un test distinto, no condenado por TS10).
 
-**Próximo paso inmediato:** cerrar la Fase 0 de S1 (trend-following) y correrla por la Capa A, extendiendo la gramática del spec con primitivos de tendencia.
+**Próximo paso:** Tarea 2 (overlay de vol / ejecucion, eje 4 del backlog) y Tarea 3 (universo ancho, ADR-055).
 
 ---
 

@@ -63,6 +63,10 @@ supera ~6x — mismo muro estructural que 1/1b, más agudo por la frecuencia. **
 la reversión de microestructura de alta frecuencia es no-viable bajo costos retail/taker — 4 rechazos
 por la misma causa (ejes 1/1b/2/3).** El perfil que sobrevive es baja frecuencia → pivote a
 trend-following (S1 de ROADMAP-STRATEGIES) y/o eje 4 (overlay de vol/ejecución, producto distinto).
+**S1 trend-following: ❌ DESCARTADA (Capa A / TS10, 2026-06-27).** 10 variantes TS, 0/11 configs
+sobreviven OOS; gate HMM {Trend} inerte/degradante en 0/3 brazos. Con S1 cerrada, los 3 ejes de la
+Parte I (trend/carry/reversion) quedan vacios en el universo de majors. Proximo: eje 4 (vol/ejecucion)
+y universo ancho (ADR-055).
 Nota de proceso: el eje 3 reveló que algunos scripts M4 corrían a costo 0.0 — el M4 debe correr con
 costos por estándar (ADR-040/ADR-056).
 

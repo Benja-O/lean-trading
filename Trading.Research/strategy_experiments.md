@@ -92,6 +92,33 @@ Signal invertida: long z-score MINIMO, short z-score MAXIMO. Resultado: win rate
 
 ---
 
+## TS10 — TS1 Trend-following GATEADO por regimen HMM {Trend} — Capa A (2026-06-27) — NO-GO
+
+**Config:** TS1 momentum lookback=48h, hold=24h, long-only, costos reales 0.12% RT. Gate = regimen `{Trend}` del HMM 4h nativo por activo (SOL con proxy BTC). IS 2021-2024 / OOS 2025-2026.
+
+**Grilla pre-registrada:** 2 brazos (ungated vs Trend-gated), decidida por mecanismo (II.4-A), sin barrido de regimenes.
+
+| Activo | Brazo | Sharpe IS | #Trades IS | Sharpe OOS | #Trades OOS |
+|---|---|---:|---:|---:|---:|
+| BTC | ungated | +0.216 | 1019 | −1.201 | 355 |
+| BTC | gated{Trend} | +0.246 | 605 | −1.375 | 160 |
+| ETH | ungated | +0.335 | 1027 | −0.522 | 355 |
+| ETH | gated{Trend} | +0.019 | 600 | −0.734 | 212 |
+| SOL (proxy BTC) | ungated | +1.512 | 993 | −1.426 | 343 |
+| SOL (proxy BTC) | gated{Trend} | +0.106 | 480 | −0.695 | 250 |
+
+**Distribucion de regimen IS (4h):** BTC 55% Trend / 33% Squeeze / 12% HighVol; ETH 53/36/11; SOL (proxy BTC) 44% Trend / 4% Squeeze / 52% HighVol (distorsionada — el modelo BTC no mapea SOL, ver eje-2).
+
+**Veredicto:** 0/3 brazos pasan el gate IS (>=0.5 en >=2/3 activos). El gate HMM `{Trend}` **no rescata** trend: es **inerte en BTC** (d+0.03), **degrada ETH** (d-0.316) y **destruye SOL** (d-1.406). La prediccion de mecanismo de §IV (trend rinde mejor en regimen Trend) queda **falsada**. Es la segunda confirmacion independiente (n=2, con eje-2/OFI) de que el gating HMM no aisla edge en este universo. El clasificador no tiene estado MeanReverting (2/4 estados son Trend), por lo que no existe el "off" que el mecanismo requiere. El pulso IS de SOL (+1.51) era sesgo de activo / beta de bull-market (OOS -1.43), no mecanismo robusto cross-asset.
+
+**Causalidad del gate:** verificada sin lookahead (resample `closed="right", label="right"`; la etiqueta del bloque 4h que cierra en T solo aplica a barras >= T).
+
+**Cierre:** S1 trend-following DESCARTADA. No pasa a Capa B (C#). No se entrena HMM propio de SOL (seria un solo-passer / infra especulativa).
+
+**Script:** `Trading.Research/layer_a_trend_s1.py` (funcion `_try_load_hmm_regime`). Exportador de regimenes: `Trading.Research/export_hmm_regimes.py`. CSVs: `Trading.Models/regime/hmm_regimes_{btc,eth,sol}usdt.csv`.
+
+---
+
 ## S1 — Trend Following (2026-06-27) — RECHAZADO OOS universalmente
 
 Familia de 10 hipótesis de tendencia (long-only, mecanismo subreacción/continuación). Evaluadas con Capa A ADR-056: costos 0.12% RT, IS 2021-2024, OOS 2025-01→2026-06-09, activos BTC/ETH/SOL.

@@ -649,12 +649,20 @@ def _try_load_hmm_regime(asset: str) -> Optional[pd.Series]:
     """
     Intenta cargar la serie de régimen HMM desde el modelo entrenado.
     Si no está disponible, retorna None (gate desactivado).
+
+    Generado por export_hmm_regimes.py con causalidad garantizada
+    (resample closed='right', label='right').
     """
-    # El HMM vive en Trading.Models/ — se verifica si hay un archivo de regímenes
     models_dir = Path(__file__).parent.parent / "Trading.Models"
+    regime_dir = models_dir / "regime"
+    asset_lower = asset.lower()
     possible_paths = [
-        models_dir / f"hmm_regime_{asset.lower()}.parquet",
-        models_dir / f"hmm_regimes_{asset.lower()}.csv",
+        # Buscar primero en subdirectorio regime/ (donde export_hmm_regimes.py los genera)
+        regime_dir / f"hmm_regimes_{asset_lower}.csv",
+        regime_dir / f"hmm_regime_{asset_lower}.parquet",
+        # Fallbacks en raíz de Trading.Models/
+        models_dir / f"hmm_regime_{asset_lower}.parquet",
+        models_dir / f"hmm_regimes_{asset_lower}.csv",
         models_dir / "hmm_regimes.csv",
     ]
     for p in possible_paths:
