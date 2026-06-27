@@ -81,9 +81,22 @@ mecanismo: rankear por retorno bruto en universo correlacionado a BTC ≡ rankea
 revierte; correlacion → 1 en crashes mata el cross-sectional. Sesgo del universo es OPTIMISTA (sin
 perps removidos pre-2021, sin impacto de mercado) → el NO-GO es robusto. Ver
 `Trading.Research/strategy_experiments.md`.
-Hilo vivo restante (no condenado por los tests, senalado por el director): momentum residual /
-beta-neutral (remover factor mercado, rankear por residuo idiosincratico) — neutral por construccion,
-candidato al carril del carry que sigue hueco. Pendiente de decision de research-direction.
+**Momentum residual / beta-neutral (universo ancho): ❌ NO-GO Capa A (2026-06-27).** Mismo
+universo/datos/costos que el momentum crudo; unica variable: senal crudo→residual (remover factor BTC,
+rankear residuo idiosincratico ε; Blitz). Long-only residual mejora vs crudo (5/8 IS>=0.5, meseta SI)
+PERO el Sharpe IS 0.51 era ~enteramente beta de mercado (cartera long de alts β≈1.2 en bull): al
+neutralizar la beta (hedge short BTC, β 1.20→0.00) el edge desaparece (2/8 positivas, media negativa,
+GATE NEUTRAL FAIL). OOS colapsa 0/8 identico al crudo → fuga de beta / sin momentum idiosincratico
+persistente. El "GO" impreso por el script es artefacto de gatear el long-only con beta incluida; el
+gate valido (neutral) falla. **Cierra toda la familia momentum.** Ver strategy_experiments.md.
+
+**Inflexion estructural (2026-06-27): no quedan hipotesis vivas dentro del marco actual.** Descartados
+por Capa A todos los ejes accesibles probados — carry (Fase 0, costos), reversion microestructura ×4
+(costos), trend majors + gateado HMM (sin edge), vol ×3 (venue), momentum crudo + residual (era beta).
+Patron transversal = restriccion estructural: edge accesible + costos taker retail + datos accesibles
+sobre Binance perps. **Proximo paso: reevaluacion estructural** — cambiar un supuesto del marco
+(ejecucion maker/menor costo; venue con opciones para vol; otra clase de dato) vs. aceptar los limites
+del marco. Pendiente de decision de research-direction/usuario.
 Nota de proceso: el eje 3 revelo que algunos scripts M4 corrian a costo 0.0 — el M4 debe correr con
 costos por estandar (ADR-040/ADR-056).
 

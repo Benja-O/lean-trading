@@ -405,3 +405,24 @@ PerÃ­odo IS: 2021-2024. PerÃ­odo OOS: 2025-2026-06-09. Activos: BTCUSDT, ETH
 
 **Veredicto:** eje volatilidad DESCARTADO en Capa A. No pasa a C#. El hueco del carril neutral (carry) queda abierto — la vol no lo lleno (bloqueo de venue). Script: `Trading.Research/layer_a_vol_v1.py`.
 
+---
+
+## Momentum Residual / Beta-Neutral — Universo ancho — Capa A (2026-06-27) — NO-GO (override del director)
+
+**Hipotesis:** el momentum crudo falla porque rankear por retorno bruto ≈ rankear por beta×mercado; el edge conductual viviria en el residuo idiosincratico ε tras remover el factor BTC (Blitz-Huij-Martens, residual momentum). Mismo universo/datos/costos/particion que el momentum crudo (apples-to-apples); unica variable: senal crudo→residual. β-window=90d, skip=7d, ambos fijos. Causalidad verificada (β y residuos solo con datos ≤ t; skip evita solape con el hold; ADV point-in-time).
+
+> **NOTA:** el script `m4_momentum_residual.py` IMPRIME "GATE LONG-ONLY: PASS / >> GO". El director (Opus) lo **OVERRIDE a NO-GO**: el gate long-only del script mide una cartera long de alts con beta de mercado ~1.2 en bull market; el gate VALIDO es el beta-neutral, que FALLA.
+
+| Vista | Configs PASS IS | Sharpe IS medio | OOS | Gate |
+|---|---|---|---|---|
+| Long-only residual | 5/8 (meseta SI, no concentrado) | +0.506 | 0/8 positivas (−0.85 a −2.95, media −2.03) | (enganoso — incluye beta) |
+| Beta-neutral (long + hedge short BTC) | 2/8 | ~−0.2 (rango −0.636 a +0.106) | −0.67 a −1.80 | **FAIL** |
+
+- **Long-only residual:** 5/8 Sharpe IS≥0.5, meseta SI, no concentrado (8/8). MEJORA vs crudo (1/8 sin meseta) — residualizar SI afina el ranking in-sample. PERO **OOS colapsa 0/8**, identico al crudo (delta OOS +0.067 ≈ 0).
+- **Beta-neutral (test REAL del carril):** beta neutralizada correctamente (pre 1.20 → post 0.00) pero Sharpe IS DESTRUIDO (2/8 positivas, media negativa). GATE NEUTRAL: **FAIL**.
+- **Descomposicion decisiva:** el Sharpe IS 0.51 del long-only era ~enteramente **beta de mercado** (cartera long de alts β≈1.2 en bull 2021-2024), NO alfa residual. Al hedgear la beta (el punto entero de un residual neutral) el edge desaparece (~−0.2). La "meseta" del long-only es meseta de exposicion a beta, no de alfa. La diferencia long-only − neutral (~0.7 Sharpe) ES la beta.
+- **OOS identico al crudo** confirma la prediccion de falla pre-registrada: fuga de beta / sin momentum idiosincratico persistente.
+- **L/S residual (diagnostico):** sin edge IS (todas ≤0 salvo ruido). Dos configs L=90/H=7 con OOS positivo (+1.10, +1.28) pero IS negativo = ruido; nunca se elige por OOS.
+
+**Veredicto: NO-GO. Cierra TODA la familia momentum** (crudo + residual; cross-sectional + TS; long-only + neutral). El carril neutral (que dejo vacio el carry) sigue vacio. El "GO" impreso por el script es un artefacto de gatear el long-only con beta incluida; el gate valido (neutral) falla. **Con esto quedan descartados por Capa A todos los ejes accesibles probados** (carry, reversion micro ×4, trend majors+gated, vol ×3, momentum crudo+residual) → pendiente reevaluacion estructural. Script: `Trading.Research/m4_momentum_residual.py`.
+
