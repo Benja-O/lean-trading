@@ -19,6 +19,24 @@ Toda decisión técnica, operativa o de planificación se toma en coherencia con
 
 **Estos documentos se mantienen actualizados como parte del trabajo, no después.** Cualquier cambio que impacte el estado del proyecto, introduzca una nueva decisión arquitectónica, o modifique comportamiento operativo debe reflejarse en el documento correspondiente en el mismo commit.
 
+## 💰 Control de costo — subagentes y contexto
+
+### Herramientas directas antes que subagentes
+Antes de lanzar cualquier subagente, verificar si una herramienta directa resuelve la tarea:
+- Ubicación conocida → `Read` / `Grep` / `Glob` directos. Nunca subagente.
+- Búsqueda en múltiples archivos sin saber dónde → `Explore` (read-only, más barato que `general-purpose`).
+- Solo lanzar `Agent(general-purpose)` cuando la tarea requiere razonamiento multi-paso o escritura de código.
+
+### Modelo por subagente
+No existe key en settings.json para modelo de subagentes — el control es en runtime:
+- Búsquedas mecánicas, fan-out de scripts M4, lecturas → `model: "haiku"`
+- Razonamiento, diseño, análisis → `model: "sonnet"` (o sin especificar, hereda la sesión)
+- En Workflow scripts: `agent("...", { model: "claude-haiku-4-5-20251001", label: "scan" })` para stages mecánicos
+
+### Contexto largo
+- `/compact` al cerrar una investigación antes de abrir la siguiente.
+- `/clear` al cambiar de tema — la memoria persistente re-hidrata el estado.
+
 ## 🤖 Cuándo usar Opus vs Sonnet
 
 El flujo normal es Sonnet (este modelo). Opus está justificado únicamente cuando la tarea es **diseño con alta complejidad metodológica y consecuencias difíciles de revertir** — no para implementación, aunque sea grande.
