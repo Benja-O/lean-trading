@@ -257,16 +257,18 @@ def process_symbol_subhour(symbol):
 
     frames_5m  = []
     frames_15m = []
+    frames_30m = []
 
     for i, zp in enumerate(all_zips, 1):
         raw = _read_zip(zp)
         if raw is not None:
             frames_5m.append(_agg_bars(raw, "5min"))
             frames_15m.append(_agg_bars(raw, "15min"))
+            frames_30m.append(_agg_bars(raw, "30min"))
         if i % 300 == 0:
             log.info(f"  [{symbol}] {i}/{len(all_zips)} ZIPs procesados")
 
-    for label, frames in [("5m", frames_5m), ("15m", frames_15m)]:
+    for label, frames in [("5m", frames_5m), ("15m", frames_15m), ("30m", frames_30m)]:
         if not frames:
             log.warning(f"[{symbol}] Sin datos procesables para {label}")
             continue
@@ -370,7 +372,7 @@ def main():
             log.info(f"  {sym}: {len(df):,} barras 1h  |  {size_mb:.1f} MB")
         else:
             log.warning(f"  {sym}: parquet no generado")
-        for label in ("5m", "15m"):
+        for label in ("5m", "15m", "30m"):
             fp_sh = BASE_PATH / "features" / f"{sym}_{label}_features.parquet"
             if fp_sh.exists():
                 size_mb = fp_sh.stat().st_size / (1 << 20)
