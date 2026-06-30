@@ -426,3 +426,28 @@ PerÃ­odo IS: 2021-2024. PerÃ­odo OOS: 2025-2026-06-09. Activos: BTCUSDT, ETH
 
 **Veredicto: NO-GO. Cierra TODA la familia momentum** (crudo + residual; cross-sectional + TS; long-only + neutral). El carril neutral (que dejo vacio el carry) sigue vacio. El "GO" impreso por el script es un artefacto de gatear el long-only con beta incluida; el gate valido (neutral) falla. **Con esto quedan descartados por Capa A todos los ejes accesibles probados** (carry, reversion micro ×4, trend majors+gated, vol ×3, momentum crudo+residual) → pendiente reevaluacion estructural. Script: `Trading.Research/m4_momentum_residual.py`.
 
+---
+
+## Lead-Lag Gap — short del laggard en caída de BTC — Universo ancho — Capa A (2026-06-30) — NO-GO
+
+**Hipótesis (director):** en cada movimiento BAJISTA importante de BTC, shortear la(s) alt(s) que todavía NO acompañaron la caída (gap de reacción = residuo CAPM sobre la ventana del evento), esperando catch-up bajista. State-contingent: cualquiera de las ~100 puede ser candidata, distinta por evento — NO se busca una moneda persistentemente lenta.
+
+**Setup:** panel ~196 perps USDT-M (reusa `m4_momentum_cross_sectional`, anti-survivorship LUNA2/USTC), base 15m, top-100 por ADV-pit (piso $5M). Eventos BTC `z<−k` (σ rolling 30d). Gap = `cumret_coin_W − β_pit·cumret_BTC_W`, acumulado sobre W (no una sola vela). Dedup `refractory=H`. Causalidad verificada en 3 niveles: β-pit termina en `t−W`, ventana del evento `[t−W,t]`, catch-up `(t,t+H]` sin solape. Grilla pre-registrada `W∈{1h,2h,4h} × k∈{2.0,2.5,3.0}σ × H∈{1h,2h,4h}` = 27 configs. IS 2021-2024. **BRUTO (sin costos).**
+
+**Resultado: 0/27 configs con short P&L > 0. NO-GO en Etapa 1-3, antes de costos.**
+
+| Métrica | Resultado (27 configs, universo 196) |
+|---|---|
+| Short P&L bucket top-gap | NEGATIVO en 27/27 (−1 a −164 bps); win rate 33-48% |
+| skip-1 (entrada 1 barra tarde) | NEGATIVO en 27/27 |
+| Terciles de liquidez (low / high) | ambos NEGATIVOS — NO es ranciedad |
+| stale_frac (top-gap sin print de entrada) | 0.00 (el filtro ADV ya remueve la cola rancia) |
+| IC (Spearman gap~fwd) | NEGATIVO en 27/27 (−0.05 a −0.08), débil pero consistente |
+| Spread market-neutral (top−bottom) | POSITIVO en 27/27 (+21 a +59 bps) |
+
+**Diagnóstico:** el short direccional está FALSADO estructuralmente. Un evento `z<−k` bajista de BTC es un mínimo local que REVIERTE — tras la venta agresiva todo el complejo rebota (el short P&L empeora monótonamente con H y k = más rebote). Es el mismo mecanismo de **OFI Contrarian** (rebote post-exhaustion): la hipótesis pelea de frente contra el único edge real del proyecto. **Problema de timing inherente:** un "movimiento importante" solo es identificable DESPUÉS de ocurrido, que es exactamente el punto de máxima presión de reversión; el lag existe (IC negativo) pero está dominado por la reversión a la que estás forzado a entrar.
+
+**La única pieza con edge bruto** (spread market-neutral: long lo ya-caído / short el laggard, +30-50 bps/evento) es una RE-DERIVACIÓN del cross-sectional reversion ya CERRADO por costos en Eje 1/1b: long+short de ilíquidos ≈ 0.44% RT en fees + slippage de crash >> 30-50 bps brutos. Sin rescate.
+
+**Veredicto: NO-GO.** No procede a Etapa 4 (costos). Tercera confirmación independiente (con OFI-OOS y eje-1b) de que el carril reversión-tras-caída no sobrevive costos en este venue. Script: `Trading.Research/layer_a_lead_lag_gap.py`.
+
