@@ -66,6 +66,7 @@ namespace Trading.Application.Health
             _initialEquityPerStrategy = initialEquityPerStrategy;
 
             eventBus.Subscribe<OrderFilledEvent>(OnOrderFilled);
+            eventBus.Subscribe<BarProcessedEvent>(OnBarProcessed);
         }
 
         public bool IsExcluded(string executorIdentifier)
@@ -74,6 +75,32 @@ namespace Trading.Application.Health
             lock (_lock)
             {
                 return _degraded.TryGetValue(executorIdentifier, out var d) && d;
+            }
+        }
+
+        // Evalúa U2 diariamente aunque la estrategia no haya cerrado ningún trade.
+        // Sin esto, una estrategia en drawdown que deja de operar congela el contador de días
+        // y nunca activa la degradación por U2 (POLICY 3.1).
+        private void OnBarProcessed(BarProcessedEvent e)
+        {
+            lock (_lock)
+            {
+                var currentDay = DateOnly.FromDateTime(e.TimestampUtc);
+                foreach (var id in _lastEvaluatedDay.Keys.ToList())
+                {
+                    if (_degraded.TryGetValue(id, out var isDegraded) && isDegraded) continue;
+                    if (_lastEvaluatedDay[id] is not null && currentDay <= _lastEvaluatedDay[id]!.Value) continue;
+
+                    _dailyEquity[id].AddLast(new DailyEquityPoint(currentDay, _equity[id]));
+                    if (_dailyEquity[id].Count > _thresholds.RollingWindowDays)
+                        _dailyEquity[id].RemoveFirst();
+
+                    var (u2Triggered, u2Desc) = EvaluateU2(id);
+                    _lastEvaluatedDay[id] = currentDay;
+
+                    if (u2Triggered)
+                        TriggerDegradation(id, u2Desc);
+                }
             }
         }
 

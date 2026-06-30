@@ -14,11 +14,10 @@ namespace Trading.Recorder.Seeding
     /// que el feed en vivo drene desde justo después del histórico, sin gaps y con CVD continuo.
     ///
     /// Por cada (símbolo, timeframe):
-    ///   - Store vacío  → siembra los últimos <c>seedDays</c> días (deploy en frío: arranca con
-    ///     historia inmediata, sin esperar días).
-    ///   - Store con datos → siembra desde el día siguiente a la última barra hasta T-1 (Vision
-    ///     publica hasta ayer). No re-siembra días ya presentes (el store es append-only, sin
-    ///     dedup), evitando barras duplicadas.
+    ///   - Store vacío  → siembra los últimos <c>seedDays</c> días.
+    ///   - Store con datos → siembra desde el mismo día de la última barra (para recuperar el
+    ///     tramo final del día en caso de reinicio que cruzó medianoche UTC), saltando las
+    ///     ventanas ya presentes. Continúa hasta T-1 (Vision publica hasta ayer).
     ///   - Store al día → no siembra; el cursor REST existente resume el vivo.
     ///
     /// El puente del cursor se aplica una vez por símbolo (todos los timeframes comparten el mismo
@@ -62,16 +61,22 @@ namespace Trading.Recorder.Seeding
 
                 DateOnly fromDate;
                 double cvdSeed;
+                DateTime? skipBefore;
                 if (lastBar is null)
                 {
-                    fromDate = today.AddDays(-seedDays);
-                    cvdSeed  = 0.0;
+                    fromDate   = today.AddDays(-seedDays);
+                    cvdSeed    = 0.0;
+                    skipBefore = null;
                 }
                 else
                 {
-                    // No re-sembrar el día de la última barra (el store es append-only sin dedup).
-                    fromDate = DateOnly.FromDateTime(lastBar.BarUtc).AddDays(1);
-                    cvdSeed  = lastBar.Cvd;
+                    // Re-sembrar desde el mismo día de la última barra para recuperar el tramo
+                    // final que pudo quedar con gap tras un reinicio que cruzó la medianoche UTC.
+                    // BinanceVisionSeeder saltea las ventanas <= lastBar.BarUtc para no duplicar
+                    // barras ya presentes (el store es append-only sin dedup).
+                    fromDate   = DateOnly.FromDateTime(lastBar.BarUtc);
+                    cvdSeed    = lastBar.Cvd;
+                    skipBefore = lastBar.BarUtc;
                 }
 
                 if (fromDate >= today)
@@ -81,7 +86,7 @@ namespace Trading.Recorder.Seeding
                 }
 
                 Console.WriteLine($"[Recorder][Seed] {symbol}/{timeframe}: sembrando Vision {fromDate} -> {today.AddDays(-1)} (cvdSeed={cvdSeed:F4})...");
-                var seedResult = await _seeder.SeedAsync(instrumentId, timeframe, store, fromDate, today, cvdSeed, cancellationToken);
+                var seedResult = await _seeder.SeedAsync(instrumentId, timeframe, store, fromDate, today, cvdSeed, skipBefore, cancellationToken);
 
                 if (seedResult.LastAggregateTradeId is long maxId &&
                     (!lastAggIdBySymbol.TryGetValue(symbol, out var existing) || maxId > existing))

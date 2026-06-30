@@ -67,6 +67,10 @@ namespace Trading.Recorder.Seeding
         /// <param name="fromDate">Primer día a descargar (inclusive).</param>
         /// <param name="toDate">Límite (exclusivo); típicamente DateOnly.FromDateTime(DateTime.UtcNow).</param>
         /// <param name="cvdSeed">CVD acumulado al inicio del período.</param>
+        /// <param name="skipBefore">Si se indica, ignora trades cuya ventana de timeframe sea
+        /// &lt;= este timestamp. Usado cuando fromDate coincide con el día de la última barra del
+        /// store (re-seed parcial de día): evita duplicar barras ya persistidas sin perder el
+        /// tramo final del día que quedó con gap tras un reinicio.</param>
         /// <param name="ct">Token de cancelación.</param>
         /// <returns>Lista de barras computadas y persistidas (en orden cronológico).</returns>
         public async Task<SeedResult> SeedAsync(
@@ -76,6 +80,7 @@ namespace Trading.Recorder.Seeding
             DateOnly fromDate,
             DateOnly toDate,
             double cvdSeed = 0.0,
+            DateTime? skipBefore = null,
             CancellationToken ct = default)
         {
             if (instrumentId is null) throw new ArgumentNullException(nameof(instrumentId));
@@ -113,8 +118,17 @@ namespace Trading.Recorder.Seeding
                 // Acumular en buckets por ventana de timeframe
                 foreach (var row in rows)
                 {
-                    var tradeUtc     = DateTimeOffset.FromUnixTimeMilliseconds(row.TransactTime).UtcDateTime;
-                    var windowStart  = FloorToWindow(tradeUtc, windowSize);
+                    var tradeUtc    = DateTimeOffset.FromUnixTimeMilliseconds(row.TransactTime).UtcDateTime;
+                    var windowStart = FloorToWindow(tradeUtc, windowSize);
+
+                    // El aggId se rastrea siempre (incluso en trades saltados) para que el
+                    // cursor bridge al feed REST quede en el último aggId real del ZIP.
+                    if (lastAggregateTradeId is null || row.AggregateTradeId > lastAggregateTradeId)
+                        lastAggregateTradeId = row.AggregateTradeId;
+
+                    // Saltar trades de ventanas ya presentes en el store (re-seed parcial).
+                    if (skipBefore.HasValue && windowStart <= skipBefore.Value)
+                        continue;
 
                     if (!aggregators.TryGetValue(windowStart, out var bucket))
                     {
@@ -122,10 +136,6 @@ namespace Trading.Recorder.Seeding
                         aggregators[windowStart] = bucket;
                     }
                     bucket.Add(row.Price, row.Quantity, row.IsBuyerMaker);
-
-                    // Mayor aggId visto: puente con el feed REST en vivo (cursor fromId).
-                    if (lastAggregateTradeId is null || row.AggregateTradeId > lastAggregateTradeId)
-                        lastAggregateTradeId = row.AggregateTradeId;
                 }
             }
 

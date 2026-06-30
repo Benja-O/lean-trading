@@ -173,15 +173,19 @@ namespace Trading.Recorder.Feed
         /// </summary>
         private long ProcessAndTrack(string symbol, IReadOnlyList<AggTrade> trades, long cursor)
         {
-            long maxId = cursor;
+            // Avanzar el cursor al último trade recibido incondicionalmente: Binance devuelve
+            // aggTrades en orden ascendente, así que si todos tienen aggId <= cursor (eventual
+            // consistency edge-case) el cursor igualmente avanza y evitamos un bucle infinito.
+            long maxId = trades.Count > 0
+                ? Math.Max(cursor, trades[trades.Count - 1].AggregateTradeId)
+                : cursor;
+
             foreach (var trade in trades)
             {
                 if (trade.AggregateTradeId <= cursor)
                     continue;
 
                 _onTrade(symbol, trade.Price, trade.Quantity, trade.IsBuyerMaker, trade.TradeTimeMs);
-                if (trade.AggregateTradeId > maxId)
-                    maxId = trade.AggregateTradeId;
             }
             return maxId;
         }
