@@ -451,3 +451,26 @@ PerÃ­odo IS: 2021-2024. PerÃ­odo OOS: 2025-2026-06-09. Activos: BTCUSDT, ETH
 
 **Veredicto: NO-GO.** No procede a Etapa 4 (costos). Tercera confirmación independiente (con OFI-OOS y eje-1b) de que el carril reversión-tras-caída no sobrevive costos en este venue. Script: `Trading.Research/layer_a_lead_lag_gap.py`.
 
+---
+
+## Screening M4 — 4 hipótesis nuevas (reversión media, carry funding, baja vol, asimetría) — 2026-07-01
+
+Screening de cuatro hipótesis clásicas de literatura (§3.9, §8.2.1, §3.4, §9.5) sobre la infra M4 existente (`m4_shared.py`, harness Hito E: 1h, IS 2021-01-01→2024-12-31, fee 0.04% RT, position tracking obligatorio, gate Sharpe≥0.5 en ≥2/3 activos, MIN_TRADES=30). Objetivo: buscar candidatas nuevas para llenar los carriles que Capa A dejó vacíos (ver [[project_inflexion_estructural]]).
+
+| Estrategia | Gate M4 | Mejor config | Sharpe BTC/ETH/SOL | Estado |
+|---|---|---|---|---|
+| Reversión a la media (z-score vs MA, contrarian) | ❌ 0/36 configs | window=48, thr=2.50, hold=6 | −0.975 / −0.950 / **+0.063** | NO-GO |
+| Carry funding alto-menos-bajo (bidireccional) | ⚠️ 2/27 configs | z_thr=2.0, z_window=60, hold=7 | **+0.800** / **+0.988** / −1.011 | NO-GO (pass mecánico frágil) |
+| Anomalía de baja volatilidad (contrarian de régimen) | ❌ 0/54 configs | vol_w=48, rank_w=96, thr=0.75, hold=8 | −1.457 / **−0.204** / −1.401 | NO-GO |
+| Prima de asimetría / skewness (contrarian y momentum) | ❌ 0/72 configs (36+36) | momentum: skew_w=24, rank_w=96, thr=0.85, hold=8 | −0.247 / +0.019 / **+0.929** | NO-GO |
+
+**Reversión a la media** (`m4_reversion_media.py`): las 36 configs dan Sharpe negativo en BTC y ETH sin excepción; SOL roza cero en 3 configs pero nunca positivo relevante. El contrarian puro contra un mercado en tendencia (bull 2021-2024) pierde sistemáticamente — confirma, con un mecanismo distinto, el mismo patrón que ya cerró el eje reversión-tras-caída (lead-lag) y el eje cross-sectional invertido: en cripto majors 2021-2024 comprar la caída y vender la subida es la apuesta perdedora, no la ganadora. Ningún parámetro de ventana (24-168h) ni threshold (1.5-2.5σ) rescata el mecanismo.
+
+**Carry funding alto-menos-bajo** (`m4_carry_funding.py`): pasa el gate mecánico en 2/27 configs (7.4%), ambas en la esquina extrema del grid (z_threshold=2.0 —el valor más alto probado—, z_window=60 —el más largo—, hold=5 o 7). BTC y ETH alcanzan +0.55/+0.80 y +0.97/+0.99 respectivamente, pero **SOL es negativo en las 27/27 configs sin excepción** (−0.15 a −1.24), y el N de trades en las configs que pasan es marginal (35-48, apenas por encima de MIN_TRADES=30). No hay meseta: mover z_threshold de 2.0 a 1.5 o z_window de 60 a 30 destruye el pass. Mismo patrón que ATR Compression H2 y el cross-sectional (pico aislado, no plataforma) — históricamente esos picos no sobrevivieron a backtest/OOS. **Veredicto: NO-GO** pese al pass mecánico — no cumple el criterio de robustez (meseta + generalización a 3/3 activos) que el proyecto exige antes de pasar a implementación. Nota metodológica: el Sharpe mide únicamente el retorno de precio en la ventana de hold, no el ingreso de funding en sí (misma simplificación que `m4_funding_rate_positioning.py`).
+
+**Anomalía de baja volatilidad** (`m4_baja_volatilidad.py`): las 54 configs dan Sharpe negativo en los 3 activos sin ninguna excepción (peor resultado de las 4 hipótesis — 0 valores positivos en 162 celdas BTC/ETH/SOL). Tanto el brazo "long en régimen de baja vol" como el "short en régimen de alta vol" pierden. La anomalía de baja volatilidad (que en equities depende de restricciones de apalancamiento institucional, Frazzini-Pedersen) no tiene el mecanismo estructural equivalente en perpetuos cripto sin restricción de leverage — evidencia consistente con el H-V3 de Capa A (vol-targeting también deterioró Sharpe OOS).
+
+**Prima de asimetría** (`m4_asimetria.py`): modo contrarian (short skew alto / long skew bajo) falla limpio — 0/36, siempre negativo, mismo patrón de "comprar la caída pierde" que reversión a la media. Modo momentum (long skew alto / short skew bajo) tiene señal parcial: SOL pasa el umbral individual en 12/36 configs (hasta +0.93), pero BTC es negativo en 33/36 y ETH oscila cerca de cero — nunca coinciden 2/3 activos en la misma config. Sesgo de un solo activo (SOL), mismo patrón que H-V2 de Capa A (edge concentrado en SOL con volumen/liquidez distinta a BTC/ETH) — no generaliza.
+
+**Patrón cruzado a las 4 hipótesis:** todo lo que apuesta contrarian direccional puro contra el mercado (reversión a la media, skew contrarian) pierde limpio; todo lo que depende de un solo activo para pasar (carry en BTC/ETH pero no SOL, skew-momentum en SOL pero no BTC/ETH) es un pico aislado, no una meseta cross-asset — el mismo criterio de rechazo usado en Capa A (H-V2, cross-sectional, momentum residual). Ninguna de las 4 pasa a implementación C#. Scripts: `Trading.Research/m4_reversion_media.py`, `m4_carry_funding.py`, `m4_baja_volatilidad.py`, `m4_asimetria.py`.
+
