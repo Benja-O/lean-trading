@@ -474,3 +474,23 @@ Screening de cuatro hipótesis clásicas de literatura (§3.9, §8.2.1, §3.4, �
 
 **Patrón cruzado a las 4 hipótesis:** todo lo que apuesta contrarian direccional puro contra el mercado (reversión a la media, skew contrarian) pierde limpio; todo lo que depende de un solo activo para pasar (carry en BTC/ETH pero no SOL, skew-momentum en SOL pero no BTC/ETH) es un pico aislado, no una meseta cross-asset — el mismo criterio de rechazo usado en Capa A (H-V2, cross-sectional, momentum residual). Ninguna de las 4 pasa a implementación C#. Scripts: `Trading.Research/m4_reversion_media.py`, `m4_carry_funding.py`, `m4_baja_volatilidad.py`, `m4_asimetria.py`.
 
+---
+
+## Eje 3 — Re-test a costos MAKER (OFI Contrarian sub-hora) — 2026-07-03 — NO-GO
+
+**Hipótesis:** el eje 3 (OFI Contrarian 5m/15m) pasaba M4 54/54 a costo 0.0 pero moría 0/54 a costo taker real (0.12% RT, ADR-056). La entrada de reversión (comprar tras venta agresiva agotada) es naturalmente maker (se postea bid debajo del mercado) — el lever propuesto en la inflexión estructural del 2026-06-27 es probar si el modelo de costos taker (que asume ejecución agresiva) estaba sobre-penalizando un mecanismo que en la práctica se ejecutaría con fee maker.
+
+**Modelo (conservador, no costo-0 disfrazado):** precio límite = `close[t-1] × (1 − 0.05%)`; fill condicional real (`low[t] <= limite`, no 100% asumido); fee maker 0.02%/lado en entrada y en salida; **haircut de selección adversa de 5bp** sobre el retorno del fill (Glosten-Milgrom: cuando un maker-bid se llena es porque el flujo era tóxico y el precio sigue cayendo). Costo RT efectivo del modelo ≈ 0.09% (vs 0.12% taker). Misma grilla pre-registrada de 54 configs (`ofi_window×threshold×hold×timeframe`), mismo IS 2021-2024, mismo position tracking. Causalidad verificada (señal shift+rolling, límite con close previo, fill con low de la barra de señal, exit con close futuro sin solape).
+
+| Escenario | PASS/54 | Sharpe típico |
+|---|---|---|
+| M4 original (0.00% RT) | 54/54 | positivo por construcción |
+| Capa A taker (0.12% RT, ADR-056) | 0/54 | −4 a −44 |
+| **Maker modelo (este re-test, ~0.09% RT efectivo)** | **0/54** | **−0.13 a −20** |
+
+**Fill-rate** (no es el problema): mediana 59.7%-88.1% según activo/TF, todos razonables — el modelo maker sí ejecuta.
+
+**Diagnóstico:** el edge bruto del eje 3 no sobrevive a NINGÚN costo neto positivo, ni siquiera al escenario de ejecución más optimista-pero-defendible (maker con fill real + haircut de selección adversa). Los Sharpes catastróficos (hasta −20 en 5m hold=3) muestran que el "edge" a costo 0 es indistinguible de ruido de alta frecuencia — miles de trades/año con edge por trade menor al spread/fee mínimo posible en el venue. La mejor config (15m, thr=0.85, hold=12) reduce la magnitud (BTC −2.2 / ETH −1.5 / SOL −0.13) pero sigue negativa en 3/3 activos.
+
+**Veredicto: NO-GO.** El lever "ejecución maker" queda descartado para el eje 3 específicamente — no era un problema de modelo de costos (taker vs maker), era ausencia de edge neto real. Esto no reabre eje 3 bajo ningún supuesto de ejecución razonable. Script: `Trading.Research/layer_a_reversion_maker.py`.
+

@@ -99,6 +99,16 @@ sobre Binance perps. **Proximo paso: reevaluacion estructural** — cambiar un s
 del marco. Pendiente de decision de research-direction/usuario.
 Nota de proceso: el eje 3 revelo que algunos scripts M4 corrian a costo 0.0 — el M4 debe correr con
 costos por estandar (ADR-040/ADR-056).
+**Screening M4 clasicas (2026-07-01): 4/4 NO-GO** (reversion media, carry funding, baja vol,
+asimetria) — confirma la inflexion, sin candidatas nuevas.
+**Lever "ejecucion maker" (2026-07-03): ❌ CERRADO NO-GO.** Re-test de eje 3 (OFI Contrarian sub-hora)
+con modelo maker conservador (fill condicional real 59-88%, fee 0.02%/lado, haircut de seleccion
+adversa 5bp, costo RT efectivo ~0.09% vs 0.12% taker): **0/54 configs**, Sharpes -0.13 a -20 (mismo
+orden de magnitud que el resultado taker -4 a -44). El fill-rate no era el problema; el edge bruto no
+sobrevive a NINGUN costo neto positivo. Descarta el supuesto "el costo taker estaba sobre-penalizando
+un mecanismo maker" — no era un problema de modelo de costos, era ausencia de edge neto real. Ver
+`strategy_experiments.md`. **De los 3 levers de reevaluacion estructural, quedan 2 sin explorar:
+venue con opciones (bloqueado — Binance no los tiene) y otra clase de dato (no explorado).**
 
 ---
 
