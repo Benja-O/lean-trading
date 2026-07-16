@@ -1,223 +1,113 @@
-<picture >
-  <source media="(prefers-color-scheme: dark)" srcset="https://github.com/user-attachments/assets/f3581da5-1983-4f6c-af5a-55c79b37913a">
-  <source media="(prefers-color-scheme: light)" srcset="https://github.com/user-attachments/assets/0f8022d5-952d-418c-9011-2644830137d2">
-  <img alt="lean-header" width="100%">
-</picture>
-<br />
-<br />
+# Sistema de Trading Algorítmico Institucional
 
-[![Build Status](https://github.com/QuantConnect/Lean/workflows/Build%20%26%20Test%20Lean/badge.svg)](https://github.com/QuantConnect/Lean/actions?query=workflow%3A%22Build%20%26%20Test%20Lean%22) &nbsp;&nbsp;&nbsp; [![Regression Tests](https://github.com/QuantConnect/Lean/workflows/Regression%20Tests/badge.svg)](https://github.com/QuantConnect/Lean/actions?query=workflow%3A%22Regression%20Tests%22) &nbsp;&nbsp;&nbsp; [![LEAN Forum](https://img.shields.io/badge/debug-LEAN%20Forum-53c82b.svg)](https://www.quantconnect.com/forum/discussions/1/lean) &nbsp;&nbsp;&nbsp; [![Discord Chat](https://img.shields.io/badge/chat-Discord-53c82b.svg)](https://www.quantconnect.com/discord)
+Sistema propio de research, backtesting y ejecución en vivo de estrategias sistemáticas en cripto, construido sobre el motor open-source [QuantConnect/Lean](https://github.com/QuantConnect/Lean) con una capa de dominio propia bajo Clean Architecture / DDD.
 
+No es un clon de Lean con algoritmos de ejemplo: es un sistema de decisión con arquitectura desacoplada del motor, un gate estadístico obligatorio antes de arriesgar una sola línea de implementación, y una bitácora de ~50 ADRs que documenta cada decisión — incluida cada estrategia que **se mató a propósito** por no sobrevivir la validación.
 
-[Lean Home][1] | [Documentation][2] | [Download Zip][3] | [Docker Hub][8] | [Nuget][9]
+**Autor:** Benjamín Otero — [LinkedIn](https://www.linkedin.com/in/benjamin-otero/)
 
-#
+---
 
-<picture >
-  <source media="(prefers-color-scheme: dark)" srcset="https://github.com/user-attachments/assets/09d7707d-619d-48e2-b6d9-ef2d2d61144b">
-  <source media="(prefers-color-scheme: light)" srcset="https://github.com/user-attachments/assets/aab2422c-f480-421d-9ad2-5a355843d82a">
-  <img alt="features-header" width="100%">
-</picture>
+## Por qué existe este repo
 
-LEAN is an event-driven, professional-caliber algorithmic trading  platform built with a passion for elegant engineering and deep quant  concept modeling. Out-of-the-box alternative data and live-trading support.
-<br/>
-<br/>
+Es mi proyecto personal de aprendizaje profundo en ingeniería de sistemas de trading: research cuantitativo, arquitectura de software de grado institucional y operación de un sistema vivo (paper trading con broker real, 24/7 en un VPS). Lo comparto porque estoy buscando oportunidades en **desarrollo de software para trading algorítmico / fintech**, y este código es la evidencia más honesta de cómo trabajo.
 
-<picture >
-  <source media="(prefers-color-scheme: dark)" srcset="https://github.com/user-attachments/assets/d0ca17eb-307f-4155-b989-9afe502845b9">
-  <source media="(prefers-color-scheme: light)" srcset="https://github.com/user-attachments/assets/9135fa86-c3e3-48e6-bbf9-de97f17afb52">
-  <img alt="feature-list" width="100%">
-</picture>
+## Filosofía: rigor antes que resultados
 
-<br/>
-<br/>
+La pregunta que gobierna cada decisión no es *"¿funciona esta estrategia?"* sino *"¿cómo sé que no me estoy mintiendo a mí mismo?"*. En la práctica, eso significa:
 
-#
+- **Ninguna estrategia llega a implementarse sin pasar antes un gate estadístico (M4)** sobre datos correctos, con costos reales incluidos.
+- **Toda validación se corre in-sample / out-of-sample**, nunca se acepta un resultado solo-IS.
+- **Cada hipótesis rechazada queda documentada** en [`Trading.Research/strategy_experiments.md`](Trading.Research/strategy_experiments.md) con la razón exacta del rechazo — no se borra el rastro de lo que no funcionó.
+- **Cuando el propio pipeline de validación tuvo un bug** (un lookahead sutil de apareo de features que *inflaba* el Sharpe de 6.6 a un real −0.29), el hallazgo se documentó, se corrigió la causa raíz y se re-auditaron todas las estrategias que habían pasado bajo el bug — sin excepciones. Ver ADR-053/054.
+- **Toda decisión arquitectónica queda en un ADR** ([`DECISIONS.md`](DECISIONS.md), ~50 entradas) — nada se decide "de pasada" en un commit.
 
-<picture >
-  <source media="(prefers-color-scheme: dark)" srcset="https://github.com/user-attachments/assets/f486e040-e350-4c9b-98c5-7b3902c0b7d8">
-  <source media="(prefers-color-scheme: light)" srcset="https://github.com/user-attachments/assets/d28fd3d4-dad8-4828-94a9-676ddb360bdd">
-  <img alt="modular-header" width="100%">
-</picture>
-LEAN is modular in design, with each component pluggable and customizable. It ships with models for all major plug-in points.
-<br/>
-<br/>
+El estado actual de investigación es deliberadamente honesto: tras más de una decena de ejes de hipótesis (microestructura, cross-sectional, régimen HMM, momentum, volatilidad, lead-lag) el research está en una fase de re-evaluación estructural — la mayoría fue **rechazada por costos reales o por no sobrevivir OOS**, no aprobada a la fuerza para tener "algo que mostrar". Ese es el punto: un sistema que no puede matar una mala idea no sirve para nada en producción.
 
-<picture >
-  <source media="(prefers-color-scheme: dark)" srcset="https://github.com/user-attachments/assets/7989d185-45cd-4a40-acef-6ff61d9d82f6">
-  <source media="(prefers-color-scheme: light)" srcset="https://github.com/user-attachments/assets/5f9cc976-a715-495a-9977-87961509d2e0">
-  <img alt="modular-architecture" width="100%">
-</picture>
+## Arquitectura
 
-#
+Clean Architecture con una regla no negociable: **el dominio y la aplicación no conocen QuantConnect.**
 
-<picture >
-  <source media="(prefers-color-scheme: dark)" srcset="https://github.com/user-attachments/assets/9b7b7abf-b0f5-41a3-8a1b-a9400738b27a">
-  <source media="(prefers-color-scheme: light)" srcset="https://github.com/user-attachments/assets/1bb1dd23-dbc7-4a96-b556-edbae84012b5">
-  <img alt="cli-header" width="100%">
-</picture>
+```mermaid
+graph TD
+    subgraph Host["Trading.Strategies — Host (único que conoce Lean)"]
+        A[TradingAlgorithmHost : QCAlgorithm]
+        B[Adaptadores: LeanOrderRouter, SystemClock]
+        C[Estrategias: EmaCrossStrategy, OfiContrarianStrategy...]
+    end
+    subgraph App["Trading.Application — Casos de uso"]
+        D[BarProcessingService]
+        E[KillSwitchManager]
+        F[PositionSizer / OrderNormalizer]
+    end
+    subgraph Domain["Trading.Domain — Núcleo (cero dependencias externas)"]
+        G["Value Objects: Money, Price, Quantity, InstrumentId"]
+        H["Interfaces: IOrderRouter, IClock, IPortfolioState"]
+    end
+    subgraph Support["Analytics / Data / Research"]
+        I[Trading.Analytics: indicadores, métricas]
+        J[Trading.Data: adaptadores de datos]
+        K["Trading.Research: gate M4 (Python)"]
+    end
 
-<img width="100%" alt="lean-animation" src="https://github.com/user-attachments/assets/09a32ba9-99ee-4fa9-9b33-d98dbf5d291f">
-
-QuantConnect Lean CLI is a command-line interface tool for interacting with the Lean algorithmic trading engine, which is an open-source platform for backtesting and live trading algorithms in multiple financial markets. It allows developers to manage projects, run backtests, deploy live algorithms, and perform various other tasks related to algorithmic trading directly from the terminal. The CLI simplifies the workflow by automating tasks, enabling seamless integration with cloud services, and facilitating collaboration with the QuantConnect community. It's designed for quant developers who need a powerful and flexible tool to streamline their trading strategies. Please watch the [instructions videos](https://www.youtube.com/watch?v=QJibe1XpP-U&list=PLD7-B3LE6mz61Hojce6gKshv5-7Qo4y0r) to learn more.
-
-### Installation
-
-```
-pip install lean
+    Host --> App --> Domain
+    Support -.-> Domain
+    K -.->|"Sharpe ≥ 0.5 en 2/3 activos"| C
 ```
 
+| Capa | Responsabilidad | Regla de oro |
+|---|---|---|
+| `Trading.Domain` | Value objects, interfaces, excepciones de dominio | Cero dependencias externas; síncrono y determinista (sin `async`, sin I/O, sin reloj de sistema) |
+| `Trading.Application` | Orquestación, risk management, sizing | Solo depende de `Trading.Domain`; interactúa con el exchange vía abstracciones inyectadas |
+| `Trading.Strategies` | Host (`QCAlgorithm`), adaptadores, estrategias | Único proyecto que puede hacer `using QuantConnect;` |
+| `Trading.Analytics` | Indicadores y cálculos analíticos | — |
+| `Trading.Data` | Adaptadores de datos / repositorios | — |
+| `Trading.Research` | Screening estadístico (M4, Python) antes de tocar C# | Gate obligatorio: si no pasa, no se implementa |
 
-### Commands
+Otras reglas de ingeniería que se aplican sin excepción (documentadas en [`AI.md`](AI.md)): prohibido `double`/`float` en cualquier magnitud monetaria (siempre `decimal` + value objects `Money`/`Price`/`Quantity`), prohibido `DateTime.UtcNow` fuera de los adaptadores (todo acceso al tiempo vía `IClock`, inyectable y testeable), prohibido estado estático mutable en Domain/Application, cero abreviaturas en nombres de variables.
 
-Create a new project containing starter code
+## Qué se validó en producción (no solo en backtest)
 
-```
-lean project-create
-```
+- **Paper trading en vivo 24/7** en un VPS, con ciclo completo de gestión de posición (entrada → stop/take-profit → cierre) validado end-to-end sobre BTCUSDT/ETHUSDT/SOLUSDT.
+- **Integración con broker real (Binance)**: routing de órdenes real, resolución de bloqueos operativos de exchange en vivo (rate limits, sincronización de reloj con tolerancia de 1000ms, validación de notional mínimo).
+- **Dead-man's switch y monitor de salud** (`StrategyHealthMonitor`) que apaga una estrategia automáticamente si degrada por debajo de umbrales operativos definidos en [`POLICY.md`](POLICY.md) — no un backtest bonito sin control de riesgo real.
+- **Pipeline de features de microestructura en vivo** (order flow imbalance, CVD) calculado desde el stream de trades del exchange, no solo sobre datos históricos.
 
-Run a local Jupyter Lab environment using Docker
+## Stack técnico
 
-```
-lean research
-```
+- **C# / .NET** — motor de ejecución y dominio (sobre QuantConnect Lean)
+- **Python** — screening estadístico M4 (~38 scripts), Monte Carlo, modelos de régimen (HMM)
+- **Binance** (spot/futures) — broker de datos y ejecución, real y paper
+- **xUnit** — suite de tests (Domain, Application, Strategies)
+- **VPS Windows** — despliegue live 24/7, con sincronización de reloj NTP dedicada para tolerancia de exchange
 
-Backtest a project locally using Docker
+## Estructura del repositorio
 
-```
-lean backtest
-```
-
-Optimize a project locally using Docker
-
-```
-lean optimize
-```
-
-Start live trading a project locally using Docker
-
-```
-lean live
-```
-
-Download the [LEAN CLI Cheat Sheet](https://cdn.quantconnect.com/i/tu/cli-cheat-sheet.pdf) for the full list of commands.
-
-#
-
-<picture >
-  <source media="(prefers-color-scheme: dark)" srcset="https://github.com/user-attachments/assets/85b548f8-9fd1-47f1-9b10-d73b3cfc6b23">
-  <source media="(prefers-color-scheme: light)" srcset="https://github.com/user-attachments/assets/b6866983-adac-4461-ac2f-8642a72ef2a5">
-  <img alt="modular-architecture" width="100%">
-</picture>
-<br>
-
-![diagram](https://github.com/user-attachments/assets/f482fae4-5908-4d95-a427-4b1d685c355c)
-
-#
-
-<picture >
-  <source media="(prefers-color-scheme: dark)" srcset="https://github.com/user-attachments/assets/7b230a0d-6bf2-45bb-872e-c0faf4f1471e">
-  <source media="(prefers-color-scheme: light)" srcset="https://github.com/user-attachments/assets/23b59138-aab5-43c3-91b0-20eff46ab21a">
-  <img alt="modular-architecture" width="100%">
-</picture>
-
-
-This section will cover how to install lean locally for you to use in your environment. **For most users we strongly recommend the LEAN CLI which is prebuilt and runs on all platforms.** Refer to the following readme files for a detailed guide regarding using your local IDE with Lean.
-<br/>
-
-* [VS Code](.vscode/readme.md)
-* [VS](.vs/readme.md)
-  
-To install locally, download the zip file with the [latest master](https://github.com/QuantConnect/Lean/archive/master.zip) and unzip it to your favorite location. Alternatively, install [Git](https://git-scm.com/downloads) and clone the repo:
+Este repo es un fork de Lean; las carpetas propias del sistema de trading son:
 
 ```
-git clone https://github.com/QuantConnect/Lean.git
-cd Lean
+Trading.Domain/         Entidades, interfaces, value objects
+Trading.Application/    Casos de uso, risk management, sizing
+Trading.Strategies/     Implementaciones IStrategy + host de QuantConnect
+Trading.Analytics/      Indicadores y métricas
+Trading.Data/           Adaptadores de datos
+Trading.Research/       Screening M4 (Python) + bitácora de experimentos
+Trading.Models/         Modelos de régimen entrenados (HMM)
+*.Tests/                Suites de test por capa
 ```
 
-### macOS 
+El resto del árbol (`Algorithm.CSharp/`, `Engine/`, `Brokerages/`, etc.) es el motor Lean original — ver [`Documentation/LEAN-ENGINE.md`](Documentation/LEAN-ENGINE.md) para la documentación del engine base y cómo compilarlo/correrlo localmente.
 
-NOTE: Visual Studio for Mac [has been discontinued](https://learn.microsoft.com/en-gb/visualstudio/releases/2022/what-happened-to-vs-for-mac), use Visual Studio Code instead
+## Documentos vivos del proyecto
 
-- Install [Visual Studio Code for Mac](https://code.visualstudio.com/download)
-- Install the [C# Dev Kit extension](https://marketplace.visualstudio.com/items?itemName=ms-dotnettools.csdevkit)
-- Install [dotnet 9 SDK](https://dotnet.microsoft.com/en-us/download/dotnet/9.0):
-- To build the solution, either:
-  - choose **Run Task** > **build** from the Panel task dropdown, or
-  - from the command line run
-    ```
-    dotnet build
-    ```
-- To run the solution, either:
-  - choose **Run and Debug** from the Activity Bar, then click **Launch**, or
-  - click F5, or
-  - from the command line run
-    ```
-    cd Launcher/bin/Debug
-    dotnet QuantConnect.Lean.Launcher.dll
-    ```
+| Documento | Contenido |
+|---|---|
+| [`ROADMAP.md`](ROADMAP.md) | Estado actual, hitos completados y en curso, deuda técnica |
+| [`DECISIONS.md`](DECISIONS.md) | ~50 ADRs — el porqué de cada decisión arquitectónica |
+| [`POLICY.md`](POLICY.md) | Reglas operativas en producción: umbrales de riesgo, runbooks |
+| [`AI.md`](AI.md) | Estándar de arquitectura y convenciones de código |
+| [`Trading.Research/strategy_experiments.md`](Trading.Research/strategy_experiments.md) | Bitácora de hipótesis probadas y por qué se rechazaron |
 
-### Linux (Debian, Ubuntu)
+## Licencia
 
-- Install [dotnet 9](https://docs.microsoft.com/en-us/dotnet/core/install/linux):
-- Compile Lean Solution:
-```
-dotnet build QuantConnect.Lean.sln
-```
-- Run Lean:
-```
-cd Launcher/bin/Debug
-dotnet QuantConnect.Lean.Launcher.dll
-```
-
-### Windows
-
-- Install [Visual Studio](https://www.visualstudio.com/en-us/downloads/download-visual-studio-vs.aspx)
-- Open `QuantConnect.Lean.sln` in Visual Studio
-- Build the solution by clicking Build Menu -> Build Solution (this should trigger the NuGet package restore)
-- Press `F5` to run
-
-### Python Support
-
-A full explanation of the Python installation process can be found in the [Algorithm.Python](https://github.com/QuantConnect/Lean/tree/master/Algorithm.Python#quantconnect-python-algorithm-project) project.
-
-### Local-Cloud Hybrid Development. 
-
-Seamlessly develop locally in your favorite development environment, with full autocomplete and debugging support to quickly and easily identify problems with your strategy. Please see the [CLI Home](https://www.lean.io/cli) for more information.
-
-## Issues and Feature Requests ##
-
-Please submit bugs and feature requests as an issue to the [Lean Repository][5]. Before submitting an issue, please read the instructions to ensure it is not duplicated.
-
-## Mailing List ## 
-
-The mailing list for the project can be found on [LEAN Forum][6]. Please use this to ask for assistance with your installation and setup questions.
-
-## Contributors and Pull Requests ##
-
-Contributions are warmly welcomed, but we ask you to read the existing code to see how it is formatted and commented on and ensure contributions match the existing style. All code submissions must include accompanying tests. Please see the [contributor guidelines][7]. All accepted pull requests will get a $50 cloud credit on QuantConnect. Once your pull request has been merged, write to us at support@quantconnect.com with a link to your PR to claim your free live trading. QC <3 Open Source.
-
-A huge thank you to all our contributors!
-
-<br/>
-
-<a href="https://github.com/QuantConnect/Lean/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=QuantConnect/Lean" />
-</a>
-
-## Acknowledgements ##
-
-The open sourcing of QuantConnect would not have been possible without the support of the Pioneers. The Pioneers formed the core 100 early adopters of QuantConnect who subscribed and allowed us to launch the project into open source. 
-
-Ryan H, Pravin B, Jimmie B, Nick C, Sam C, Mattias S, Michael H, Mark M, Madhan, Paul R, Nik M, Scott Y, BinaryExecutor.com, Tadas T, Matt B, Binumon P, Zyron, Mike O, TC, Luigi, Lester Z, Andreas H, Eugene K, Hugo P, Robert N, Christofer O, Ramesh L, Nicholas S, Jonathan E, Marc R, Raghav N, Marcus, Hakan D, Sergey M, Peter McE, Jim M, INTJCapital.com, Richard E, Dominik, John L, H. Orlandella, Stephen L, Risto K, E.Subasi, Peter W, Hui Z, Ross F, Archibald112, MooMooForex.com, Jae S, Eric S, Marco D, Jerome B, James B. Crocker, David Lypka, Edward T, Charlie Guse, Thomas D, Jordan I, Mark S, Bengt K, Marc D, Al C, Jan W, Ero C, Eranmn, Mitchell S, Helmuth V, Michael M, Jeremy P, PVS78, Ross D, Sergey K, John Grover, Fahiz Y, George L.Z., Craig E, Sean S, Brad G, Dennis H, Camila C, Egor U, David T, Cameron W, Napoleon Hernandez, Keeshen A, Daniel E, Daniel H, M.Patterson, Asen K, Virgil J, Balazs Trader, Stan L, Con L, Will D, Scott K, Barry K, Pawel D, S Ray, Richard C, Peter L, Thomas L., Wang H, Oliver Lee, Christian L..
-
-
-  [1]: https://www.lean.io/ "Lean Open Source Home Page"
-  [2]: https://www.lean.io/docs/ "Lean Documentation"
-  [3]: https://github.com/QuantConnect/Lean/archive/master.zip
-  [4]: https://www.quantconnect.com "QuantConnect"
-  [5]: https://github.com/QuantConnect/Lean/issues
-  [6]: https://www.quantconnect.com/forum/discussions/1/lean
-  [7]: https://github.com/QuantConnect/Lean/blob/master/CONTRIBUTING.md
-  [8]: https://hub.docker.com/orgs/quantconnect/repositories
-  [9]: https://www.nuget.org/profiles/jaredbroad
+Este proyecto hereda la licencia Apache 2.0 del motor [QuantConnect/Lean](https://github.com/QuantConnect/Lean). Ver [`LICENSE`](LICENSE).
