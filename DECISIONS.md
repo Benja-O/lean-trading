@@ -2524,7 +2524,7 @@ En la planificación original se asumió que el filtro de régimen sería un `IR
 ```csharp
 if (_riskOrchestrator.IsKillSwitchActivated) continue;
 if (signalDirection == SignalDirection.Flat) continue;
-// â† acá va el filtro de régimen, como un guard más
+// ← acá va el filtro de régimen, como un guard más
 if (_portfolioState.IsInvested(instrumentId)) continue;
 ```
 

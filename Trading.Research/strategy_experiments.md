@@ -4,20 +4,20 @@ Registro de hipótesis evaluadas por Fase 0. Fuente de verdad para evitar re-exp
 
 | Hito | Estrategia | TF | Activos | M4 | Backtest Sharpe | Win Rate | Estado | Razón descarte |
 |---|---|---|---|---|---|---|---|---|
-| E | CVD Divergence bidireccional | 1h | BTC, ETH, SOL | âŒ 0/9 configs (0%) bidireccional. Long-only: ✅ 9/9 configs, BTC +1.74 / ETH +0.52 / SOL +0.95 (3/3) | N/A — ver CvdBullishDivergenceStrategy | N/A | ✅→ CvdBullishDivergenceStrategy implementada | Bidireccional falla: Short signals destruyen el Sharpe en ETH y SOL (SOL Short -0.92). Long-only pasa 3/3 activos con lookback=24, hold=6. Implementado como estrategia Long-only separada. Script: `Trading.Research/m4_cvd_divergence.py`. |
-| E | CvdBullishDivergenceStrategy | 1h | BTC, ETH, SOL | ✅ BTC +1.74, ETH +0.52, SOL +0.95 (lookback=24, hold=6 — 3/3 activos) | -1.85 (IS 2021-2024, sin OPS-2, SL=10%) | 48% | âŒ | M4 pasó pero QC IS falla. Root cause: M4 contaba señales solapadas como trades independientes — inflación artificial del Sharpe. QC solo entra una vez por posición. Expectancy trade-level negativa (-0.022%/trade). Eliminada. Ver nota. |
-| E | DonchianBreakoutStrategy | 4h | BTC | âš ï¸ +0.705 (señal mensual — escala incorrecta) | -2.623 (lookback 126) | 13% | âŒ | Win rate 13-24% con cualquier lookback. Desconexión de escala entre M4 (mensual) e implementación (4h). |
-| E | IntradayMomentumStrategy | 30m | ETH, BNB, BTC | ✅ ETH +0.645, BNB +0.691 / âŒ BTC -0.204 | -3.28 (ETH OOS 2025) | 36% | âŒ | Edge arbitrado por institucionales en 2025. M4 validó 2020-2024; OOS falla M1+M2. |
-| E | BollingerBandsStrategy | 4h | BTC, ETH, BNB | âŒ 5/9 configs (55.6%) | N/A (M4 rechazado) | N/A | âŒ | M4 falla: BTC OK en oversold=1,4; ETH falla todas; BNB OK todas. Inconsistencia cross-asset. |
-| E | H3 — Lead-lag BTC→ETH/BNB | 1h | BTC (señal), ETH, BNB | âŒ 0/6 configs (0%) | N/A (M4 rechazado) | ~47% | âŒ | Win rate sistemáticamente < 50% en todos los thresholds (0.5/1.0/1.5%) y ambos activos. Correlación BTC-ETH/BNB ocurre en la misma barra (simultaneidad), no con lag de 1 barra. Edge ya arbitrado. |
-| E | H1 — RSI(14) + HMM Squeeze | 4h | BTC, ETH, BNB | âŒ 0/18 configs (0%) | N/A (M4 rechazado) | 55-69% | âŒ | Win rate alto (55-69%) pero Sharpe negativo — retornos perdedores superan en magnitud a los ganadores. Muy pocas señales (RSI<25 en Squeeze: 12-19 trades/5 años = insuficiente poder estadístico). Sin edge explotable. |
-| E | Funding Rate Positioning (FRP) | Diario | BTC, ETH, SOL | âŒ Bidireccional: BTC 8/54, ETH 0/54, SOL 11/54. SHORT-only: BTC 0/54, ETH 3/54, SOL 5/54 | N/A (M4 rechazado) | N/A | âŒ | Señal no generalizable cross-asset. BTC tiene edge en el lado LONG (crowded shorts → squeeze alcista), no en el SHORT. ETH resistente a cualquier señal de funding. El mecanismo existe pero opera en timeframes intraday, no diarios. |
-| E | H2 — ATR Compression Breakout | 4h | BTC, ETH, BNB | ✅ BTC 6/9, ETH 5/9, BNB 7/9 | -0.922 (BTC, Sharpe) | 37% | âŒ | M4 pasado. Backtest con SL 2%: Sharpe -0.922, Win 37%, DD 30.3% (kill switch 2025-03-19). SL 2% fijo mata el edge antes de que se materialice. Ver ADR-035. |
-| E | ATR Compression + SL ATR (2.5×, TP 3.5×) | 4h | BTC, ETH, BNB | ✅ (H2) | -0.779 | 37% | âŒ | ATR SL mejora DD (30.3%→18.3%) y Sharpe (-0.922→-0.779) pero win rate permanece 37%. OPS-2 disparó BTC 2025-07-27 (PF 0.70), ETH 2025-12-01 (PF 0.75). Falla M1 y M2. El problema es el edge de la señal, no el risk management. |
-| E | ATR Compression + Taker Buy Ratio | 1h | BTC, ETH, BNB | âŒ BTC 0/54, ETH 9/54, BNB 0/54 | N/A (M4 rechazado) | N/A | âŒ | TBR no añade edge cross-asset en 1h. ETH tiene señal parcial (TBR=0.55, hold=4-6b, Sharpe ~0.8) pero estadísticamente débil (30-40 trades/4 años). BTC y BNB: 0 configs. El filtro TBR estrecha tanto la señal que no hay frecuencia suficiente. Script: `Trading.Research/m4_atr_tbr.py`. |
+| E | CVD Divergence bidireccional | 1h | BTC, ETH, SOL | ❌ 0/9 configs (0%) bidireccional. Long-only: ✅ 9/9 configs, BTC +1.74 / ETH +0.52 / SOL +0.95 (3/3) | N/A — ver CvdBullishDivergenceStrategy | N/A | ✅→ CvdBullishDivergenceStrategy implementada | Bidireccional falla: Short signals destruyen el Sharpe en ETH y SOL (SOL Short -0.92). Long-only pasa 3/3 activos con lookback=24, hold=6. Implementado como estrategia Long-only separada. Script: `Trading.Research/m4_cvd_divergence.py`. |
+| E | CvdBullishDivergenceStrategy | 1h | BTC, ETH, SOL | ✅ BTC +1.74, ETH +0.52, SOL +0.95 (lookback=24, hold=6 — 3/3 activos) | -1.85 (IS 2021-2024, sin OPS-2, SL=10%) | 48% | ❌ | M4 pasó pero QC IS falla. Root cause: M4 contaba señales solapadas como trades independientes — inflación artificial del Sharpe. QC solo entra una vez por posición. Expectancy trade-level negativa (-0.022%/trade). Eliminada. Ver nota. |
+| E | DonchianBreakoutStrategy | 4h | BTC | ⚠️ +0.705 (señal mensual — escala incorrecta) | -2.623 (lookback 126) | 13% | ❌ | Win rate 13-24% con cualquier lookback. Desconexión de escala entre M4 (mensual) e implementación (4h). |
+| E | IntradayMomentumStrategy | 30m | ETH, BNB, BTC | ✅ ETH +0.645, BNB +0.691 / ❌ BTC -0.204 | -3.28 (ETH OOS 2025) | 36% | ❌ | Edge arbitrado por institucionales en 2025. M4 validó 2020-2024; OOS falla M1+M2. |
+| E | BollingerBandsStrategy | 4h | BTC, ETH, BNB | ❌ 5/9 configs (55.6%) | N/A (M4 rechazado) | N/A | ❌ | M4 falla: BTC OK en oversold=1,4; ETH falla todas; BNB OK todas. Inconsistencia cross-asset. |
+| E | H3 — Lead-lag BTC→ETH/BNB | 1h | BTC (señal), ETH, BNB | ❌ 0/6 configs (0%) | N/A (M4 rechazado) | ~47% | ❌ | Win rate sistemáticamente < 50% en todos los thresholds (0.5/1.0/1.5%) y ambos activos. Correlación BTC-ETH/BNB ocurre en la misma barra (simultaneidad), no con lag de 1 barra. Edge ya arbitrado. |
+| E | H1 — RSI(14) + HMM Squeeze | 4h | BTC, ETH, BNB | ❌ 0/18 configs (0%) | N/A (M4 rechazado) | 55-69% | ❌ | Win rate alto (55-69%) pero Sharpe negativo — retornos perdedores superan en magnitud a los ganadores. Muy pocas señales (RSI<25 en Squeeze: 12-19 trades/5 años = insuficiente poder estadístico). Sin edge explotable. |
+| E | Funding Rate Positioning (FRP) | Diario | BTC, ETH, SOL | ❌ Bidireccional: BTC 8/54, ETH 0/54, SOL 11/54. SHORT-only: BTC 0/54, ETH 3/54, SOL 5/54 | N/A (M4 rechazado) | N/A | ❌ | Señal no generalizable cross-asset. BTC tiene edge en el lado LONG (crowded shorts → squeeze alcista), no en el SHORT. ETH resistente a cualquier señal de funding. El mecanismo existe pero opera en timeframes intraday, no diarios. |
+| E | H2 — ATR Compression Breakout | 4h | BTC, ETH, BNB | ✅ BTC 6/9, ETH 5/9, BNB 7/9 | -0.922 (BTC, Sharpe) | 37% | ❌ | M4 pasado. Backtest con SL 2%: Sharpe -0.922, Win 37%, DD 30.3% (kill switch 2025-03-19). SL 2% fijo mata el edge antes de que se materialice. Ver ADR-035. |
+| E | ATR Compression + SL ATR (2.5×, TP 3.5×) | 4h | BTC, ETH, BNB | ✅ (H2) | -0.779 | 37% | ❌ | ATR SL mejora DD (30.3%→18.3%) y Sharpe (-0.922→-0.779) pero win rate permanece 37%. OPS-2 disparó BTC 2025-07-27 (PF 0.70), ETH 2025-12-01 (PF 0.75). Falla M1 y M2. El problema es el edge de la señal, no el risk management. |
+| E | ATR Compression + Taker Buy Ratio | 1h | BTC, ETH, BNB | ❌ BTC 0/54, ETH 9/54, BNB 0/54 | N/A (M4 rechazado) | N/A | ❌ | TBR no añade edge cross-asset en 1h. ETH tiene señal parcial (TBR=0.55, hold=4-6b, Sharpe ~0.8) pero estadísticamente débil (30-40 trades/4 años). BTC y BNB: 0 configs. El filtro TBR estrecha tanto la señal que no hay frecuencia suficiente. Script: `Trading.Research/m4_atr_tbr.py`. |
 
-| E | OFI Momentum | 1h | BTC, ETH, SOL | âŒ 0/27 configs (0%) — Sharpe negativo en todos. Mejor: BTC +0.383 (window=24, thr=0.75, hold=8) | N/A (M4 rechazado) | N/A | âŒ | OFI en top percentil no predice continuación en 1h. Contrariamente, Short cuando OFI bajo da Sharpe -1.2 (implica que precio SUBE después de venta agresiva). Script: `Trading.Research/m4_ofi_momentum.py`. |
-| E | OFI Contrarian (Long-only) | 1h | BTC, ETH, SOL | ✅ 25/27 configs. Mejor: BTC +0.869, ETH +1.475, SOL +1.367 (window=24, thr=0.85, hold=8) | **0.503** (IS 2021-2024) | 44% IS / 36% OOS | âŒ | Hito G OOS FALLA. OOS 2025-2026Q1: Sharpe=-0.703, Net=-12.7%, PF=0.84. Win rate colapsó 44%→36%. P(Sharpe<0)=77%. Edge ligado al bull market 2021-2024; no generaliza. Eliminada. Ver ADR-039. |
+| E | OFI Momentum | 1h | BTC, ETH, SOL | ❌ 0/27 configs (0%) — Sharpe negativo en todos. Mejor: BTC +0.383 (window=24, thr=0.75, hold=8) | N/A (M4 rechazado) | N/A | ❌ | OFI en top percentil no predice continuación en 1h. Contrariamente, Short cuando OFI bajo da Sharpe -1.2 (implica que precio SUBE después de venta agresiva). Script: `Trading.Research/m4_ofi_momentum.py`. |
+| E | OFI Contrarian (Long-only) | 1h | BTC, ETH, SOL | ✅ 25/27 configs. Mejor: BTC +0.869, ETH +1.475, SOL +1.367 (window=24, thr=0.85, hold=8) | **0.503** (IS 2021-2024) | 44% IS / 36% OOS | ❌ | Hito G OOS FALLA. OOS 2025-2026Q1: Sharpe=-0.703, Net=-12.7%, PF=0.84. Win rate colapsó 44%→36%. P(Sharpe<0)=77%. Edge ligado al bull market 2021-2024; no generaliza. Eliminada. Ver ADR-039. |
 
 ---
 
@@ -308,16 +308,16 @@ Período IS: 2021-2024. Período OOS: 2025-2026-06-09. Activos: BTCUSDT, ETHUSDT
 
 | ID | Hipótesis | Implementación | M4 Sharpe (BTC/ETH/SOL) | QC IS Sharpe | QC OOS Sharpe | Estado |
 |---|---|---|---|---|---|---|
-| H1 | VWAP Deviation — Long cuando (close-vwap)/vwap < -1.5% | VwapDeviationStrategy | ✅ PASS (≥2/3) | -0.369 | — | âŒ FAIL IS |
-| H2 | Trade Count Spike — Long cuando ArrivalRate en P95 y PriceReturn plano | TradeCountSpikeStrategy | ✅ PASS (≥2/3) | -1.553 | — | âŒ FAIL IS |
+| H1 | VWAP Deviation — Long cuando (close-vwap)/vwap < -1.5% | VwapDeviationStrategy | ✅ PASS (≥2/3) | -0.369 | — | ❌ FAIL IS |
+| H2 | Trade Count Spike — Long cuando ArrivalRate en P95 y PriceReturn plano | TradeCountSpikeStrategy | ✅ PASS (≥2/3) | -1.553 | — | ❌ FAIL IS |
 | H3 | CVD Sell Exhaustion — Long cuando close=min(47b) y CvdDelta>0 | CvdSellExhaustionStrategy | ✅ PASS (≥2/3) | 2.178 | 1.718 | ✅ APROBADA |
-| H4 | CVD Structure Shift — Long cuando CVD cambia de negativo a positivo | — (M4 FAIL) | âŒ FAIL | — | — | âŒ |
+| H4 | CVD Structure Shift — Long cuando CVD cambia de negativo a positivo | — (M4 FAIL) | ❌ FAIL | — | — | ❌ |
 | H5 | Trade Size Institutional — Long cuando MeanTradeSize en P90 y BSR>1.02 | TradeSizeInstitutionalStrategy | ✅ PASS (≥2/3) | 3.985 | 4.186 | ✅ APROBADA |
-| H6 | CVD-OFI Divergence — Long cuando CVD positivo pero OFI negativo | — (M4 FAIL) | âŒ FAIL | — | — | âŒ |
-| H7 | Arrival Rate Momentum — Long cuando ArrivalRate acelerando | — (M4 FAIL) | âŒ FAIL | — | — | âŒ |
-| H8 | Bid-Ask Imbalance — Long cuando BuySellRatio en percentil extremo | — (M4 FAIL) | âŒ FAIL | — | — | âŒ |
-| H9 | Trade Count Spike Short — Short cuando ArrivalRate spike y return positivo | — (M4 FAIL) | âŒ FAIL | — | — | âŒ |
-| H10 | Selling Climax — Long cuando SellingPressure extrema (ArrivalRate+return<-0.3%) | SellingClimaxStrategy | ✅ PASS (≥2/3) | -5.128 (SL=30%) | — | âŒ FAIL IS |
+| H6 | CVD-OFI Divergence — Long cuando CVD positivo pero OFI negativo | — (M4 FAIL) | ❌ FAIL | — | — | ❌ |
+| H7 | Arrival Rate Momentum — Long cuando ArrivalRate acelerando | — (M4 FAIL) | ❌ FAIL | — | — | ❌ |
+| H8 | Bid-Ask Imbalance — Long cuando BuySellRatio en percentil extremo | — (M4 FAIL) | ❌ FAIL | — | — | ❌ |
+| H9 | Trade Count Spike Short — Short cuando ArrivalRate spike y return positivo | — (M4 FAIL) | ❌ FAIL | — | — | ❌ |
+| H10 | Selling Climax — Long cuando SellingPressure extrema (ArrivalRate+return<-0.3%) | SellingClimaxStrategy | ✅ PASS (≥2/3) | -5.128 (SL=30%) | — | ❌ FAIL IS |
 
 ### Notas por hipótesis
 
