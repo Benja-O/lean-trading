@@ -339,3 +339,7 @@ QuantConnect.Lean.sln.DotSettings
 /.claude/settings.local.json
 Trading.Research/Estrategias_script.txt
 Trading.Research/Estrategias.txt
+
+# Sandbox de research discrecional (ver CLAUDE.md): experimentos fuera del pipeline
+# M4/StrategyFactory. No versionado a propósito — resistances.json cambia a diario.
+/Trading.Strategies/Sandbox/
